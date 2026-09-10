@@ -1,0 +1,55 @@
+# ── CashU — repository-wide ignores ───────────────────────────────────────
+# backend/.gitignore and frontend/.gitignore carry the per-stack rules; this
+# file covers the root and anything that would be catastrophic to commit.
+
+# Secrets — never commit. .env.example is the tracked template.
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Virtualenvs
+venv/
+.venv/
+env/
+ENV/
+
+# Node
+node_modules/
+dist/
+build/
+.vite/
+*.local
+
+# Logs & runtime
+logs/
+*.log
+flask_session/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Uploaded user documents (KYC, loan sanction letters) — PII, never in git
+backend/portal/uploads/*
+!backend/portal/uploads/.gitkeep
+!backend/portal/uploads/**/.gitkeep
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+*.swp
+
+# VS Code — share the workspace config, keep personal overrides local
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json

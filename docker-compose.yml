@@ -1,0 +1,94 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# CashU — full local stack: MySQL + Flask API + React frontend
+#
+#   docker compose up --build          start everything
+#   docker compose logs -f backend     tail the API
+#   docker compose down                stop (keeps data)
+#   docker compose down -v             stop AND wipe the database
+#
+# Frontend → http://localhost:3000
+# API      → http://localhost:5050/v1
+# Swagger  → http://localhost:5050/v1/doc/
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  db:
+    image: mysql:8.4
+    container_name: cashu-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-Mahesh2605}
+      MYSQL_DATABASE:      ${MYSQL_DATABASE:-cashu_db}
+      TZ:                  Asia/Kolkata
+    command:
+      # utf8mb4 so rupee symbols, emoji in offer copy, and Indian-language names
+      # all round-trip correctly.
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    ports:
+      # Host 3307, not 3306 — you already run MySQL natively on 3306 for the
+      # stockverse project, and binding both would fail.
+      - "3307:3306"
+    volumes:
+      - cashu_mysql_data:/var/lib/mysql
+    healthcheck:
+      # The backend seeds on boot, so it must not start until MySQL can actually
+      # answer queries — "container started" is not the same as "ready".
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-Mahesh2605}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [cashu-net]
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cashu-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      Backend:      ${BACKEND_ENV:-DEV}
+      DB_HOST:      db
+      DB_PORT:      "3306"
+      # Points at the compose service, overriding whatever .env carries for
+      # bare-metal runs (where the host would be localhost).
+      DATABASE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-Mahesh2605}@db:3306/${MYSQL_DATABASE:-cashu_db}
+    env_file:
+      # Secrets (JWT, Razorpay, SMTP) live here and are never baked into the image.
+      - ./backend/.env
+    ports:
+      - "5050:5050"
+    volumes:
+      # Named volumes, not bind mounts: KYC documents and logs must survive a
+      # rebuild without being writable from the host by accident.
+      - cashu_uploads:/app/portal/uploads
+      - cashu_logs:/app/logs
+    networks: [cashu-net]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:5050/v1}
+    container_name: cashu-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+    networks: [cashu-net]
+
+volumes:
+  cashu_mysql_data:
+  cashu_uploads:
+  cashu_logs:
+
+networks:
+  cashu-net:
+    driver: bridge

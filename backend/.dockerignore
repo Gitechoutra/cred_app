@@ -1,0 +1,38 @@
+# ── Python ────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# ── Virtualenvs — never copy the host venv into the image ──
+venv/
+.venv/
+env/
+
+# ── Secrets: .env is injected at runtime via env_file, not baked in ──
+.env
+.env.*
+!.env.example
+
+# ── Runtime artefacts ─────────────────────────────────
+logs/
+*.log
+flask_session/
+portal/uploads/*
+!portal/uploads/.gitkeep
+
+# ── VCS / editor / OS ─────────────────────────────────
+.git/
+.gitignore
+.claude/
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+
+# ── Docs & docker itself ──────────────────────────────
+docs/
+*.md
+Dockerfile
+.dockerignore
