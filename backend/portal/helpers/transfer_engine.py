@@ -250,11 +250,11 @@ def initiate(*, user, card, bank_account, amount, idempotency_key: str,
 
     # Carry the transfer id on the return URL so the status screen knows which
     # transfer to confirm when the issuer hands the user back, without having to
-    # trust anything the redirect itself carries.
-    return_url = current_app.config.get('CASHFREE_RETURN_URL') or ''
+    # trust anything the redirect itself carries. It goes on as a path segment
+    # because the client route is /transfer/status/<transfer_id>.
+    return_url = (current_app.config.get('CASHFREE_RETURN_URL') or '').rstrip('/')
     if return_url:
-        joiner = '&' if '?' in return_url else '?'
-        return_url = f'{return_url}{joiner}transfer_id={transfer.transfer_id}'
+        return_url = f'{return_url}/{transfer.transfer_id}'
 
     order = adapters.create_payment_order(
         order_id=order_request_id(transfer),

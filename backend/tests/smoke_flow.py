@@ -18,7 +18,7 @@ import uuid
 
 import requests
 
-BASE = 'http://localhost:5050/v1'
+BASE = 'http://127.0.0.1:3000/v1'
 TIMEOUT = 30
 
 PASS, FAIL = [], []
