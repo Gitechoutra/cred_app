@@ -58,12 +58,17 @@ class InitApp:
 
         try:
             from . import api, routes, models
+            from portal.helpers.email import init_mail
             from portal.helpers.jwt import Token
 
             models.init_app(APP)
             api.init_app(APP)
             routes.init_app()
             Token(APP)
+            # Bound here rather than in app.py so Flask-Mail is initialised on
+            # every entry point - gunicorn imports the factory without ever
+            # running app.py's __main__ block.
+            init_mail(APP)
             init_cors(APP)
 
             # -- Scheduler -------------------------------------------------

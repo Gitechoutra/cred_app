@@ -26,5 +26,12 @@ if command -v nc >/dev/null 2>&1; then
     [ "${waited}" -lt "${WAIT_TIMEOUT}" ] && echo "[entrypoint] MySQL is up (waited ${waited}s)."
 fi
 
+# app.py runs bootstrap() only under __main__, so importing it through gunicorn
+# would never create the tables or run the seeders. Do it here instead - it is
+# idempotent, and the engines read fee percentages, transfer limits and the
+# chart of ledger accounts from those seeded rows at runtime.
+echo "[entrypoint] bootstrapping database..."
+python -c "from app import bootstrap; bootstrap()"
+
 echo "[entrypoint] starting: $*"
 exec "$@"
