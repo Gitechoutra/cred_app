@@ -59,7 +59,7 @@ services:
       # bare-metal runs (where the host would be localhost).
       DATABASE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-Mahesh2605}@db:3306/${MYSQL_DATABASE:-cashu_db}
     env_file:
-      # Secrets (JWT, Razorpay, SMTP) live here and are never baked into the image.
+      # Secrets (JWT, Cashfree, SMTP) live here and are never baked into the image.
       - ./backend/.env
     ports:
       - "5050:5050"

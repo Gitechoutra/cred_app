@@ -30,6 +30,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from flask import current_app
+from sqlalchemy import func
 
 from portal import db
 from portal.helpers import (
@@ -78,6 +79,66 @@ def _transition(transfer: Transfers, new_status: str, commit: bool = False):
     if commit:
         db.session.commit()
     return transfer
+
+
+# ── Gateway-facing reference ids ───────────────────────────────────────────
+# Both are derived from the transfer's UUID, which does two jobs at once: it is
+# the idempotency anchor on each rail (replaying one must not charge or pay
+# twice), and it lets a callback carrying only the id CashU issued be mapped
+# back to the row that owns it.
+
+_ORDER_PREFIX = 'CASHU_TXF_'
+_PAYOUT_PREFIX = 'CASHU_PO_'
+
+#: Cashfree caps these references well below a full UUID, so the hyphens are
+#: stripped and the first 24 hex characters used. 96 bits of a v4 UUID is far
+#: more than enough to stay unique across the transfer table.
+_REF_LENGTH = 24
+
+
+def _short_id(transfer: Transfers) -> str:
+    return transfer.transfer_id.replace('-', '')[:_REF_LENGTH]
+
+
+def order_request_id(transfer: Transfers) -> str:
+    """The PG order id CashU sends for the inbound card charge."""
+    return f'{_ORDER_PREFIX}{_short_id(transfer)}'
+
+
+def payout_request_id(transfer: Transfers) -> str:
+    """The payout transfer id CashU sends for the outbound IMPS leg."""
+    return f'{_PAYOUT_PREFIX}{_short_id(transfer)}'
+
+
+def transfer_from_payout_request_id(request_id: str):
+    """
+    Map a payout reference CashU issued back to its transfer.
+
+    Unlike the inbound leg - where gateway_order_id is stored verbatim on the
+    row and looked up by equality - the payout reference is not persisted, so
+    this is a prefix match on the de-hyphenated UUID. It is narrowed to the
+    statuses a payout callback can legitimately concern, which keeps it to the
+    handful of in-flight rows rather than a scan of every transfer ever made.
+
+    Returns None for a transfer that has already reached a terminal state; a
+    duplicated or late webhook is then a no-op, which is the intent.
+    """
+    if not request_id or not request_id.startswith(_PAYOUT_PREFIX):
+        return None
+
+    prefix = request_id[len(_PAYOUT_PREFIX):].strip()
+    if not prefix:
+        return None
+
+    return Transfers.query.filter(
+        Transfers.status.in_([
+            TransferStatus.INBOUND_CHARGED,
+            TransferStatus.PAYOUT_PROCESSING,
+            TransferStatus.PENDING_RECONCILIATION,
+            TransferStatus.REVERSAL_INIT,
+        ]),
+        func.replace(Transfers.transfer_id, '-', '').like(f'{prefix}%'),
+    ).first()
 
 
 def quote(*, user, amount) -> dict:
@@ -187,13 +248,23 @@ def initiate(*, user, card, bank_account, amount, idempotency_key: str,
 
     _transition(transfer, TransferStatus.RISK_CHECKED)
 
+    # Carry the transfer id on the return URL so the status screen knows which
+    # transfer to confirm when the issuer hands the user back, without having to
+    # trust anything the redirect itself carries.
+    return_url = current_app.config.get('CASHFREE_RETURN_URL') or ''
+    if return_url:
+        joiner = '&' if '?' in return_url else '?'
+        return_url = f'{return_url}{joiner}transfer_id={transfer.transfer_id}'
+
     order = adapters.create_payment_order(
-        order_id=f'CASHU_TXF_{transfer.transfer_id.replace("-", "")[:24]}',
+        order_id=order_request_id(transfer),
         amount=breakdown['total_charged_to_card'],
         customer_id=str(user.user_id),
         customer_phone=user.phone,
         customer_email=user.email,
         customer_name=user.full_name,
+        return_url=return_url or None,
+        notify_url=current_app.config.get('CASHFREE_NOTIFY_URL') or None,
         note=f'CashU transfer to {bank_account.masked_account()}',
         tags={'transfer_id': transfer.transfer_id, 'type': 'CARD_TO_BANK'},
     )
@@ -378,7 +449,7 @@ def dispatch_payout(transfer: Transfers) -> Transfers:
         return transfer
 
     result = adapters.dispatch_payout(
-        transfer_id=f'CASHU_PO_{transfer.transfer_id.replace("-", "")[:24]}',
+        transfer_id=payout_request_id(transfer),
         amount=transfer.net_payout_amount,
         beneficiary_id=f'BEN_{str(bank.bank_account_id).replace("-", "")[:20]}',
         beneficiary_name=bank.verified_cbs_name or bank.account_holder_name or 'Beneficiary',
@@ -589,6 +660,62 @@ def reverse_to_card(transfer: Transfers, *, reason: str) -> Transfers:
         actor_user_id=str(transfer.user_id),
         after={'reason': reason, 'refund_ref': transfer.reversal_reference},
     )
+    return transfer
+
+
+def apply_payout_callback(transfer: Transfers, *, reported_status: str = None,
+                          utr: str = None, reason: str = None) -> Transfers:
+    """
+    Resolve an in-flight payout from a gateway callback.
+
+    The webhook says what happened; this re-reads the payout from the provider
+    before acting on it, for the same reason confirm_charge re-reads the order -
+    a valid signature proves the body was not altered in transit, not that the
+    money actually moved.
+
+    Safe to call repeatedly. A transfer already past PAYOUT_PROCESSING falls
+    straight through, so a duplicated or out-of-order webhook cannot re-settle
+    a reversed transfer or re-reverse a settled one.
+    """
+    if transfer.status not in (
+        TransferStatus.INBOUND_CHARGED,
+        TransferStatus.PAYOUT_PROCESSING,
+        TransferStatus.PENDING_RECONCILIATION,
+    ):
+        return transfer
+
+    authoritative = adapters.get_payout_status(payout_request_id(transfer))
+
+    if authoritative.get('ok'):
+        status = (authoritative.get('status') or '').upper()
+        utr = authoritative.get('utr') or utr
+    else:
+        # Provider unreachable. Fall back to what the (signature-verified)
+        # webhook reported rather than leaving the transfer stuck - the retry
+        # ladder and the recon job are the backstop if this call is wrong.
+        current_app.logger.warning(
+            f'[transfer] payout status unreadable for {transfer.transfer_id}: '
+            f'{authoritative.get("error")}; falling back to webhook status.'
+        )
+        status = (reported_status or '').upper()
+
+    if status == 'SUCCESS':
+        transfer.bank_rrn_utr = utr or transfer.bank_rrn_utr
+        if not transfer.payout_dispatched_at:
+            transfer.payout_dispatched_at = utcnow()
+        return _settle(transfer)
+
+    if status in ('FAILED', 'REVERSED', 'REJECTED', 'ERROR'):
+        return _handle_payout_failure(
+            transfer, reason or f'Payout {status.lower()} at the beneficiary bank.'
+        )
+
+    # RECEIVED / PENDING / anything unrecognised - still in flight. Record the
+    # UTR if the rail has issued one and let the retry ladder own the outcome.
+    if utr and not transfer.bank_rrn_utr:
+        transfer.bank_rrn_utr = utr
+        db.session.commit()
+
     return transfer
 
 

@@ -58,6 +58,17 @@ class BaseConfig:
     CASHFREE_PAYOUT_CLIENT_ID = os.getenv('CASHFREE_PAYOUT_CLIENT_ID', '')
     CASHFREE_PAYOUT_CLIENT_SECRET = os.getenv('CASHFREE_PAYOUT_CLIENT_SECRET', '')
 
+    # Where Cashfree returns the user after the 3DS challenge, and where it
+    # POSTs order callbacks. The webhook URL set in the Cashfree dashboard is
+    # what actually receives deliveries; CASHFREE_NOTIFY_URL is the per-order
+    # override, which matters when several environments share one merchant
+    # account and each needs its own callback target.
+    CASHFREE_RETURN_URL = os.getenv(
+        'CASHFREE_RETURN_URL',
+        os.getenv('FRONTEND_BASE_URL', 'http://localhost:3000') + '/transfer/status',
+    )
+    CASHFREE_NOTIFY_URL = os.getenv('CASHFREE_NOTIFY_URL', '')
+
     # When True, every external adapter uses its simulated implementation.
     # PRD section 21 lists all nine vendor integrations as "To Be Confirmed",
     # so sandbox mode is the default until real credentials are present.
