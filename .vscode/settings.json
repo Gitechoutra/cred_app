@@ -1,0 +1,50 @@
+{
+  // ── CashU workspace settings ────────────────────────────────────────────
+  // Committed so every clone gets the same interpreter, formatting and
+  // exclusions. Personal overrides belong in your User settings, not here.
+
+  "python.defaultInterpreterPath": "${workspaceFolder}/backend/venv/Scripts/python.exe",
+  "python.terminal.activateEnvironment": true,
+  "python.analysis.extraPaths": ["${workspaceFolder}/backend"],
+  "python.testing.pytestEnabled": true,
+  "python.testing.pytestArgs": ["backend/tests"],
+
+  "[python]": {
+    "editor.tabSize": 4,
+    "editor.rulers": [88]
+  },
+  "[javascript][javascriptreact][json][jsonc][css][html]": {
+    "editor.tabSize": 2
+  },
+
+  "files.eol": "\n",
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+
+  // Keep the file tree and search focused on source.
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "backend/venv": true,
+    "frontend/node_modules": true
+  },
+  "search.exclude": {
+    "**/__pycache__": true,
+    "backend/venv": true,
+    "frontend/node_modules": true,
+    "frontend/dist": true,
+    "backend/logs": true
+  },
+
+  // ── Git ────────────────────────────────────────────────────────────────
+  // Cashfree work happens on `cashu`; main is the protected base.
+  "git.branchProtection": ["main"],
+  "git.branchProtectionPrompt": "alwaysPrompt",
+  "git.defaultBranchName": "main",
+  "git.autofetch": true,
+  "git.confirmSync": true,
+  "git.pruneOnFetch": true,
+  "git.branchPrefix": "cashu/",
+
+  "editor.formatOnSave": false
+}

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="CashU">
+  <!--
+    "The Coin Cut" - the U is drawn as the lower arc of a coin, and the negative
+    space cuts an upward notch through it: a currency token and a rising line at
+    once. Single-path, so it stays legible at 16px and works in one colour.
+  -->
+  <rect width="64" height="64" rx="16" fill="#0A0F0D"/>
+  <path
+    d="M20 18v16a12 12 0 0 0 24 0V18"
+    fill="none"
+    stroke="#00F5B8"
+    stroke-width="6"
+    stroke-linecap="round"
+  />
+  <path
+    d="M32 40V22l7 7"
+    fill="none"
+    stroke="#00F5B8"
+    stroke-width="4.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    opacity="0.55"
+  />
+</svg>
