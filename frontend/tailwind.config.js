@@ -75,6 +75,34 @@ export default {
         shimmer: {
           '100%': { transform: 'translateX(100%)' },
         },
+        float: {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(-14px)' },
+        },
+        'float-slow': {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(-22px)' },
+        },
+        sheen: {
+          '0%': { transform: 'translateX(-120%) skewX(-18deg)' },
+          '60%, 100%': { transform: 'translateX(320%) skewX(-18deg)' },
+        },
+        'deal-in': {
+          '0%': { opacity: '0', transform: 'translateY(36px) rotate(0deg) scale(0.94)' },
+          '100%': { opacity: '1' },
+        },
+        'rise-in': {
+          '0%': { opacity: '0', transform: 'translateY(28px) scale(0.97)' },
+          '100%': { opacity: '1', transform: 'translateY(0) scale(1)' },
+        },
+        'pulse-ring': {
+          '0%': { transform: 'scale(0.85)', opacity: '0.55' },
+          '100%': { transform: 'scale(1.6)', opacity: '0' },
+        },
+        marquee: {
+          '0%': { transform: 'translateX(0)' },
+          '100%': { transform: 'translateX(-50%)' },
+        },
         'ring-draw': {
           '0%': { strokeDashoffset: '283' },
         },
@@ -84,6 +112,13 @@ export default {
         'sheet-up': 'sheet-up 280ms cubic-bezier(0.16,1,0.3,1) both',
         'scale-in': 'scale-in 260ms cubic-bezier(0.16,1,0.3,1) both',
         shimmer: 'shimmer 1.6s infinite',
+        float: 'float 6s ease-in-out infinite',
+        'float-slow': 'float-slow 8s ease-in-out infinite',
+        sheen: 'sheen 5.5s ease-in-out infinite',
+        'deal-in': 'deal-in 900ms cubic-bezier(0.16,1,0.3,1) both',
+        'rise-in': 'rise-in 700ms cubic-bezier(0.16,1,0.3,1) both',
+        'pulse-ring': 'pulse-ring 2.6s ease-out infinite',
+        marquee: 'marquee 28s linear infinite',
         'ring-draw': 'ring-draw 900ms cubic-bezier(0.16,1,0.3,1) both',
       },
     },

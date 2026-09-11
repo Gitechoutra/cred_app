@@ -12,6 +12,7 @@ import OtpVerify from '../pages/auth/OtpVerify';
 import ProfileSetup from '../pages/auth/ProfileSetup';
 import MpinSetup from '../pages/auth/MpinSetup';
 import MpinLogin from '../pages/auth/MpinLogin';
+import AdminLogin from '../pages/auth/AdminLogin';
 
 /* Member */
 import Home from '../pages/user/Home';
@@ -118,6 +119,7 @@ export default function App() {
       <Route path="/signin" element={<RedirectIfAuthed><PhoneEntry /></RedirectIfAuthed>} />
       <Route path="/signin/otp" element={<RedirectIfAuthed><OtpVerify /></RedirectIfAuthed>} />
       <Route path="/signin/mpin" element={<RedirectIfAuthed><MpinLogin /></RedirectIfAuthed>} />
+      <Route path="/admin/login" element={<RedirectIfAuthed><AdminLogin /></RedirectIfAuthed>} />
 
       {/* Onboarding - authenticated but incomplete */}
       <Route

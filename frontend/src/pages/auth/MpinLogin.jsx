@@ -37,12 +37,12 @@ export default function MpinLogin() {
     try {
       const response = await endpoints.auth.loginMpin(phone, finalPin);
       signIn(response.data);
-      const profile = await refresh();
+      await refresh();
 
-      const isAdmin = ['L1_SUPPORT', 'L2_RISK_RECON', 'L3_SUPER_ADMIN'].includes(
-        profile?.role,
-      );
-      navigate(isAdmin ? '/admin' : '/home', { replace: true });
+      // Always the member app. Staff who want the console either came through
+      // /admin/login or can switch from the sidebar - honouring the door they
+      // actually chose is less surprising than redirecting them.
+      navigate('/home', { replace: true });
     } catch (err) {
       setError(err.message);
       setPin('');
