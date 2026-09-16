@@ -132,58 +132,100 @@ export default function AdminLogin() {
             if (phoneValid) setStage('pin');
           }}
         >
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-2xs font-semibold text-mint">
-            <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="4.5" y="10" width="15" height="10" rx="2.5" />
-              <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-            </svg>
-            Staff access only
-          </span>
+          {/* A contained panel rather than content floating on black — it gives
+              the form an edge to sit against and reads as a console sign-in. */}
+          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-7 shadow-lift">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-mint/25 bg-mint/10 px-2.5 py-1 text-2xs font-semibold text-mint">
+              <svg
+                viewBox="0 0 24 24"
+                className="h-3 w-3"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <rect x="4.5" y="10" width="15" height="10" rx="2.5" />
+                <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+              </svg>
+              Staff access only
+            </span>
 
-          <h1 className="mt-5 text-2xl font-bold tracking-tight text-white">
-            Operations console
-          </h1>
-          <p className="mt-2 text-sm text-white/50">
-            Sign in with your CashU staff account.
-          </p>
+            <h1 className="mt-5 text-[1.75rem] font-bold leading-tight tracking-tight text-white">
+              Operations console
+            </h1>
+            <p className="mt-1.5 text-sm leading-relaxed text-white/45">
+              Sign in with your CashU staff account.
+            </p>
 
-          <div className="mt-8">
-            <label htmlFor="admin-phone" className="mb-1.5 block text-sm font-medium text-white/80">
-              Registered mobile number
-            </label>
-            <div className="flex h-12 items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-3.5 transition focus-within:border-mint/40 focus-within:ring-2 focus-within:ring-mint/20">
-              <span className="shrink-0 text-sm font-medium text-white/60">+91</span>
-              <input
-                id="admin-phone"
-                inputMode="numeric"
-                autoComplete="tel-national"
-                autoFocus
-                placeholder="98765 43210"
-                value={phone}
-                maxLength={10}
-                onChange={(event) => setPhone(event.target.value.replace(/\D/g, '').slice(0, 10))}
-                className="money w-full bg-transparent text-[15px] text-white outline-none placeholder:text-white/25"
-              />
+            <div className="mt-7">
+              <label
+                htmlFor="admin-phone"
+                className="mb-2 block text-2xs font-semibold uppercase tracking-[0.12em] text-white/40"
+              >
+                Registered mobile number
+              </label>
+
+              <div className="group flex h-14 items-center rounded-xl border border-white/10 bg-ink-800/60 transition-colors duration-200 focus-within:border-mint/50 focus-within:bg-ink-800">
+                <span className="money flex h-full shrink-0 items-center border-r border-white/10 px-4 text-sm font-semibold text-white/50 transition-colors group-focus-within:text-mint">
+                  +91
+                </span>
+                <input
+                  id="admin-phone"
+                  inputMode="numeric"
+                  autoComplete="tel-national"
+                  autoFocus
+                  placeholder="98765 43210"
+                  value={phone}
+                  maxLength={10}
+                  onChange={(event) =>
+                    setPhone(event.target.value.replace(/\D/g, '').slice(0, 10))
+                  }
+                  className="money h-full w-full bg-transparent px-4 text-base tracking-wide text-white outline-none ring-0 placeholder:font-normal placeholder:tracking-normal placeholder:text-white/20 focus:outline-none focus:ring-0"
+                />
+
+                {/* Quiet completion tick, so the field confirms itself. */}
+                {phoneValid && (
+                  <span className="mr-4 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-mint text-ink">
+                    <svg viewBox="0 0 20 20" className="h-3 w-3" fill="none">
+                      <path
+                        d="M5 10.5l3.5 3.5L15 7"
+                        stroke="currentColor"
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                )}
+              </div>
             </div>
+
+            <Button
+              type="submit"
+              variant="mint"
+              size="lg"
+              full
+              className="mt-5"
+              disabled={!phoneValid}
+            >
+              Continue
+              <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none">
+                <path
+                  d="M4 10h11M11 5l5 5-5 5"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </Button>
           </div>
 
-          <Button
-            type="submit"
-            variant="mint"
-            size="lg"
-            full
-            className="mt-6"
-            disabled={!phoneValid}
-          >
-            Continue
-          </Button>
-
-          <div className="mt-7 border-t border-white/10 pt-5 text-center">
-            <p className="text-2xs text-white/40">Not staff?</p>
+          <div className="mt-6 text-center">
+            <p className="text-2xs text-white/35">Not staff?</p>
             <button
               type="button"
               onClick={() => navigate('/signin')}
-              className="mt-1 text-sm font-semibold text-mint hover:underline"
+              className="mt-1 rounded-lg px-2 py-1 text-sm font-semibold text-mint transition hover:bg-mint/10"
             >
               Go to user login
             </button>
@@ -202,13 +244,20 @@ export default function AdminLogin() {
         </h1>
         <p className="money mt-1.5 text-sm text-white/50">+91 {phone}</p>
 
-        <PinDots length={6} filled={pin.length} error={Boolean(error)} className="mt-8" />
+        <PinDots
+          length={6}
+          filled={pin.length}
+          error={Boolean(error)}
+          tone="dark"
+          className="mt-8"
+        />
 
         {error && <p className="mt-4 max-w-xs text-sm text-alert">{error}</p>}
       </div>
 
-      <div className="mt-8 [&_button]:text-white [&_button:active]:bg-white/10">
+      <div className="mt-8">
         <PinPad
+          tone="dark"
           onPress={press}
           onBackspace={() => {
             setPin(pin.slice(0, -1));
@@ -243,7 +292,10 @@ function Frame({ children, wide = false }) {
   const navigate = useNavigate();
 
   return (
-    <div className="flex min-h-screen flex-col bg-ink">
+    // The global focus ring uses `ring-offset-canvas` (white), which paints a
+    // white halo around anything focused on this dark page. Re-point the offset
+    // to the surface it actually sits on.
+    <div className="flex min-h-screen flex-col bg-ink [&_*:focus-visible]:ring-offset-ink">
       <header className="border-b border-white/10">
         <div className="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
           <button

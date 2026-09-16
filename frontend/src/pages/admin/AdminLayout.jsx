@@ -32,7 +32,12 @@ export default function AdminLayout() {
 
   return (
     <div className="min-h-screen bg-mist">
-      <div className="mx-auto flex min-h-screen w-full max-w-7xl">
+      {/* Full bleed, deliberately. A capped, centred container leaves dead space
+          down both sides of a wide monitor, and this console is a data tool —
+          the transaction and audit tables want every pixel of width they can
+          get. The sidebar sits flush to the left edge, content runs to the
+          right. */}
+      <div className="flex min-h-screen w-full">
         {/* ── Sidebar ─────────────────────────────────────────────── */}
         <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-line bg-canvas p-4 lg:flex">
           <div className="flex items-center gap-2.5 px-1 pb-6">
@@ -123,7 +128,7 @@ export default function AdminLayout() {
             </div>
           </div>
 
-          <div className="p-4 lg:p-6">
+          <div className="p-4 sm:p-6 lg:px-8 lg:py-7">
             <Outlet />
           </div>
         </main>
