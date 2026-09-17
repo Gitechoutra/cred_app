@@ -60,7 +60,13 @@ def transfer_dict(transfer: Transfers, detailed: bool = False) -> dict:
                 transfer.bank_account.masked_account() if transfer.bank_account else None
             ),
             'bank_name': transfer.bank_account.bank_name if transfer.bank_account else None,
+            'ifsc_code': transfer.bank_account.ifsc_code if transfer.bank_account else None,
         },
+        'source_opening_balance': to_float(transfer.source_opening_balance),
+        'source_closing_balance': to_float(transfer.source_closing_balance),
+        'destination_opening_balance': to_float(transfer.destination_opening_balance),
+        'destination_closing_balance': to_float(transfer.destination_closing_balance),
+        'transaction_id': transfer.transaction_id or transfer.transfer_id,
         'utr': transfer.bank_rrn_utr,
         'created_on': iso(transfer.created_on),
         'charged_at': iso(transfer.charged_at),
@@ -72,7 +78,6 @@ def transfer_dict(transfer: Transfers, detailed: bool = False) -> dict:
 
     if detailed:
         data['fee_percentage_applied'] = to_float(transfer.fee_percentage_applied)
-        data['transaction_id'] = transfer.transaction_id
         data['gateway_order_id'] = transfer.gateway_order_id
         data['payout_reference'] = transfer.payout_reference
         data['payout_retry_count'] = transfer.payout_retry_count

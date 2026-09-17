@@ -82,6 +82,11 @@ class Transfers(db.Model, TimestampMixin, CRUDMixin):
     net_payout_amount = db.Column(db.Numeric(12, 2), nullable=False)
     fee_percentage_applied = db.Column(db.Numeric(5, 2), nullable=False)
 
+    source_opening_balance = db.Column(db.Numeric(12, 2), nullable=True)
+    source_closing_balance = db.Column(db.Numeric(12, 2), nullable=True)
+    destination_opening_balance = db.Column(db.Numeric(12, 2), nullable=True)
+    destination_closing_balance = db.Column(db.Numeric(12, 2), nullable=True)
+
     idempotency_key = db.Column(db.String(64), unique=True, nullable=False, index=True)
 
     status = db.Column(

@@ -157,7 +157,7 @@ export default function OtpVerify() {
                 className={[
                   'money h-14 w-full rounded-xl border bg-canvas text-center',
                   'text-xl font-semibold text-ink outline-none transition-all',
-                  'focus:border-ink/30 focus:ring-2 focus:ring-mint/30',
+                  'focus:border-ink/40',
                   error ? 'border-alert' : digit ? 'border-ink/25' : 'border-line',
                 ].join(' ')}
               />

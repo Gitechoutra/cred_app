@@ -6,6 +6,7 @@ import { PageHeader } from '../../components/layout/AppShell';
 import { Button, Input, Spinner } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
 import { useProfile } from '../../hooks/useProfile';
+import { money } from '../../utils/format';
 
 /**
  * Add a bank account (PRD FR-005).
@@ -27,6 +28,7 @@ export default function AddBankAccount() {
     account_holder_name: '',
   });
   const [bank, setBank] = useState(null);
+  const [matchedAccount, setMatchedAccount] = useState(null);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [lookingUp, setLookingUp] = useState(false);
@@ -40,13 +42,14 @@ export default function AddBankAccount() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.full_name]);
 
-  // Resolve the IFSC as it is typed so the user sees which branch they picked.
+  // Resolve the IFSC and matching test account as it is typed
   useEffect(() => {
     clearTimeout(debounce.current);
     const ifsc = form.ifsc_code.toUpperCase();
 
     if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) {
       setBank(null);
+      setMatchedAccount(null);
       return undefined;
     }
 
@@ -56,8 +59,31 @@ export default function AddBankAccount() {
         const response = await endpoints.banks.lookupIfsc(ifsc);
         setBank(response.data);
         setErrors((current) => ({ ...current, ifsc_code: '' }));
+
+        // Check if there is a matching test account
+        if (form.account_number.length >= 6) {
+          try {
+            const accRes = await endpoints.banks.lookupAccount({
+              account_number: form.account_number,
+              ifsc_code: ifsc,
+            });
+            if (accRes.data) {
+              setMatchedAccount(accRes.data);
+              if (accRes.data.account_holder_name) {
+                setForm((current) => ({
+                  ...current,
+                  account_holder_name: accRes.data.account_holder_name,
+                  account_type: accRes.data.account_type || current.account_type,
+                }));
+              }
+            }
+          } catch {
+            setMatchedAccount(null);
+          }
+        }
       } catch {
         setBank(null);
+        setMatchedAccount(null);
         setErrors((current) => ({ ...current, ifsc_code: 'We could not find this IFSC code.' }));
       } finally {
         setLookingUp(false);
@@ -65,7 +91,7 @@ export default function AddBankAccount() {
     }, 400);
 
     return () => clearTimeout(debounce.current);
-  }, [form.ifsc_code]);
+  }, [form.ifsc_code, form.account_number]);
 
   const mismatch =
     form.confirm_account_number.length > 0 &&
@@ -198,6 +224,41 @@ export default function AddBankAccount() {
               yours.
             </p>
           </div>
+
+          {matchedAccount && (
+            <div className="rounded-xl border border-mint-200 bg-mint-50/70 p-3.5 space-y-2 text-xs">
+              <div className="flex items-center justify-between border-b border-mint-200 pb-1.5">
+                <span className="font-semibold text-mint-800">Verified Test Account Details</span>
+                <span className="rounded-full bg-mint-100 px-2 py-0.5 text-2xs font-semibold text-mint-800">
+                  {matchedAccount.account_type}
+                </span>
+              </div>
+              <div className="space-y-1 text-slate">
+                <div className="flex justify-between">
+                  <span>Bank / Institution:</span>
+                  <span className="font-medium text-ink">{matchedAccount.bank_name}</span>
+                </div>
+                {matchedAccount.branch_name && (
+                  <div className="flex justify-between">
+                    <span>Branch:</span>
+                    <span className="font-medium text-ink">{matchedAccount.branch_name}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span>Account Holder:</span>
+                  <span className="font-medium text-ink">{matchedAccount.account_holder_name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Masked Account:</span>
+                  <span className="font-mono text-ink">{matchedAccount.masked_account}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Available Balance:</span>
+                  <span className="font-mono font-semibold text-mint-800">{money(matchedAccount.balance)}</span>
+                </div>
+              </div>
+            </div>
+          )}
 
           <Button type="submit" variant="mint" size="lg" full disabled={!valid} loading={loading}>
             {loading ? 'Verifying…' : 'Add and verify'}

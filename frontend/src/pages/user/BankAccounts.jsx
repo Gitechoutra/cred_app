@@ -159,6 +159,9 @@ export default function BankAccounts() {
               <Row label="IFSC" value={selected.ifsc_code} mono />
               {selected.branch_name && <Row label="Branch" value={selected.branch_name} />}
               <Row label="Type" value={selected.account_type} />
+              {selected.balance != null && (
+                <Row label="Available balance" value={money(selected.balance)} mono />
+              )}
               {selected.verified_cbs_name && (
                 <Row label="Name at bank" value={selected.verified_cbs_name} />
               )}

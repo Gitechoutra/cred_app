@@ -190,6 +190,28 @@ def initiate(*, user, card, bank_account, amount, idempotency_key: str,
     and the card is only debited when the gateway says so.
     """
     amount = Decimal(str(amount))
+    if amount <= Decimal('0'):
+        raise TransferError('Enter a valid transfer amount.', ErrorCode.VALIDATION_ERROR)
+
+    # Validate card status and available balance
+    if not card or card.status != 'ACTIVE':
+        raise TransferError('Card is not active.', ErrorCode.VALIDATION_ERROR)
+
+    card_available = Decimal(str(
+        card.available_limit if card.available_limit is not None
+        else ((card.card_limit or Decimal('0')) - (card.outstanding_amount or Decimal('0')))
+    ))
+    if card_available < amount:
+        raise TransferError('Insufficient card balance.', ErrorCode.VALIDATION_ERROR)
+
+    # Validate bank account
+    if not bank_account or not bank_account.is_active or bank_account.deleted_at is not None:
+        raise TransferError('Bank account not found.', ErrorCode.NOT_FOUND)
+
+    from portal.helpers import bank_ifsc_service
+    valid_ifsc, _ = bank_ifsc_service.validate_ifsc_format(bank_account.ifsc_code)
+    if not valid_ifsc:
+        raise TransferError('Invalid IFSC code.', ErrorCode.VALIDATION_ERROR)
 
     # A replay of the same key returns the original rather than opening a
     # second transfer for the same intent (ERR-007).
@@ -475,67 +497,118 @@ def dispatch_payout(transfer: Transfers) -> Transfers:
 
 
 def _settle(transfer: Transfers) -> Transfers:
-    """Payout confirmed: move the liability to clearing and finish."""
-    txn = None
-    if transfer.transaction_id:
-        from portal.models.master_transactions import MasterTransactions
-        txn = MasterTransactions.query.get(transfer.transaction_id)
+    """
+    Payout confirmed: atomic balance updates and finalize transfer.
+    Deducts transferred amount from source card available balance.
+    Adds transferred amount to destination bank account balance.
+    Saves opening and closing balances on the transfer record.
+    """
+    card = transfer.card
+    bank_account = transfer.bank_account
+    amount = Decimal(str(transfer.principal_amount))
 
     try:
-        ledger_engine.post(
-            user_id=transfer.user_id,
-            transaction_type=TransactionType.CARD_TO_BANK_TRANSFER,
-            gross_amount=transfer.net_payout_amount,
-            net_amount=transfer.net_payout_amount,
-            source_type=SourceType.CREDIT_CARD_TOKEN,
-            source_masked_ref=transfer.card.masked_pan,
-            dest_type=DestType.BANK_ACCOUNT_IMPS,
-            dest_masked_ref=transfer.bank_account.masked_account(),
-            gateway_provider=transfer.payout_provider or 'SANDBOX',
-            bank_rrn_utr=transfer.bank_rrn_utr,
-            idempotency_key=f'pay_{transfer.idempotency_key}',
-            entries=ledger_engine.entries_for_transfer_payout(
-                principal=transfer.net_payout_amount,
-                bank_ref=transfer.bank_account.masked_account(),
-            ),
-            status=TransactionStatus.SUCCEEDED,
-            commit=False,
+        # Check source card balance at settlement
+        curr_card_bal = Decimal(str(
+            card.available_limit if card.available_limit is not None
+            else ((card.card_limit or Decimal('0')) - (card.outstanding_amount or Decimal('0')))
+        ))
+        if curr_card_bal < amount:
+            raise TransferError('Insufficient card balance.', ErrorCode.VALIDATION_ERROR)
+
+        dest_curr_bal = Decimal(str(bank_account.balance if bank_account.balance is not None else Decimal('20000.00')))
+
+        # Snapshots
+        source_opening = curr_card_bal
+        dest_opening = dest_curr_bal
+
+        source_closing = curr_card_bal - amount
+        dest_closing = dest_curr_bal + amount
+
+        # Update card balances
+        card.available_limit = source_closing
+        card.outstanding_amount = Decimal(str(card.outstanding_amount or Decimal('0'))) + amount
+
+        # Update destination bank account balance
+        bank_account.balance = dest_closing
+
+        # Save to transfer audit columns
+        transfer.source_opening_balance = source_opening
+        transfer.source_closing_balance = source_closing
+        transfer.destination_opening_balance = dest_opening
+        transfer.destination_closing_balance = dest_closing
+
+        txn = None
+        if transfer.transaction_id:
+            from portal.models.master_transactions import MasterTransactions
+            txn = MasterTransactions.query.get(transfer.transaction_id)
+
+        try:
+            ledger_engine.post(
+                user_id=transfer.user_id,
+                transaction_type=TransactionType.CARD_TO_BANK_TRANSFER,
+                gross_amount=transfer.net_payout_amount,
+                net_amount=transfer.net_payout_amount,
+                source_type=SourceType.CREDIT_CARD_TOKEN,
+                source_masked_ref=transfer.card.masked_pan,
+                dest_type=DestType.BANK_ACCOUNT_IMPS,
+                dest_masked_ref=transfer.bank_account.masked_account(),
+                gateway_provider=transfer.payout_provider or 'SANDBOX',
+                bank_rrn_utr=transfer.bank_rrn_utr,
+                idempotency_key=f'pay_{transfer.idempotency_key}',
+                entries=ledger_engine.entries_for_transfer_payout(
+                    principal=transfer.net_payout_amount,
+                    bank_ref=transfer.bank_account.masked_account(),
+                ),
+                status=TransactionStatus.SUCCEEDED,
+                commit=False,
+            )
+        except DuplicateTransaction:
+            pass
+
+        if txn:
+            txn.status = TransactionStatus.SUCCEEDED
+            txn.bank_rrn_utr = transfer.bank_rrn_utr
+
+        transfer.status = TransferStatus.SUCCEEDED
+        transfer.payout_completed_at = utcnow()
+
+        audit.emit(
+            'TransferSucceededEvent',
+            aggregate_type='Transfers',
+            aggregate_id=transfer.transfer_id,
+            user_id=str(transfer.user_id),
+            payload={
+                'event': NotificationEvent.TRANSFER_SUCCEEDED,
+                'amount': float(transfer.net_payout_amount),
+                'account': transfer.bank_account.account_last4,
+                'utr': transfer.bank_rrn_utr,
+            },
         )
-    except DuplicateTransaction:
+
+        db.session.commit()
+
+        audit.record(
+            action='TRANSFER_SUCCEEDED',
+            entity_type='Transfers',
+            entity_id=transfer.transfer_id,
+            actor_user_id=str(transfer.user_id),
+            after={
+                'amount': float(transfer.net_payout_amount),
+                'utr': transfer.bank_rrn_utr,
+                'card_balance_after': float(source_closing),
+                'bank_balance_after': float(dest_closing),
+            },
+        )
+        return transfer
+
+    except TransferError:
         db.session.rollback()
-
-    if txn:
-        txn.status = TransactionStatus.SUCCEEDED
-        txn.bank_rrn_utr = transfer.bank_rrn_utr
-
-    transfer.status = TransferStatus.SUCCEEDED
-    transfer.payout_completed_at = utcnow()
-
-    audit.emit(
-        'TransferSucceededEvent',
-        aggregate_type='Transfers',
-        aggregate_id=transfer.transfer_id,
-        user_id=str(transfer.user_id),
-        payload={
-            'event': NotificationEvent.TRANSFER_SUCCEEDED,
-            'amount': float(transfer.net_payout_amount),
-            'account': transfer.bank_account.account_last4,
-            'utr': transfer.bank_rrn_utr,
-        },
-    )
-    db.session.commit()
-
-    audit.record(
-        action='TRANSFER_SUCCEEDED',
-        entity_type='Transfers',
-        entity_id=transfer.transfer_id,
-        actor_user_id=str(transfer.user_id),
-        after={
-            'amount': float(transfer.net_payout_amount),
-            'utr': transfer.bank_rrn_utr,
-        },
-    )
-    return transfer
+        raise
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception(f'[transfer] settlement failed for {transfer.transfer_id}: {exc}')
+        raise TransferError('Transfer failed. No balance was changed.', ErrorCode.INTERNAL_ERROR)
 
 
 def _handle_payout_failure(transfer: Transfers, reason: str) -> Transfers:

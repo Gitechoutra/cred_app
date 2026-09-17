@@ -41,6 +41,8 @@ link_parser.add_argument('nickname', type=str, required=False, location='json')
 link_parser.add_argument('card_limit', type=float, required=False, location='json')
 link_parser.add_argument('statement_day', type=int, required=False, location='json')
 link_parser.add_argument('due_day', type=int, required=False, location='json')
+link_parser.add_argument('issuer_bank', type=str, required=False, location='json')
+link_parser.add_argument('brand_color', type=str, required=False, location='json')
 
 update_parser = reqparse.RequestParser()
 update_parser.add_argument('nickname', type=str, required=False, location='json')
@@ -167,6 +169,26 @@ class CardList(Resource):
             network_row = CardNetworks.query.filter(
                 CardNetworks.bin_prefix == bin_prefix[:4]
             ).first()
+
+        if not network_row:
+            provided_bank = (args.get('issuer_bank') or '').strip()
+            if provided_bank:
+                first_digit = bin_prefix[0] if bin_prefix else '4'
+                deduced_net = {
+                    '4': 'VISA',
+                    '5': 'MASTERCARD',
+                    '6': 'RUPAY',
+                    '3': 'AMEX',
+                }.get(first_digit, 'VISA')
+                colour = args.get('brand_color') or '#0A0F0D'
+                network_row = type('DynamicNetworkRow', (), {
+                    'network': deduced_net,
+                    'issuer_bank': provided_bank,
+                    'card_type': 'CREDIT',
+                    'brand_color': colour,
+                    'is_blocklisted': False,
+                    'is_supported': True,
+                })()
 
         if not network_row:
             return failure(

@@ -294,7 +294,7 @@ export default function AdminTransfers() {
                 value={reason}
                 onChange={(event) => setReason(event.target.value)}
                 placeholder="Why are you taking this action?"
-                className="w-full rounded-xl border border-line bg-canvas p-3 text-sm outline-none focus:border-ink/30 focus:ring-2 focus:ring-mint/30"
+                className="w-full rounded-xl border border-line bg-canvas p-3 text-sm outline-none focus:border-ink/40"
               />
               <p className="mt-1.5 text-2xs text-slate">
                 Recorded in the admin activity log against your user id.

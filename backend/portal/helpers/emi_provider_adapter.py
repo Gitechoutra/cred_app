@@ -34,60 +34,130 @@ class EMIProviderError(Exception):
         self.retryable = retryable
 
 
-def _deterministic_loan(loan_account_no: str, provider_name: str) -> dict:
+PREDEFINED_TEST_LOANS = {
+    'LAN4567890': {
+        'emi_amount': Decimal('3500.00'),
+        'due_day_of_month': 5,
+        'total_tenure': 12,
+        'tenure_remaining': 8,
+        'total_loan_amount': Decimal('42000.00'),
+        'outstanding_bal': Decimal('28000.00'),
+        'interest_rate': Decimal('13.50'),
+        'loan_type': 'CONSUMER_DURABLE',
+    },
+    'BAJAJ123456': {
+        'emi_amount': Decimal('4200.00'),
+        'due_day_of_month': 10,
+        'total_tenure': 18,
+        'tenure_remaining': 12,
+        'total_loan_amount': Decimal('75600.00'),
+        'outstanding_bal': Decimal('50400.00'),
+        'interest_rate': Decimal('14.00'),
+        'loan_type': 'PERSONAL_LOAN',
+    },
+    'HDB987654': {
+        'emi_amount': Decimal('2800.00'),
+        'due_day_of_month': 15,
+        'total_tenure': 9,
+        'tenure_remaining': 5,
+        'total_loan_amount': Decimal('25200.00'),
+        'outstanding_bal': Decimal('14000.00'),
+        'interest_rate': Decimal('12.50'),
+        'loan_type': 'TWO_WHEELER',
+    },
+    'IDFC112233': {
+        'emi_amount': Decimal('5500.00'),
+        'due_day_of_month': 20,
+        'total_tenure': 24,
+        'tenure_remaining': 16,
+        'total_loan_amount': Decimal('132000.00'),
+        'outstanding_bal': Decimal('88000.00'),
+        'interest_rate': Decimal('15.00'),
+        'loan_type': 'PERSONAL_LOAN',
+    },
+    'HC123456': {
+        'emi_amount': Decimal('2100.00'),
+        'due_day_of_month': 12,
+        'total_tenure': 12,
+        'tenure_remaining': 7,
+        'total_loan_amount': Decimal('25200.00'),
+        'outstanding_bal': Decimal('14700.00'),
+        'interest_rate': Decimal('16.00'),
+        'loan_type': 'CONSUMER_DURABLE',
+    },
+    'TVS123456': {
+        'emi_amount': Decimal('3200.00'),
+        'due_day_of_month': 7,
+        'total_tenure': 24,
+        'tenure_remaining': 18,
+        'total_loan_amount': Decimal('76800.00'),
+        'outstanding_bal': Decimal('57600.00'),
+        'interest_rate': Decimal('13.00'),
+        'loan_type': 'TWO_WHEELER',
+    },
+    'TC123456': {
+        'emi_amount': Decimal('6000.00'),
+        'due_day_of_month': 1,
+        'total_tenure': 36,
+        'tenure_remaining': 28,
+        'total_loan_amount': Decimal('216000.00'),
+        'outstanding_bal': Decimal('168000.00'),
+        'interest_rate': Decimal('11.50'),
+        'loan_type': 'PERSONAL_LOAN',
+    },
+}
+
+
+def _lookup_loan_from_db(provider_id: int, loan_account_no: str):
     """
-    Derive stable pseudo-loan details from the LAN.
-
-    Deterministic on purpose: the same LAN must return the same EMI and tenure
-    on every lookup, or the sandbox would show a different loan each time the
-    user opened the screen.
+    Look up loan account from the EMIObligations database table.
     """
-    seed = int(hashlib.sha256(
-        f'{provider_name}:{loan_account_no}'.encode()
-    ).hexdigest()[:12], 16)
-    rng = random.Random(seed)
+    try:
+        from portal.models.emi_obligations import EMIObligations
+        from portal.helpers.encryption import decrypt
 
-    emi_amount = Decimal(rng.choice([1499, 2100, 3100, 4250, 5600, 7800, 12500]))
-    total_tenure = rng.choice([6, 9, 12, 18, 24, 36])
-    tenure_remaining = rng.randint(1, total_tenure)
-    due_day = rng.choice([1, 5, 10, 12, 15, 20, 25, 28])
+        clean_lan = loan_account_no.strip().upper()
+        if len(clean_lan) < 4:
+            return None
 
-    total_loan = emi_amount * total_tenure
-    outstanding = emi_amount * tenure_remaining
+        candidates = EMIObligations.query.filter_by(
+            provider_id=provider_id,
+            loan_account_last4=clean_lan[-4:],
+        ).all()
 
-    today = date.today()
-    if today.day < due_day:
-        next_due = today.replace(day=min(due_day, 28))
-    else:
-        month = today.month + 1
-        year = today.year + (1 if month > 12 else 0)
-        month = 1 if month > 12 else month
-        next_due = date(year, month, min(due_day, 28))
-
-    return {
-        'emi_amount': emi_amount,
-        'due_day_of_month': due_day,
-        'total_tenure': total_tenure,
-        'tenure_remaining': tenure_remaining,
-        'total_loan_amount': total_loan,
-        'outstanding_bal': outstanding,
-        'interest_rate': Decimal(str(rng.choice([12.5, 13.99, 15.0, 16.5, 18.0]))),
-        'next_due_date': next_due,
-        'loan_type': rng.choice(
-            ['CONSUMER_DURABLE', 'PERSONAL_LOAN', 'TWO_WHEELER']
-        ),
-    }
+        for cand in candidates:
+            try:
+                decrypted = decrypt(cand.loan_account_no_enc)
+                if decrypted.strip().upper() == clean_lan:
+                    due_day = cand.due_day_of_month or 5
+                    return {
+                        'emi_amount': cand.emi_amount,
+                        'due_day_of_month': due_day,
+                        'total_tenure': cand.total_tenure or 12,
+                        'tenure_remaining': cand.tenure_remaining or 12,
+                        'total_loan_amount': cand.total_loan_amount or (cand.emi_amount * (cand.total_tenure or 12)),
+                        'outstanding_bal': cand.outstanding_bal or (cand.emi_amount * (cand.tenure_remaining or 12)),
+                        'interest_rate': cand.interest_rate or Decimal('14.00'),
+                        'next_due_date': cand.next_due_date or next_due_date(due_day),
+                        'loan_type': cand.loan_type if isinstance(cand.loan_type, str) else getattr(cand.loan_type, 'value', 'CONSUMER_DURABLE'),
+                    }
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
 
 
 def fetch_loan(*, provider, loan_account_no: str, registered_phone: str = None) -> dict:
     """
-    Look up a loan with the lender (PRD FR-007 step: invoke BBPS or the
-    provider adapter).
+    Look up a loan with the lender (PRD FR-007 step: invoke BBPS or the provider adapter).
 
-    Returns {ok, data} or {ok: False, error, code}. A lookup failure is a normal
-    outcome - a mistyped LAN is the single most common thing that happens on
-    this screen - so it is returned rather than raised.
+    Returns {ok, data} or {ok: False, error, code}.
+    Never generates random values. Only returns data if the loan exists in the database
+    or belongs to predefined test loan accounts.
     """
+    clean_lan = (loan_account_no or '').strip().upper()
+
     if not provider.supports_auto_fetch and provider.integration_mode == 'MANUAL':
         return {
             'ok': False,
@@ -97,7 +167,7 @@ def fetch_loan(*, provider, loan_account_no: str, registered_phone: str = None) 
         }
 
     if _use_sandbox():
-        if _simulating(loan_account_no, Simulate.BILLER_DOWN):
+        if _simulating(clean_lan, Simulate.BILLER_DOWN):
             return {
                 'ok': False,
                 'code': 'ERR-010',
@@ -106,19 +176,47 @@ def fetch_loan(*, provider, loan_account_no: str, registered_phone: str = None) 
                 'retryable': True,
             }
 
-        # PRD ERR-010 sibling case: an LAN the lender does not recognise.
-        if len(loan_account_no) < 6:
+        if len(clean_lan) < 4:
             return {
                 'ok': False,
                 'code': 'INVALID_LAN',
-                'error': 'Provider rejected this loan account number. Please '
-                         'verify the LAN on your loan sanction letter.',
+                'error': 'Loan account not found. Please enter a valid loan account number.',
             }
 
+        # 1. Search database EMIObligations
+        db_loan = _lookup_loan_from_db(provider.provider_id, clean_lan)
+        if db_loan:
+            return {
+                'ok': True,
+                'data': db_loan,
+                'provider_reference': _ref('bbps_db'),
+            }
+
+        # 2. Check predefined test loan accounts
+        if clean_lan in PREDEFINED_TEST_LOANS:
+            preset = PREDEFINED_TEST_LOANS[clean_lan]
+            due_day = preset['due_day_of_month']
+            return {
+                'ok': True,
+                'data': {
+                    'emi_amount': preset['emi_amount'],
+                    'due_day_of_month': due_day,
+                    'total_tenure': preset['total_tenure'],
+                    'tenure_remaining': preset['tenure_remaining'],
+                    'total_loan_amount': preset['total_loan_amount'],
+                    'outstanding_bal': preset['outstanding_bal'],
+                    'interest_rate': preset['interest_rate'],
+                    'next_due_date': next_due_date(due_day),
+                    'loan_type': preset['loan_type'],
+                },
+                'provider_reference': _ref('bbps_sbx'),
+            }
+
+        # 3. Not found
         return {
-            'ok': True,
-            'data': _deterministic_loan(loan_account_no, provider.provider_name),
-            'provider_reference': _ref('bbps_sbx'),
+            'ok': False,
+            'code': 'LOAN_NOT_FOUND',
+            'error': 'Loan account not found. Please enter a valid loan account number.',
         }
 
     return {

@@ -53,6 +53,9 @@ export default function Transfer() {
     || banks[0]
     || null;
 
+  const cardBalance = card ? (card.available_limit ?? card.card_limit ?? 0) : 0;
+  const insufficientBalance = Boolean(card && numeric > 0 && numeric > cardBalance);
+
   const numeric = Number(amount) || 0;
   const minimum = limits?.limits?.minimum ?? 1000;
   const dailyRemaining = limits?.limits?.daily_remaining;
@@ -85,10 +88,14 @@ export default function Transfer() {
     return () => clearTimeout(debounce.current);
   }, [numeric, minimum]);
 
-  const ready = Boolean(quote && card && bank && !quoting && numeric >= minimum);
+  const ready = Boolean(quote && card && bank && !quoting && numeric >= minimum && !insufficientBalance);
 
   async function submit() {
     if (!ready || submitting) return;
+    if (insufficientBalance) {
+      toast.error('Insufficient card balance.');
+      return;
+    }
 
     setSubmitting(true);
 
@@ -224,6 +231,11 @@ export default function Transfer() {
             </p>
           )}
           {quoteError && <p className="mt-3 text-xs text-alert">{quoteError}</p>}
+          {insufficientBalance && (
+            <p className="mt-3 text-xs text-alert">
+              Insufficient card balance. Available balance: {money(cardBalance)}.
+            </p>
+          )}
 
           {dailyRemaining !== undefined && (
             <p className="mt-3 border-t border-line pt-3 text-2xs text-slate">
@@ -238,7 +250,11 @@ export default function Transfer() {
           <SelectorRow
             label="From"
             title={card ? `${card.issuer_bank} ${card.masked_pan}` : 'Choose a card'}
-            subtitle={card ? card.network : undefined}
+            subtitle={
+              card
+                ? `${card.network} · Available ${money(card.available_limit ?? card.card_limit)}`
+                : undefined
+            }
             swatch={card?.brand_color}
             onClick={() => setPicker('card')}
           />
@@ -246,7 +262,11 @@ export default function Transfer() {
           <SelectorRow
             label="To"
             title={bank ? bank.bank_name : 'Choose an account'}
-            subtitle={bank ? bank.masked_account : undefined}
+            subtitle={
+              bank
+                ? `${bank.masked_account}${bank.balance != null ? ` · Balance ${money(bank.balance)}` : ''}`
+                : undefined
+            }
             icon={<IconBank className="h-4 w-4" />}
             onClick={() => setPicker('bank')}
           />

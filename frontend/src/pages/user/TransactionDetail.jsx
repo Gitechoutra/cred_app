@@ -65,6 +65,18 @@ export default function TransactionDetail() {
               <Row label="GST" value={money(transaction.tax_amount)} mono />
             )}
             <Row label="Total" value={money(transaction.gross_amount)} mono />
+            {transaction.source_opening_balance != null && (
+              <Row label="Card balance before" value={money(transaction.source_opening_balance)} mono />
+            )}
+            {transaction.source_closing_balance != null && (
+              <Row label="Card balance after" value={money(transaction.source_closing_balance)} mono />
+            )}
+            {transaction.destination_opening_balance != null && (
+              <Row label="Account balance before" value={money(transaction.destination_opening_balance)} mono />
+            )}
+            {transaction.destination_closing_balance != null && (
+              <Row label="Account balance after" value={money(transaction.destination_closing_balance)} mono />
+            )}
             {transaction.utr && <Row label="UTR" value={transaction.utr} mono />}
             {transaction.gateway_reference && (
               <Row label="Gateway reference" value={transaction.gateway_reference} mono />

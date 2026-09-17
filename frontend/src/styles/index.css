@@ -32,6 +32,29 @@
     @apply outline-none ring-2 ring-mint ring-offset-2 ring-offset-canvas;
   }
 
+  input, textarea, select {
+    outline: none !important;
+  }
+
+  input:hover,
+  input:focus,
+  input:focus-visible,
+  input:active,
+  textarea:hover,
+  textarea:focus,
+  textarea:focus-visible,
+  textarea:active,
+  select:hover,
+  select:focus,
+  select:focus-visible,
+  select:active {
+    outline: none !important;
+    box-shadow: none !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+    --tw-ring-offset-shadow: 0 0 #0000 !important;
+    --tw-ring-color: transparent !important;
+  }
+
   /* Respect a user who has asked the OS for less motion. */
   @media (prefers-reduced-motion: reduce) {
     *,

@@ -129,7 +129,7 @@ class ProviderList(Resource):
     @jwt_required()
     def get(self):
         """Searchable lender directory for the Add EMI screen."""
-        providers = EMIProviders.query.filter_by(is_active=True).order_by(
+        providers = EMIProviders.query.order_by(
             EMIProviders.display_order.asc(), EMIProviders.display_name.asc()
         ).all()
 
@@ -191,7 +191,7 @@ class LoanLookup(Resource):
                 'reason': result.get('error'),
                 'code': result.get('code'),
                 'retryable': result.get('retryable', False),
-            }, result.get('error', 'Loan details could not be fetched.'))
+            }, result.get('error', 'Loan account not found. Please enter a valid loan account number.'))
 
         data = result['data']
         return success({

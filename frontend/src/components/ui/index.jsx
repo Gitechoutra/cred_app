@@ -102,8 +102,8 @@ export function Input({
       <div
         className={cx(
           'flex items-center gap-2 rounded-xl border bg-canvas px-3.5 transition-colors',
-          'h-12 focus-within:border-ink/30 focus-within:ring-2 focus-within:ring-mint/30',
-          error ? 'border-alert' : 'border-line',
+          'h-12',
+          error ? 'border-alert' : 'border-line focus-within:border-ink/40',
         )}
       >
         {prefix && <span className="shrink-0 text-sm text-slate">{prefix}</span>}

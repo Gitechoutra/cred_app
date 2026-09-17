@@ -41,14 +41,24 @@ add_parser.add_argument('is_primary', type=bool, required=False, location='json'
 
 
 def account_dict(account: BankAccounts) -> dict:
+    from portal.helpers import bank_ifsc_service
+    bank_info = bank_ifsc_service.get_bank_info(account.ifsc_code) if account.ifsc_code else {}
+    bank_name = (
+        bank_info.get('bank_name')
+        if bank_info.get('ok')
+        else (account.bank_name or 'Bank')
+    )
+    branch_name = account.branch_name or bank_info.get('branch')
+
     return {
         'bank_account_id': account.bank_account_id,
         'masked_account': account.masked_account(),
         'account_last4': account.account_last4,
         'ifsc_code': account.ifsc_code,
-        'bank_name': account.bank_name,
-        'branch_name': account.branch_name,
+        'bank_name': bank_name,
+        'branch_name': branch_name,
         'account_type': account.account_type,
+        'balance': to_float(account.balance),
         'account_holder_name': account.account_holder_name,
         'verified_cbs_name': account.verified_cbs_name,
         'name_match_score': to_float(account.name_match_score),
@@ -482,3 +492,25 @@ class IFSCLookup(Resource):
             'city': result.get('city'),
             'state': result.get('state'),
         })
+
+
+account_lookup_parser = reqparse.RequestParser()
+account_lookup_parser.add_argument('account_number', type=str, required=True, location='json')
+account_lookup_parser.add_argument('ifsc_code', type=str, required=True, location='json')
+
+
+@ns.route('/lookup-account')
+class BankAccountLookup(Resource):
+    @ns.doc('lookup_account', security='Bearer')
+    @jwt_required()
+    def post(self):
+        """Lookup and validate bank account details by account number and IFSC."""
+        args = account_lookup_parser.parse_args()
+        from portal.helpers import bank_ifsc_service
+        valid, msg, account_info = bank_ifsc_service.validate_destination_account(
+            args['account_number'], args['ifsc_code']
+        )
+        if not valid:
+            return failure(ErrorCode.VALIDATION_ERROR, msg, 400)
+
+        return success(account_info, 'Bank account verified.')

@@ -415,24 +415,22 @@ def penny_drop(
 
 
 def lookup_ifsc(ifsc: str) -> dict:
-    """Resolve an IFSC to bank and branch, so the user sees what they picked."""
-    if _use_sandbox():
-        # Derived from the code itself: the first four characters are the bank.
-        return {
-            'ok': True,
-            'bank_name': f'{ifsc[:4].upper()} Bank',
-            'branch': 'Sandbox Branch',
-            'city': 'Mumbai',
-            'state': 'Maharashtra',
-        }
+    """Resolve an IFSC to bank and branch, identifying official bank/institution names."""
+    from portal.helpers import bank_ifsc_service
+    info = bank_ifsc_service.get_bank_info(ifsc)
+    if info.get('ok'):
+        return info
 
-    result = cashfree.verify_ifsc(ifsc)
-    if result['ok']:
-        return {
-            'ok': True,
-            'bank_name': result['bank_name'],
-            'branch': result['branch'],
-            'city': result.get('city'),
-            'state': result.get('state'),
-        }
-    return {'ok': False, 'error': result['error']}
+    if not _use_sandbox():
+        result = cashfree.verify_ifsc(ifsc)
+        if result.get('ok'):
+            return {
+                'ok': True,
+                'bank_name': result['bank_name'],
+                'branch': result['branch'],
+                'city': result.get('city'),
+                'state': result.get('state'),
+            }
+        return {'ok': False, 'error': result.get('error', 'Invalid IFSC code.')}
+
+    return {'ok': False, 'error': info.get('error', 'Invalid IFSC code.')}

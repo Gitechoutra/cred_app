@@ -274,7 +274,7 @@ export default function AdminUsers() {
                   value={reason}
                   onChange={(event) => setReason(event.target.value)}
                   placeholder="Why are you freezing or reactivating this account?"
-                  className="w-full rounded-xl border border-line bg-canvas p-3 text-sm outline-none focus:border-ink/30 focus:ring-2 focus:ring-mint/30"
+                  className="w-full rounded-xl border border-line bg-canvas p-3 text-sm outline-none focus:border-ink/40"
                 />
               </div>
             )}

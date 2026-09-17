@@ -54,6 +54,7 @@ class BankAccounts(db.Model, TimestampMixin, CRUDMixin):
     bank_name = db.Column(db.String(150), nullable=True)
     branch_name = db.Column(db.String(200), nullable=True)
     account_type = db.Column(db.String(20), default=AccountType.SAVINGS)
+    balance = db.Column(db.Numeric(12, 2), default=20000.00, nullable=False)
 
     account_holder_name = db.Column(db.String(200), nullable=True)   # user-entered
     verified_cbs_name = db.Column(db.String(200), nullable=True)     # from the bank

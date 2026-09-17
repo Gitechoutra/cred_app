@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 80" width="320" height="80">
+  <!-- Official SBI Card Logo -->
+  <g transform="translate(10, 8)">
+    <!-- SBI Keyhole Symbol -->
+    <circle cx="32" cy="32" r="30" fill="#00A5DF" />
+    <path fill="#FFFFFF" d="M30 62 A 30 30 0 0 1 30 2 A 30 30 0 0 1 34 2 A 30 30 0 0 1 34 62 V 38 A 6 6 0 1 0 30 38 Z" opacity="0.0" />
+    <!-- Clean keyhole cut -->
+    <circle cx="32" cy="28" r="6.5" fill="#FFFFFF" />
+    <rect x="29.5" y="28" width="5" height="34" fill="#FFFFFF" />
+  </g>
+  <!-- SBI Card Typography -->
+  <text x="85" y="44" fill="#22409A" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="800" font-size="28" letter-spacing="-0.5">SBI Card</text>
+  <rect x="85" y="52" width="120" height="3" rx="1.5" fill="#00A5DF" />
+</svg>

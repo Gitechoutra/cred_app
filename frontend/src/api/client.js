@@ -251,6 +251,7 @@ export const endpoints = {
     verify: (id) => api.post(`/bank-accounts/${id}/verify`),
     setPrimary: (id) => api.post(`/bank-accounts/${id}/primary`),
     lookupIfsc: (ifsc) => api.get(`/bank-accounts/ifsc/${ifsc}`),
+    lookupAccount: (data) => api.post('/bank-accounts/lookup-account', data),
   },
   transfers: {
     quote: (amount) => api.post('/transfers/quote', { amount }),

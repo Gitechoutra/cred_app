@@ -28,6 +28,7 @@ export default function AddEmi() {
   const [step, setStep] = useState('provider');
   const [provider, setProvider] = useState(null);
   const [lan, setLan] = useState('');
+  const [lanError, setLanError] = useState('');
   const [lookup, setLookup] = useState(null);
   const [manual, setManual] = useState({ emi_amount: '', due_day_of_month: '', total_tenure: '' });
   const [busy, setBusy] = useState(false);
@@ -36,20 +37,29 @@ export default function AddEmi() {
     if (!lan.trim() || busy) return;
 
     setBusy(true);
+    setLanError('');
     try {
       const response = await endpoints.emi.lookup({
         provider_id: provider.provider_id,
         loan_account_no: lan.trim(),
       });
 
-      setLookup(response.data);
-      setStep(response.data.found ? 'confirm' : 'manual');
-
-      if (!response.data.found) {
-        toast.info(response.data.reason || 'Enter your loan details manually.');
+      if (response?.data?.found) {
+        setLookup(response.data);
+        setStep('confirm');
+      } else {
+        const errorMsg =
+          response?.data?.reason ||
+          response?.message ||
+          'Loan account not found. Please enter a valid loan account number.';
+        setLanError(errorMsg);
+        toast.error(errorMsg);
       }
     } catch (err) {
-      toast.error(err.message);
+      const errorMsg =
+        err?.message || 'Loan account not found. Please enter a valid loan account number.';
+      setLanError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setBusy(false);
     }
@@ -146,17 +156,24 @@ export default function AddEmi() {
           <PageHeader
             title={provider.display_name}
             subtitle="Enter your loan account number"
-            back={() => setStep('provider')}
+            back={() => {
+              setLanError('');
+              setStep('provider');
+            }}
           />
 
           <div className="space-y-4 px-4 pt-4">
             <Input
               label="Loan Account Number (LAN)"
-              hint="Printed on your loan sanction letter or the lender's app."
+              hint={lanError ? undefined : "Printed on your loan sanction letter or the lender's app."}
+              error={lanError}
               autoFocus
               placeholder="LAN4567890"
               value={lan}
-              onChange={(event) => setLan(event.target.value.toUpperCase())}
+              onChange={(event) => {
+                setLan(event.target.value.toUpperCase());
+                if (lanError) setLanError('');
+              }}
             />
 
             <Button
@@ -170,11 +187,21 @@ export default function AddEmi() {
               {busy ? 'Fetching your loan…' : 'Continue'}
             </Button>
 
-            <p className="px-1 text-xs leading-relaxed text-slate">
-              We use your LAN to fetch your EMI amount, due date and remaining
-              tenure directly from {provider.display_name}. It is stored
-              encrypted and shown masked.
-            </p>
+            <div className="flex items-center justify-between px-1">
+              <p className="text-xs leading-relaxed text-slate">
+                We fetch verified loan details directly from {provider.display_name}.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setLanError('');
+                  setStep('manual');
+                }}
+                className="shrink-0 text-xs font-semibold text-mint-700 hover:underline"
+              >
+                Enter manually
+              </button>
+            </div>
           </div>
         </div>
       </div>

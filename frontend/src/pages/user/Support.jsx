@@ -191,7 +191,7 @@ export default function Support() {
               placeholder="Tell us what happened, and include the UTR if you have one."
               value={form.message}
               onChange={(event) => setForm({ ...form, message: event.target.value })}
-              className="w-full rounded-xl border border-line bg-canvas p-3.5 text-[15px] text-ink outline-none transition focus:border-ink/30 focus:ring-2 focus:ring-mint/30 placeholder:text-slate-light"
+              className="w-full rounded-xl border border-line bg-canvas p-3.5 text-[15px] text-ink outline-none transition focus:border-ink/40 placeholder:text-slate-light"
             />
           </div>
         </div>
@@ -209,7 +209,7 @@ export default function Support() {
                 value={reply}
                 onChange={(event) => setReply(event.target.value)}
                 placeholder="Write a reply…"
-                className="h-12 flex-1 rounded-xl border border-line bg-canvas px-3.5 text-[15px] outline-none focus:border-ink/30 focus:ring-2 focus:ring-mint/30"
+                className="h-12 flex-1 rounded-xl border border-line bg-canvas px-3.5 text-[15px] outline-none focus:border-ink/40"
               />
               <Button variant="mint" size="lg" loading={busy} onClick={sendReply}>
                 Send

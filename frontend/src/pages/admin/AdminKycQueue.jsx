@@ -219,7 +219,7 @@ export default function AdminKycQueue() {
                 value={reason}
                 onChange={(event) => setReason(event.target.value)}
                 placeholder="Shown to the applicant verbatim, so make it actionable."
-                className="w-full rounded-xl border border-line bg-canvas p-3 text-sm outline-none focus:border-ink/30 focus:ring-2 focus:ring-mint/30"
+                className="w-full rounded-xl border border-line bg-canvas p-3 text-sm outline-none focus:border-ink/40"
               />
             </div>
 
