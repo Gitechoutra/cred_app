@@ -6,6 +6,7 @@ import { useToast } from '../../context/ToastContext';
 import { useFetch, useProfile } from '../../hooks/useProfile';
 import { dateTime, statusLabel, statusTone } from '../../utils/format';
 import { AdminHeader, DataTable } from './AdminLayout';
+import KycDocumentViewer, { AuthenticityGate } from './KycDocumentViewer';
 
 /**
  * KYC review queue (PRD 16.1).
@@ -23,6 +24,7 @@ export default function AdminKycQueue() {
   const [selected, setSelected] = useState(null);
   const [tier, setTier] = useState('MINIMUM');
   const [reason, setReason] = useState('');
+  const [verified, setVerified] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const canReview = ['L2_RISK_RECON', 'L3_SUPER_ADMIN'].includes(role);
@@ -30,6 +32,11 @@ export default function AdminKycQueue() {
   async function review(decision) {
     if (decision === 'REJECT' && !reason.trim()) {
       toast.error('A reason is required when rejecting a submission.');
+      return;
+    }
+
+    if (decision === 'APPROVE' && !verified) {
+      toast.error('Confirm you have examined the document before approving.');
       return;
     }
 
@@ -44,6 +51,7 @@ export default function AdminKycQueue() {
       toast.success(response.message);
       setSelected(null);
       setReason('');
+      setVerified(false);
       refetch();
     } catch (err) {
       toast.error(err.message);
@@ -137,6 +145,7 @@ export default function AdminKycQueue() {
         onClose={() => {
           setSelected(null);
           setReason('');
+          setVerified(false);
         }}
         title="Review submission"
         footer={
@@ -156,6 +165,7 @@ export default function AdminKycQueue() {
                 size="lg"
                 full
                 loading={busy}
+                disabled={!verified}
                 onClick={() => review('APPROVE')}
               >
                 Approve
@@ -171,16 +181,38 @@ export default function AdminKycQueue() {
               <Row label="Phone" value={selected.masked_phone} mono />
               <Row label="Requested tier" value={selected.requested_tier} />
               <Row label="Submitted" value={dateTime(selected.submitted_at)} />
-              <Row
-                label="PAN document"
-                value={selected.has_pan_document ? 'Uploaded' : 'Missing'}
-                tone={selected.has_pan_document ? 'good' : 'alert'}
-              />
-              <Row
-                label="Aadhaar document"
-                value={selected.has_aadhaar_document ? 'Uploaded' : 'Not provided'}
-              />
             </Card>
+
+            {/* ── The documents themselves ──────────────────────────────
+                The whole point of this screen: the reviewer has to actually
+                look at the PAN card before deciding, so it is shown inline
+                rather than hidden behind a download. */}
+            <div>
+              <p className="mb-2 text-2xs font-bold uppercase tracking-[0.12em] text-slate">
+                Uploaded documents
+              </p>
+
+              <div className="space-y-3">
+                {(selected.documents || []).map((doc) => (
+                  <KycDocumentViewer
+                    key={doc.slot}
+                    kycId={selected.kyc_id}
+                    slot={doc.slot}
+                    label={doc.label}
+                    available={doc.available}
+                  />
+                ))}
+              </div>
+
+              {!selected.has_pan_document && (
+                <p className="mt-2 text-2xs text-alert">
+                  No PAN document was uploaded. This submission cannot be
+                  verified — reject it and ask for the document.
+                </p>
+              )}
+            </div>
+
+            <AuthenticityGate checked={verified} onChange={setVerified} />
 
             <div>
               <span className="mb-2 block text-sm font-medium text-ink">Grant tier</span>

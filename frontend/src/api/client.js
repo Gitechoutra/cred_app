@@ -189,6 +189,45 @@ async function request(path, { method = 'GET', body, form, idempotent, retry = t
   return parsed;
 }
 
+
+/**
+ * Fetch a protected binary (a KYC document) as an object URL.
+ *
+ * `<img src>` cannot send an Authorization header, so a token-protected image
+ * has to be fetched like any other API call and wrapped in a blob URL. The
+ * caller owns the returned URL and must revokeObjectURL it on unmount, or the
+ * blob leaks for the life of the tab.
+ */
+export async function fetchBlobUrl(path) {
+  const headers = { 'X-Device-UUID': deviceId() };
+  const access = tokens.access;
+  if (access) headers.Authorization = `Bearer ${access}`;
+
+  let response = await fetch(`${BASE}${path}`, { headers });
+
+  // Same single-flight refresh the JSON path uses.
+  if (response.status === 401 && tokens.refresh) {
+    const refreshed = await refreshTokens();
+    if (refreshed) {
+      headers.Authorization = `Bearer ${tokens.access}`;
+      response = await fetch(`${BASE}${path}`, { headers });
+    }
+  }
+
+  if (!response.ok) {
+    let message = 'Could not load this document.';
+    try {
+      const body = await response.json();
+      message = body?.error?.message || message;
+    } catch {
+      /* binary endpoints may not return JSON on failure */
+    }
+    throw new ApiError({ code: 'DOCUMENT_ERROR', message, status: response.status });
+  }
+
+  return URL.createObjectURL(await response.blob());
+}
+
 /* ── Verbs ──────────────────────────────────────────────────────────────── */
 
 export const api = {
@@ -314,6 +353,7 @@ export const endpoints = {
     unfreeze: (id, reason) => api.post(`/admin/users/${id}/unfreeze`, { reason }),
     kycQueue: () => api.get('/admin/kyc/queue'),
     reviewKyc: (id, data) => api.post(`/admin/kyc/${id}/review`, data),
+    kycDocumentUrl: (id, slot) => fetchBlobUrl(`/admin/kyc/${id}/document/${slot}`),
     transfers: (params = '') => api.get(`/admin/transfers${params}`),
     stuckTransfers: () => api.get('/admin/transfers/stuck'),
     retryPayout: (id, reason) => api.post(`/admin/transfers/${id}/retry-payout`, { reason }),

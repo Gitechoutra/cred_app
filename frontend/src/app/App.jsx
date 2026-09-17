@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
 import AppShell from '../components/layout/AppShell';
+import ErrorBoundary from '../components/ErrorBoundary';
 import { Spinner } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useProfile } from '../hooks/useProfile';
@@ -108,7 +109,11 @@ function RedirectIfAuthed({ children }) {
 
 /** Member routes render inside the shell with its bottom navigation. */
 function Shell({ children }) {
-  return <AppShell>{children}</AppShell>;
+  return (
+    <AppShell>
+      <ErrorBoundary>{children}</ErrorBoundary>
+    </AppShell>
+  );
 }
 
 export default function App() {

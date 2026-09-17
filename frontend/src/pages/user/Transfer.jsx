@@ -53,12 +53,16 @@ export default function Transfer() {
     || banks[0]
     || null;
 
-  const cardBalance = card ? (card.available_limit ?? card.card_limit ?? 0) : 0;
-  const insufficientBalance = Boolean(card && numeric > 0 && numeric > cardBalance);
-
+  // `numeric` has to be declared before anything reads it. A `const` is hoisted
+  // but stays uninitialised until this line, so referencing it above throws
+  // "Cannot access 'numeric' before initialization" on every render - which
+  // unmounts the whole tree and renders a blank page rather than an error.
   const numeric = Number(amount) || 0;
   const minimum = limits?.limits?.minimum ?? 1000;
   const dailyRemaining = limits?.limits?.daily_remaining;
+
+  const cardBalance = card ? (card.available_limit ?? card.card_limit ?? 0) : 0;
+  const insufficientBalance = Boolean(card && numeric > 0 && numeric > cardBalance);
 
   const debounce = useRef();
 

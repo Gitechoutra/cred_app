@@ -10,8 +10,10 @@ weight:
     cannot approve their own request.
 """
 
+import os
 from datetime import timedelta
 
+from flask import current_app, send_file
 from flask_jwt_extended import jwt_required
 from flask_restx import Resource, reqparse
 from sqlalchemy import func
@@ -466,11 +468,130 @@ class KYCQueue(Resource):
             'submitted_at': iso(k.submitted_at),
             'has_pan_document': bool(k.pan_document_path),
             'has_aadhaar_document': bool(k.aadhaar_document_path),
+            # What the reviewer can actually open. Only the slot name is sent -
+            # never the stored path, which would leak the on-disk layout.
+            'documents': [
+                {
+                    'slot': slot,
+                    'label': {'pan': 'PAN card', 'aadhaar': 'Aadhaar',
+                              'selfie': 'Selfie'}[slot],
+                    'available': bool(getattr(k, column, None)),
+                }
+                for slot, column in _KYC_DOCUMENT_SLOTS.items()
+            ],
             'waiting_hours': (
                 round((utcnow() - k.submitted_at).total_seconds() / 3600, 1)
                 if k.submitted_at else None
             ),
         } for k in pagination.items], page, per_page, pagination.total)
+
+
+#: Document slots an admin may request, mapped to the column holding the path.
+#: The caller names a slot, never a path - so no request can reach a file the
+#: database does not already point at.
+_KYC_DOCUMENT_SLOTS = {
+    'pan': 'pan_document_path',
+    'aadhaar': 'aadhaar_document_path',
+    'selfie': 'selfie_path',
+}
+
+#: Only these may be streamed back. A KYC upload that somehow carried another
+#: extension is refused rather than served with a guessed content type.
+_KYC_MIME_TYPES = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.pdf': 'application/pdf',
+}
+
+
+@ns.route('/kyc/<string:kyc_id>/document/<string:slot>')
+class KYCDocument(Resource):
+    @ns.doc('get_kyc_document', security='Bearer')
+    @jwt_required()
+    @roles_required(L2, L3)
+    def get(self, kyc_id, slot):
+        """
+        Stream an uploaded KYC document for review.
+
+        This is the only route that can read anything out of the upload
+        directory - the files are deliberately not served statically, so a
+        leaked filename is worthless without an L2/L3 token.
+
+        PRD section 15 lists "View Raw PII / KYC Documents" as L2 and L3 only,
+        and marks it *audited*. The audit row is the half that matters: someone
+        looking at a customer's PAN card must always be attributable.
+        """
+        actor, role = _actor()
+
+        column = _KYC_DOCUMENT_SLOTS.get(slot)
+        if not column:
+            return failure(
+                ErrorCode.VALIDATION_ERROR,
+                f"Unknown document type. Expected one of: "
+                f"{', '.join(_KYC_DOCUMENT_SLOTS)}.",
+                400,
+            )
+
+        kyc = KYCVerifications.query.filter_by(kyc_id=kyc_id).first()
+        if not kyc:
+            return failure(ErrorCode.NOT_FOUND, 'KYC record not found.', 404)
+
+        stored = getattr(kyc, column, None)
+        if not stored:
+            return failure(
+                ErrorCode.NOT_FOUND,
+                'No document of that type was uploaded.',
+                404,
+            )
+
+        upload_root = os.path.realpath(current_app.config['UPLOAD_FOLDER'])
+        resolved = os.path.realpath(os.path.join(upload_root, stored))
+
+        # Defence in depth. The path comes from our own database rather than the
+        # request, so it should already be safe - but a stored value corrupted
+        # by some future bug must not become an arbitrary file read.
+        if not resolved.startswith(upload_root + os.sep):
+            logger.error(
+                f'Blocked out-of-root KYC document read: kyc={kyc_id} '
+                f'slot={slot} resolved={resolved}'
+            )
+            return failure(ErrorCode.FORBIDDEN, 'This document cannot be served.', 403)
+
+        if not os.path.isfile(resolved):
+            logger.error(f'KYC document missing on disk: {resolved}')
+            return failure(
+                ErrorCode.NOT_FOUND,
+                'The uploaded file is no longer available on disk.',
+                404,
+            )
+
+        mimetype = _KYC_MIME_TYPES.get(os.path.splitext(resolved)[1].lower())
+        if not mimetype:
+            return failure(
+                ErrorCode.FORBIDDEN,
+                'This file type cannot be displayed.',
+                403,
+            )
+
+        audit.record(
+            action='ADMIN_VIEWED_KYC_DOCUMENT',
+            entity_type='KYCVerifications',
+            entity_id=kyc_id,
+            actor_user_id=str(actor.user_id),
+            actor_role=role,
+            on_behalf_of=str(kyc.user_id),
+            notes=f'Opened the {slot.upper()} document for verification.',
+        )
+
+        response = send_file(resolved, mimetype=mimetype, conditional=False)
+
+        # Never let a customer's identity document sit in a shared cache, and
+        # never let a browser sniff it into something executable.
+        response.headers['Cache-Control'] = 'no-store, private, max-age=0'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['Content-Disposition'] = f'inline; filename="{slot}"'
+        return response
 
 
 @ns.route('/kyc/<string:kyc_id>/review')
