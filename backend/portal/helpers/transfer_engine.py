@@ -278,18 +278,36 @@ def initiate(*, user, card, bank_account, amount, idempotency_key: str,
     if return_url:
         return_url = f'{return_url}/{transfer.transfer_id}'
 
-    order = adapters.create_payment_order(
+    # The instrument is still the card - that is what a CashU transfer is, and
+    # the fee, the limit check and the ledger all assume it. Only the gateway
+    # carrying the charge changes: Razorpay when it is configured, so that the
+    # transfer and EMI paths share one checkout, one verification routine and
+    # one webhook. Cashfree remains the fallback, so an environment without
+    # Razorpay credentials behaves exactly as it did before.
+    collection = dict(
         order_id=order_request_id(transfer),
         amount=breakdown['total_charged_to_card'],
         customer_id=str(user.user_id),
         customer_phone=user.phone,
         customer_email=user.email,
         customer_name=user.full_name,
-        return_url=return_url or None,
-        notify_url=current_app.config.get('CASHFREE_NOTIFY_URL') or None,
         note=f'CashU transfer to {bank_account.masked_account()}',
         tags={'transfer_id': transfer.transfer_id, 'type': 'CARD_TO_BANK'},
     )
+
+    use_razorpay = (
+        adapters.razorpay_available()
+        and current_app.config.get('RAZORPAY_TRANSFERS_ENABLED', True)
+    )
+
+    if use_razorpay:
+        order = adapters.create_razorpay_order(**collection)
+    else:
+        order = adapters.create_payment_order(
+            return_url=return_url or None,
+            notify_url=current_app.config.get('CASHFREE_NOTIFY_URL') or None,
+            **collection,
+        )
 
     if not order['ok']:
         transfer.status = TransferStatus.FAILED
@@ -310,7 +328,7 @@ def initiate(*, user, card, bank_account, amount, idempotency_key: str,
         )
 
     transfer.gateway_provider = order['provider']
-    transfer.gateway_order_id = order['order_id']
+    transfer.gateway_order_id = order.get('gateway_order_id') or order.get('order_id')
     transfer.three_ds_url = order.get('checkout_url')
     _transition(transfer, TransferStatus.AUTH_PENDING)
 
@@ -339,23 +357,99 @@ def initiate(*, user, card, bank_account, amount, idempotency_key: str,
         },
     )
 
-    # Attach for the response; not persisted.
+    # Attach for the response; not persisted. The key id and paise amount are
+    # derivable from config and the row, so storing them would duplicate state
+    # that can go stale.
     transfer.payment_session_id = order.get('payment_session_id')
+    transfer.checkout_key = order.get('public_key')
+    transfer.checkout_amount_paise = order.get('amount_paise')
     return transfer
 
 
-def confirm_charge(transfer: Transfers, *, gateway_payment_id: str = None) -> Transfers:
+def _paid_by_upi(transfer: Transfers) -> bool:
+    """True when the gateway reported UPI, not a card, as the paying method."""
+    return (transfer.source_instrument or '').lower() == 'upi'
+
+
+def _source_ref(transfer: Transfers) -> str:
+    """How the funding instrument is described in the ledger and on receipts."""
+    if _paid_by_upi(transfer):
+        return transfer.source_vpa or 'UPI'
+    return transfer.card.masked_pan if transfer.card else 'Card'
+
+
+def confirm_charge(
+    transfer: Transfers,
+    *,
+    gateway_payment_id: str = None,
+    signature: str = None,
+) -> Transfers:
     """
     Confirm the card charge against the gateway and post it to the ledger.
 
-    Called from the webhook and from the client return URL, and safe from both:
-    the status is always re-read from the gateway API, and a transfer already
-    past AUTH_PENDING short-circuits.
+    Called from the browser after checkout, from the webhook, and from the
+    reconciliation sweep - and safe from all three at once. The row is re-read
+    under `FOR UPDATE` before the status check, because two callers can
+    otherwise both observe AUTH_PENDING and both post the charge to the ledger.
+
+    `signature` is the HMAC Razorpay Checkout returned in the browser. It is
+    verified before `gateway_payment_id` is used, and an unverified id is
+    discarded rather than trusted. Even a verified one only selects which
+    payment to read: whether the card was actually charged is decided by the
+    gateway API, never by the caller.
     """
+    locked = (
+        Transfers.query
+        .filter_by(transfer_id=transfer.transfer_id)
+        .with_for_update()
+        .first()
+    )
+    if locked is not None:
+        transfer = locked
+
     if transfer.status != TransferStatus.AUTH_PENDING:
+        db.session.commit()   # release the lock; nothing to do
         return transfer
 
-    status = adapters.get_payment_status(transfer.gateway_order_id)
+    if transfer.gateway_provider == 'RAZORPAY':
+        if gateway_payment_id and signature:
+            if adapters.verify_razorpay_signature(
+                order_id=transfer.gateway_order_id,
+                payment_id=gateway_payment_id,
+                signature=signature,
+            ):
+                transfer.gateway_signature = signature
+            else:
+                current_app.logger.error(
+                    f'[transfer] bad checkout signature for '
+                    f'{transfer.transfer_id}; ignoring the supplied payment id.'
+                )
+                gateway_payment_id = None
+
+        status = adapters.get_razorpay_payment_status(
+            order_id=transfer.gateway_order_id,
+            payment_id=gateway_payment_id,
+        )
+
+        if status.get('ok') and status.get('status') == 'PENDING' and not status.get('paid'):
+            # The user has not finished at the gateway. Not a failure - leave it
+            # AUTH_PENDING so the webhook or the recon sweep resolves it, rather
+            # than failing a charge that may still land.
+            db.session.commit()
+            return transfer
+
+        if status.get('gateway_payment_id'):
+            gateway_payment_id = status['gateway_payment_id']
+
+        # What the gateway says actually paid, not what we assumed when the
+        # order was opened. The ledger and the credit-line accounting below
+        # both key off this, so a UPI settlement is never recorded as a card
+        # charge.
+        transfer.source_instrument = status.get('method')
+        transfer.source_vpa = status.get('vpa')
+    else:
+        status = adapters.get_payment_status(transfer.gateway_order_id)
+        transfer.source_instrument = 'card'
 
     if not status.get('ok'):
         current_app.logger.warning(
@@ -394,8 +488,11 @@ def confirm_charge(transfer: Transfers, *, gateway_payment_id: str = None) -> Tr
             net_amount=transfer.net_payout_amount,
             fee_amount=transfer.convenience_fee,
             tax_amount=transfer.gst_on_fee,
-            source_type=SourceType.CREDIT_CARD_TOKEN,
-            source_masked_ref=transfer.card.masked_pan,
+            source_type=(
+                SourceType.UPI_VPA if _paid_by_upi(transfer)
+                else SourceType.CREDIT_CARD_TOKEN
+            ),
+            source_masked_ref=_source_ref(transfer),
             dest_type=DestType.BANK_ACCOUNT_IMPS,
             dest_masked_ref=transfer.bank_account.masked_account(),
             gateway_provider=transfer.gateway_provider,
@@ -406,7 +503,7 @@ def confirm_charge(transfer: Transfers, *, gateway_payment_id: str = None) -> Tr
                 fee=transfer.convenience_fee,
                 gst=transfer.gst_on_fee,
                 total_charged=transfer.total_charged_to_card,
-                card_ref=transfer.card.masked_pan,
+                card_ref=_source_ref(transfer),
                 bank_ref=transfer.bank_account.masked_account(),
             ),
             status=TransactionStatus.PROCESSING,
@@ -507,27 +604,34 @@ def _settle(transfer: Transfers) -> Transfers:
     bank_account = transfer.bank_account
     amount = Decimal(str(transfer.principal_amount))
 
+    # The credit line is only consumed when the credit line actually paid. A
+    # UPI-settled transfer took the money out of a bank account, so drawing
+    # down the card's limit as well would bill the user twice - once really,
+    # once on paper - and leave the card's outstanding permanently overstated.
+    card_funded = not _paid_by_upi(transfer)
+
     try:
-        # Check source card balance at settlement
-        curr_card_bal = Decimal(str(
-            card.available_limit if card.available_limit is not None
-            else ((card.card_limit or Decimal('0')) - (card.outstanding_amount or Decimal('0')))
-        ))
-        if curr_card_bal < amount:
-            raise TransferError('Insufficient card balance.', ErrorCode.VALIDATION_ERROR)
-
         dest_curr_bal = Decimal(str(bank_account.balance if bank_account.balance is not None else Decimal('20000.00')))
-
-        # Snapshots
-        source_opening = curr_card_bal
         dest_opening = dest_curr_bal
-
-        source_closing = curr_card_bal - amount
         dest_closing = dest_curr_bal + amount
 
-        # Update card balances
-        card.available_limit = source_closing
-        card.outstanding_amount = Decimal(str(card.outstanding_amount or Decimal('0'))) + amount
+        source_opening = source_closing = None
+
+        if card_funded:
+            # Check source card balance at settlement
+            curr_card_bal = Decimal(str(
+                card.available_limit if card.available_limit is not None
+                else ((card.card_limit or Decimal('0')) - (card.outstanding_amount or Decimal('0')))
+            ))
+            if curr_card_bal < amount:
+                raise TransferError('Insufficient card balance.', ErrorCode.VALIDATION_ERROR)
+
+            source_opening = curr_card_bal
+            source_closing = curr_card_bal - amount
+
+            # Update card balances
+            card.available_limit = source_closing
+            card.outstanding_amount = Decimal(str(card.outstanding_amount or Decimal('0'))) + amount
 
         # Update destination bank account balance
         bank_account.balance = dest_closing

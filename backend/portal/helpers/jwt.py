@@ -64,6 +64,39 @@ def _register_handlers(manager: JWTManager):
     def _revoked(_header, _payload):
         return failure(ErrorCode.UNAUTHORIZED, 'This session has been revoked.', 401)
 
+    @manager.token_in_blocklist_loader
+    def _is_revoked(_header, payload):
+        """
+        Decide whether this token's session is still alive.
+
+        Without this, flask-jwt-extended never treats *any* token as revoked and
+        the handler above is unreachable - which is exactly what happened here:
+        signing out marked the session REVOKED in the database and every
+        subsequent request sailed through on the same token until it expired.
+        Signing out of all devices had the same problem.
+
+        Sitting on the blocklist hook rather than inside `active_user_required`
+        means it covers every `@jwt_required()` route, including the ones that
+        do not re-read the user row.
+
+        It costs one indexed lookup per authenticated request. That is the price
+        of revocable sessions without a cache; if it ever shows up in a profile,
+        the answer is to memoise revoked ids, not to drop the check.
+        """
+        from portal.models.user_sessions import SessionStatus, UserSessions
+
+        session_id = payload.get('session_id')
+        if not session_id:
+            # No session claim to check - a token minted before sessions were
+            # tracked. The kill switch in `active_user_required` still applies.
+            return False
+
+        session = UserSessions.query.filter_by(session_id=session_id).first()
+        if session is None:
+            return False
+
+        return session.status != SessionStatus.ACTIVE
+
 
 # ── Token issuance ─────────────────────────────────────────────────────────
 

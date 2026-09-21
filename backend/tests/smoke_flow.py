@@ -285,12 +285,30 @@ def main():
     same = replay_ok and response.json()['data']['transfer_id'] == transfer_id
     check('AC-004 idempotent replay', same, response.text[:200])
 
-    # Confirm - sandbox settles the charge and the payout.
+    # What happens next depends on which rail is carrying the charge, so ask
+    # the server rather than assuming. On the simulated rail the charge and
+    # payout settle synchronously and the whole ledger path is exercised. On
+    # Razorpay the card has genuinely not been charged - nobody completed a
+    # checkout - and the correct behaviour is to refuse to advance.
+    on_razorpay = (transfer.get('checkout') or {}).get('provider') == 'RAZORPAY'
+
     response = post(f'/transfers/{transfer_id}/confirm', token=token)
     confirm_ok = check('Transfer confirmed', response.status_code == 200,
                        response.text[:300])
 
-    if confirm_ok:
+    if confirm_ok and on_razorpay:
+        pending = response.json()['data']
+        check('Unpaid Razorpay charge does not settle',
+              pending['status'] not in ('SUCCEEDED', 'PAYOUT_PROCESSING',
+                                        'INBOUND_CHARGED'),
+              pending['status'])
+        check('No UTR without a real charge', not pending.get('utr'))
+
+        response = get(f'/transfers/{transfer_id}/receipt', token=token)
+        check('Receipt refused for an unpaid transfer',
+              response.status_code in (400, 409), str(response.status_code))
+
+    elif confirm_ok:
         settled = response.json()['data']
         check('Transfer SUCCEEDED', settled['status'] == 'SUCCEEDED', settled['status'])
         check('UTR issued', bool(settled.get('utr')))
@@ -307,7 +325,18 @@ def main():
 
     if txn_ok:
         transactions = response.json()['data']
-        check('Transactions recorded', len(transactions) >= 1, str(len(transactions)))
+
+        if on_razorpay:
+            # Nothing was charged, so nothing may be in the ledger. This is a
+            # stronger assertion than the settled path's "at least one row":
+            # a ledger entry appearing here would mean money was recorded that
+            # no gateway ever collected, which is precisely the drift the
+            # nightly self-audit exists to catch.
+            check('No ledger rows without a charge', len(transactions) == 0,
+                  str(len(transactions)))
+        else:
+            check('Transactions recorded', len(transactions) >= 1,
+                  str(len(transactions)))
 
         if transactions:
             txn_id = transactions[0]['transaction_id']
@@ -332,11 +361,20 @@ def main():
         check('Bajaj Finserv seeded', bajaj is not None)
 
         if bajaj:
-            lan = f'LAN{random.randint(1000000, 9999999)}'
+            # A known test loan, not a random one. The provider adapter only
+            # returns details for loans it actually knows - it never fabricates
+            # them - so a random account number resolves to nothing and the add
+            # below then correctly demands the amount and due date by hand.
+            lan = 'LAN4567890'
             response = post('/emi/lookup', {
                 'provider_id': bajaj['provider_id'], 'loan_account_no': lan,
             }, token=token)
-            check('Loan lookup', response.status_code == 200, response.text[:200])
+            lookup_ok = check('Loan lookup', response.status_code == 200,
+                              response.text[:200])
+            if lookup_ok:
+                check('Loan details actually resolved',
+                      (response.json().get('data') or {}).get('found') is True,
+                      response.text[:200])
 
             response = post('/emi', {
                 'provider_id': bajaj['provider_id'], 'loan_account_no': lan,
@@ -363,12 +401,27 @@ def main():
                                response.text[:300])
 
                 if pay_ok:
-                    payment_id = response.json()['data']['payment_id']
-                    response = post(f'/emi-payments/{payment_id}/confirm', token=token)
+                    opened = response.json()['data']
+                    payment_id = opened['payment_id']
+                    upi_live = (
+                        (opened.get('checkout') or {}).get('provider') == 'RAZORPAY'
+                    )
+
+                    response = post(f'/emi-payments/{payment_id}/confirm',
+                                    token=token)
                     if response.status_code == 200:
-                        check('EMI settled',
-                              response.json()['data']['status'] == 'SETTLED',
-                              response.json()['data']['status'])
+                        status = response.json()['data']['status']
+
+                        if upi_live:
+                            # A real UPI order nobody has paid. The only correct
+                            # outcome is to wait - marking this SETTLED would be
+                            # the fabricated success the whole design forbids.
+                            check('Unpaid UPI order does not settle',
+                                  status not in ('SETTLED', 'SUCCESSFUL'), status)
+                            check('Unpaid UPI order parks as PENDING',
+                                  status == 'PENDING', status)
+                        else:
+                            check('EMI settled', status == 'SETTLED', status)
 
     # ── Dashboard (FR-002) ─────────────────────────────────────────────────
     print('\n[9] Dashboard')

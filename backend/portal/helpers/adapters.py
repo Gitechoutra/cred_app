@@ -26,7 +26,7 @@ import uuid
 
 from flask import current_app
 
-from portal.helpers import cashfree
+from portal.helpers import cashfree, razorpay
 
 
 # ── Failure injection ──────────────────────────────────────────────────────
@@ -434,3 +434,286 @@ def lookup_ifsc(ifsc: str) -> dict:
         return {'ok': False, 'error': result.get('error', 'Invalid IFSC code.')}
 
     return {'ok': False, 'error': info.get('error', 'Invalid IFSC code.')}
+
+
+# -- UPI collection (PRD FR-008, section 11) --------------------------------
+# A separate rail from the card charge above, and deliberately a separate
+# vendor. A transfer is funded by a credit card and settles over IMPS; an EMI
+# is collected over UPI. Forcing both through one gateway would couple two
+# products that fail independently.
+#
+# Unlike the card path, UPI does not honour USE_SANDBOX_ADAPTERS: the reason to
+# configure a Razorpay test key is to exercise the real rail, test mode and
+# all. The simulator is reached only when there is genuinely nothing to call.
+
+#: UPI apps surfaced to the user. `package` is the Android intent target that
+#: Razorpay Checkout hands off to. Order matters - it is the order they appear
+#: in the sheet.
+UPI_APPS = [
+    {'id': 'google_pay', 'label': 'Google Pay',
+     'package': 'com.google.android.apps.nbu.paisa.user'},
+    {'id': 'phonepe', 'label': 'PhonePe', 'package': 'com.phonepe.app'},
+    {'id': 'paytm', 'label': 'Paytm', 'package': 'net.one97.paytm'},
+    {'id': 'bhim', 'label': 'BHIM', 'package': 'in.org.npci.upiapp'},
+]
+
+
+def upi_provider() -> str:
+    """Which rail a UPI collection would actually use right now."""
+    if not current_app.config.get('RAZORPAY_UPI_ENABLED', True):
+        return 'SANDBOX'
+    return 'RAZORPAY' if razorpay.is_configured() else 'SANDBOX'
+
+
+def upi_public_key() -> str:
+    """
+    The Checkout key id, safe to hand to the browser.
+
+    Empty on the sandbox rail, which is how the client knows to take the
+    simulated path instead of opening Checkout with no key.
+    """
+    return razorpay.public_key() if upi_provider() == 'RAZORPAY' else ''
+
+
+def create_razorpay_order(
+    *,
+    order_id: str,
+    amount,
+    customer_id: str,
+    customer_phone: str = None,
+    customer_email: str = None,
+    customer_name: str = None,
+    note: str = None,
+    tags: dict = None,
+) -> dict:
+    """
+    Open a UPI collection order.
+
+    Returns what the client needs to launch Checkout - never a payment status.
+    Opening an order is not collecting money, and nothing downstream may treat
+    a successful return from here as a payment.
+    """
+    if upi_provider() == 'SANDBOX':
+        if _simulating(order_id, Simulate.TIMEOUT):
+            return {
+                'ok': False, 'error_code': 'GATEWAY_TIMEOUT',
+                'error': 'Gateway timed out.', 'timeout': True,
+            }
+        if _simulating(order_id, Simulate.DECLINE):
+            return {
+                'ok': False, 'error_code': 'UPI_DECLINED',
+                'error': 'The UPI request was declined.',
+            }
+
+        return {
+            'ok': True,
+            'provider': 'SANDBOX',
+            'gateway_order_id': _ref('order_sbx'),
+            'public_key': '',
+            'checkout_url': f'/sandbox/upi/{order_id}',
+            'amount_paise': razorpay.to_paise(amount),
+        }
+
+    result = razorpay.create_order(
+        receipt=order_id,
+        amount=amount,
+        notes={
+            'customer_id': customer_id,
+            'customer_name': customer_name or '',
+            'note': note or '',
+            **(tags or {}),
+        },
+    )
+
+    if not result['ok']:
+        return {
+            'ok': False,
+            'error_code': result.get('error_code') or 'GATEWAY_ERROR',
+            'error': result['error'],
+            'timeout': result.get('timeout', False),
+        }
+
+    return {
+        'ok': True,
+        'provider': 'RAZORPAY',
+        'gateway_order_id': result['order_id'],
+        'public_key': razorpay.public_key(),
+        'checkout_url': None,          # Checkout is opened by the JS SDK
+        'amount_paise': result['amount'],
+    }
+
+
+def get_razorpay_payment_status(*, order_id: str, payment_id: str = None) -> dict:
+    """
+    Authoritative status for a UPI collection.
+
+    Resolution order matters. When a payment id is known it is read directly,
+    because an order can carry several attempts and only one of them is the one
+    the user just completed. With no payment id, every attempt on the order is
+    examined and a captured one wins - that is the path the webhook and the
+    poller take.
+
+    `paid` is True only for a *captured* payment. An `authorized` payment is
+    money held, not money taken; it auto-refunds if never captured, so treating
+    it as paid would show a success screen for a payment that later reverses.
+    """
+    if upi_provider() == 'SANDBOX':
+        if _simulating(order_id, Simulate.DECLINE):
+            return {
+                'ok': True, 'status': 'FAILED', 'paid': False,
+                'failure_code': 'UPI_DECLINED',
+                'failure_reason': 'The payment was declined in your UPI app.',
+            }
+        return {
+            'ok': True, 'status': 'PAID', 'paid': True,
+            'gateway_payment_id': _ref('pay_sbx'),
+            'rrn': _fake_utr(),
+            'method': 'upi',
+        }
+
+    if payment_id:
+        payment = razorpay.fetch_payment(payment_id)
+        if not payment['ok']:
+            return {'ok': False, 'error': payment['error'],
+                    'timeout': payment.get('timeout', False)}
+
+        # A payment id belonging to a different order is either a bug or an
+        # attempt to settle one EMI with another EMI's payment. Refuse it.
+        if payment.get('order_id') and payment['order_id'] != order_id:
+            return {
+                'ok': True, 'status': 'FAILED', 'paid': False,
+                'failure_code': 'ORDER_MISMATCH',
+                'failure_reason': 'This payment belongs to a different order.',
+            }
+
+        return _upi_status_from_payment(payment)
+
+    attempts = razorpay.fetch_order_payments(order_id)
+    if not attempts['ok']:
+        return {'ok': False, 'error': attempts['error'],
+                'timeout': attempts.get('timeout', False)}
+
+    items = attempts['items']
+    if not items:
+        # The order exists but nobody has paid it yet - the user is still in
+        # their UPI app, or they abandoned it. Neither is a failure.
+        return {'ok': True, 'status': 'PENDING', 'paid': False}
+
+    captured = next((i for i in items if i.get('status') == 'captured'), None)
+    if captured:
+        return _upi_status_from_payment({
+            'ok': True,
+            'payment_id': captured.get('id'),
+            'status': 'captured',
+            'captured': True,
+            'method': captured.get('method'),
+            'vpa': captured.get('vpa'),
+            'acquirer_data': captured.get('acquirer_data') or {},
+            'amount': captured.get('amount'),
+        })
+
+    authorized = next((i for i in items if i.get('status') == 'authorized'), None)
+    if authorized:
+        return {'ok': True, 'status': 'PENDING', 'paid': False,
+                'gateway_payment_id': authorized.get('id')}
+
+    latest = items[-1]
+    return {
+        'ok': True,
+        'status': 'FAILED',
+        'paid': False,
+        'gateway_payment_id': latest.get('id'),
+        'failure_code': latest.get('error_code') or 'UPI_FAILED',
+        'failure_reason': (
+            latest.get('error_description') or 'The payment was not completed.'
+        ),
+    }
+
+
+def _upi_status_from_payment(payment: dict) -> dict:
+    """Map one Razorpay payment onto the vocabulary the EMI engine speaks."""
+    status = payment.get('status')
+
+    if payment.get('captured') or status == 'captured':
+        acquirer = payment.get('acquirer_data') or {}
+        return {
+            'ok': True,
+            'status': 'PAID',
+            'paid': True,
+            'gateway_payment_id': payment.get('payment_id'),
+            'rrn': acquirer.get('rrn') or acquirer.get('upi_transaction_id'),
+            'vpa': payment.get('vpa'),
+            'method': payment.get('method'),
+            'amount_paise': payment.get('amount'),
+        }
+
+    if status in ('created', 'authorized'):
+        # Money is held but not taken, or the user has not finished. Pending is
+        # the honest answer; the poller will come back to it.
+        return {
+            'ok': True, 'status': 'PENDING', 'paid': False,
+            'gateway_payment_id': payment.get('payment_id'),
+        }
+
+    return {
+        'ok': True,
+        'status': 'FAILED',
+        'paid': False,
+        'gateway_payment_id': payment.get('payment_id'),
+        'failure_code': payment.get('error_code') or 'UPI_FAILED',
+        'failure_reason': (
+            payment.get('error_description') or 'The payment was not completed.'
+        ),
+    }
+
+
+def verify_razorpay_signature(
+    *, order_id: str, payment_id: str, signature: str
+) -> bool:
+    """
+    Verify the signed handler payload the browser returns.
+
+    On the sandbox rail there is no signature and no secret to verify it with,
+    so this is vacuously true - and the sandbox is unreachable whenever real
+    credentials exist.
+    """
+    if upi_provider() == 'SANDBOX':
+        return True
+
+    return razorpay.verify_checkout_signature(
+        order_id=order_id, payment_id=payment_id, signature=signature
+    )
+
+
+# Back-compatible aliases. The EMI engine speaks in UPI terms because that is
+# what it collects with; the transfer engine charges a card through the same
+# gateway and calls the general names.
+create_upi_order = create_razorpay_order
+get_upi_payment_status = get_razorpay_payment_status
+verify_upi_checkout_signature = verify_razorpay_signature
+
+
+def transfer_upi_funding_allowed() -> bool:
+    """
+    Whether UPI may settle a transfer's charge.
+
+    Unset in config, this follows the key: on for a test key, off for a live
+    one. A UPI-funded transfer takes money from a bank rather than a credit
+    line, so it is a testing affordance by default rather than a product
+    decision made by accident.
+    """
+    explicit = current_app.config.get('TRANSFER_UPI_FUNDING', '')
+    if explicit:
+        return explicit == 'True'
+    return razorpay_available() and razorpay.is_test_mode()
+
+
+def test_upi_vpa() -> str:
+    """A VPA to prefill during testing, so nobody retypes it every attempt."""
+    return current_app.config.get('RAZORPAY_TEST_UPI_VPA', '') or ''
+
+
+def razorpay_available() -> bool:
+    """Whether the Razorpay rail is live for any instrument."""
+    return upi_provider() == 'RAZORPAY'
+

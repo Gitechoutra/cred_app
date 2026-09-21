@@ -33,9 +33,10 @@ from datetime import datetime, timezone
 from flask import request
 from flask_restx import Resource
 
-from portal.helpers import audit, cashfree, transfer_engine
+from portal.helpers import audit, cashfree, emi_engine, razorpay, transfer_engine
 from portal.helpers.helpers import ErrorCode, failure, success
-from portal.models.transfers import Transfers
+from portal.models.emi_payments import EMIPaymentState, EMIPayments
+from portal.models.transfers import TransferStatus, Transfers
 
 from . import logger, ns
 
@@ -372,3 +373,221 @@ class WebhookHealth(Resource):
             'credentials_configured': cashfree.is_configured(),
             'max_skew_seconds': MAX_SKEW_SECONDS,
         }, 'Webhook receiver is reachable.')
+
+
+# -- Razorpay: UPI collection for EMI payments ------------------------------
+
+#: Deliveries this endpoint acts on. Everything else verified is acknowledged
+#: and dropped - Razorpay sends the full event stream for the account, and a
+#: 4xx on an event we simply do not care about would put the endpoint into
+#: their retry-and-disable path.
+_RAZORPAY_ACTIONABLE = {
+    'payment.captured',
+    'payment.failed',
+    'payment.authorized',
+    'order.paid',
+}
+
+
+def _authenticate_razorpay():
+    """
+    Verify a Razorpay delivery and return (payload, error_response).
+
+    Razorpay signs the raw body with the dashboard webhook secret and sends no
+    timestamp header, so freshness is taken from `created_at` inside the signed
+    body - which the signature already protects from tampering.
+    """
+    raw_body = request.get_data()
+    signature = request.headers.get('X-Razorpay-Signature')
+
+    if not razorpay.verify_webhook_signature(raw_body, signature):
+        logger.error(
+            f'[webhook] REJECTED bad Razorpay signature from '
+            f'{request.remote_addr} for {request.path}'
+        )
+        return None, failure(
+            ErrorCode.UNAUTHORIZED, 'Invalid webhook signature.', 401
+        )
+
+    try:
+        payload = json.loads(raw_body.decode('utf-8')) if raw_body else {}
+    except (UnicodeDecodeError, ValueError) as exc:
+        logger.error(f'[webhook] Razorpay signature valid but body is not JSON: {exc}')
+        return None, failure(
+            ErrorCode.VALIDATION_ERROR, 'Webhook body could not be parsed.', 400
+        )
+
+    created_at = payload.get('created_at')
+    if created_at is not None:
+        sent_at = _parse_timestamp(created_at)
+        if sent_at is None:
+            logger.error(f'[webhook] Razorpay created_at unreadable: {created_at!r}')
+            return None, failure(
+                ErrorCode.UNAUTHORIZED, 'Invalid webhook timestamp.', 401
+            )
+
+        age = abs((datetime.now(timezone.utc) - sent_at).total_seconds())
+        if age > MAX_SKEW_SECONDS:
+            logger.error(
+                f'[webhook] REJECTED stale Razorpay delivery: {age:.0f}s old '
+                f'(limit {MAX_SKEW_SECONDS}s)'
+            )
+            return None, failure(
+                ErrorCode.UNAUTHORIZED,
+                'Webhook timestamp is outside the accepted window.',
+                401,
+            )
+
+    return payload, None
+
+
+def _handle_razorpay_transfer(event: str, order_id: str, rzp_payment_id: str):
+    """
+    Resolve a Razorpay delivery that belongs to a transfer rather than an EMI.
+
+    Same contract as the EMI branch: the body is a hint, and `confirm_charge`
+    re-reads the charge from Razorpay before the ledger is posted or the payout
+    dispatched. No signature is passed - the handler signature belongs to the
+    browser flow, and this delivery was already authenticated by its own HMAC.
+    """
+    transfer = Transfers.query.filter_by(gateway_order_id=order_id).first()
+
+    if not transfer:
+        # Neither an EMI nor a transfer. The merchant account may serve more
+        # than this product, so this is expected traffic, not an error.
+        logger.info(f'[webhook] no EMI or transfer for order {order_id} ({event})')
+        return _acknowledged('No matching payment.', order_id=order_id)
+
+    logger.info(
+        f'[webhook] {event} for transfer {transfer.transfer_id} '
+        f'(status {transfer.status})'
+    )
+
+    if transfer.status in TransferStatus.TERMINAL:
+        return _acknowledged(
+            'Transfer already in a terminal state.',
+            transfer_id=transfer.transfer_id,
+            status=transfer.status,
+        )
+
+    try:
+        transfer = transfer_engine.confirm_charge(
+            transfer, gateway_payment_id=rzp_payment_id
+        )
+    except Exception as exc:
+        # 200 regardless: a retry replays the same fault, and the payout retry
+        # ladder plus the reconciliation job own the recovery path.
+        logger.exception(
+            f'[webhook] confirm_charge failed for {transfer.transfer_id}: {exc}'
+        )
+        return _acknowledged(
+            'Received; the transfer could not be advanced and has been logged.',
+            transfer_id=transfer.transfer_id,
+        )
+
+    audit.record(
+        action='WEBHOOK_TRANSFER_CHARGE_RECEIVED',
+        entity_type='Transfers',
+        entity_id=transfer.transfer_id,
+        after={'event': event, 'status': transfer.status},
+        notes=f'Razorpay callback for order {order_id}',
+    )
+
+    return _acknowledged(
+        'Transfer callback processed.',
+        transfer_id=transfer.transfer_id,
+        status=transfer.status,
+    )
+
+
+@ns.route('/razorpay')
+class RazorpayWebhook(Resource):
+    @ns.doc('razorpay_webhook')
+    def post(self):
+        """
+        UPI collection callback for EMI payments (PRD FR-008).
+
+        This is what makes the flow survive the user. If they authorise the
+        payment and then kill the browser, no verify call ever arrives - this
+        delivery is the only thing that credits the EMI, and it is why an
+        interrupted payment resolves itself instead of stranding money.
+
+        It obeys the same four rules as the Cashfree handlers above. The one
+        worth restating: the body is a hint that something changed, never the
+        thing acted on. `confirm_payment` re-reads the payment from Razorpay
+        before the ledger is touched, so a delivery claiming `captured` cannot
+        settle an EMI that Razorpay's own API says failed.
+        """
+        payload, error = _authenticate_razorpay()
+        if error:
+            return error
+
+        event = payload.get('event') or 'UNKNOWN'
+        entities = (payload.get('payload') or {})
+        payment_entity = (entities.get('payment') or {}).get('entity') or {}
+        order_entity = (entities.get('order') or {}).get('entity') or {}
+
+        if event not in _RAZORPAY_ACTIONABLE:
+            return _acknowledged(f'Event {event} needs no action.')
+
+        order_id = payment_entity.get('order_id') or order_entity.get('id')
+        rzp_payment_id = payment_entity.get('id')
+
+        if not order_id:
+            logger.warning(f'[webhook] Razorpay {event} carried no order id')
+            return _acknowledged('No order id in payload; nothing to do.')
+
+        payment = EMIPayments.query.filter_by(gateway_order_id=order_id).first()
+
+        if not payment:
+            # Both products now collect through Razorpay, so an order that is
+            # not an EMI payment may still be a transfer's card charge.
+            return _handle_razorpay_transfer(
+                event, order_id, rzp_payment_id
+            )
+
+        logger.info(
+            f'[webhook] {event} for EMI payment {payment.payment_id} '
+            f'(status {payment.status})'
+        )
+
+        if payment.status in EMIPaymentState.TERMINAL:
+            # A late duplicate, or the browser already resolved it. Both are
+            # normal; the row is finished either way.
+            return _acknowledged(
+                'Payment already in a terminal state.',
+                payment_id=payment.payment_id,
+                status=payment.status,
+            )
+
+        try:
+            # No signature is passed: the handler signature belongs to the
+            # browser flow. The payment id is a lookup hint and confirm_payment
+            # re-reads it from the API regardless.
+            payment = emi_engine.confirm_payment(
+                payment, gateway_payment_id=rzp_payment_id
+            )
+        except Exception as exc:
+            # Answer 200 anyway. A retry replays the same fault, and the
+            # pending-payment poller already owns the recovery path.
+            logger.exception(
+                f'[webhook] confirm_payment failed for {payment.payment_id}: {exc}'
+            )
+            return _acknowledged(
+                'Received; the payment could not be advanced and has been logged.',
+                payment_id=payment.payment_id,
+            )
+
+        audit.record(
+            action='WEBHOOK_UPI_PAYMENT_RECEIVED',
+            entity_type='EMIPayments',
+            entity_id=payment.payment_id,
+            after={'event': event, 'status': payment.status},
+            notes=f'Razorpay callback for order {order_id}',
+        )
+
+        return _acknowledged(
+            'UPI callback processed.',
+            payment_id=payment.payment_id,
+            status=payment.status,
+        )

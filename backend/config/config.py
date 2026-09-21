@@ -69,6 +69,43 @@ class BaseConfig:
     )
     CASHFREE_NOTIFY_URL = os.getenv('CASHFREE_NOTIFY_URL', '')
 
+    # -- Razorpay (UPI collection for EMI payments) ------------------------
+    # UPI is a separate rail from the card charge that funds a transfer, so it
+    # gets its own vendor rather than being forced through the card gateway.
+    # The key id is public by design - Checkout needs it in the browser. The
+    # secret and the webhook secret never leave the server.
+    RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', '')
+    RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', '')
+    RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET', '')
+
+    # Razorpay is used for UPI whenever credentials exist, independent of
+    # USE_SANDBOX_ADAPTERS: the point of wiring a real test key is to exercise
+    # the real rail. Set this to False to force UPI back to the simulator.
+    RAZORPAY_UPI_ENABLED = os.getenv('RAZORPAY_UPI_ENABLED', 'True') == 'True'
+
+    # Whether a transfer's card charge also goes through Razorpay. On by
+    # default, so the transfer and EMI flows share one checkout, one
+    # verification routine and one webhook.
+    #
+    # Turning this off is how the sandbox transfer path is restored: the
+    # simulated card rail settles synchronously and can therefore exercise the
+    # payout, refund and circuit-breaker logic end to end, which no real
+    # gateway can do without a human completing a payment.
+    RAZORPAY_TRANSFERS_ENABLED = (
+        os.getenv('RAZORPAY_TRANSFERS_ENABLED', 'True') == 'True'
+    )
+
+    # Whether UPI may settle a transfer's charge. Unset, this follows the key:
+    # on with a test key, off with a live one. That is deliberate - it exists so
+    # the UPI checkout can be exercised during testing without a real card, and
+    # a live deployment should make offering it a conscious decision, since a
+    # UPI-funded transfer moves money bank-to-bank rather than from a credit
+    # line and does not consume the card's limit.
+    TRANSFER_UPI_FUNDING = os.getenv('TRANSFER_UPI_FUNDING', '')
+
+    # Prefilled into checkout so a tester does not retype a VPA every attempt.
+    RAZORPAY_TEST_UPI_VPA = os.getenv('RAZORPAY_TEST_UPI_VPA', '')
+
     # When True, every external adapter uses its simulated implementation.
     # PRD section 21 lists all nine vendor integrations as "To Be Confirmed",
     # so sandbox mode is the default until real credentials are present.

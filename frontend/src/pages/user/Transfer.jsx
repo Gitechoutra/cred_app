@@ -2,13 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { isSimulatedCheckout, openCheckout } from '../../api/cashfree';
+import { PaymentMethodPicker, PaymentProgress } from '../../components/payments/PaymentMethods';
+import { useRazorpay } from '../../hooks/useRazorpay';
 import { endpoints } from '../../api/client';
 import { BankRow, FeeBreakdown } from '../../components/domain';
-import { IconBank, IconChevron, IconLock, IconPlus } from '../../components/layout/AppShell';
+import { IconBank, IconChevron, IconLock, IconPlus, PageHeader } from '../../components/layout/AppShell';
 import { Button, Card, EmptyState, Sheet, Skeleton, cx } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
 import { useFetch } from '../../hooks/useProfile';
-import { money, moneyCompact } from '../../utils/format';
+import { money, moneyCompact, sanitizeAmount } from '../../utils/format';
 
 /**
  * Credit facility to bank transfer (PRD FR-006).
@@ -33,10 +35,16 @@ export default function Transfer() {
   const [quoteError, setQuoteError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [picker, setPicker] = useState(null);
+  const [stage, setStage] = useState('form');
+  const [mode, setMode] = useState('CREDIT_CARD');
+  const [upiApp, setUpiApp] = useState('google_pay');
+
+  const razorpay = useRazorpay();
 
   const { data: cardsData, loading: cardsLoading } = useFetch(() => endpoints.cards.list(), []);
   const { data: banksData, loading: banksLoading } = useFetch(() => endpoints.banks.list(), []);
   const { data: limits } = useFetch(() => endpoints.transfers.limits(), []);
+  const { data: methods } = useFetch(() => endpoints.transfers.methods(), []);
 
   const cards = useMemo(
     () => (cardsData?.cards || []).filter((c) => c.status === 'ACTIVE' && c.is_transfer_eligible),
@@ -111,12 +119,77 @@ export default function Transfer() {
       });
 
       const transfer = response.data;
+      const checkout = transfer.checkout || {};
 
-      // Live credentials: hand off to Cashfree's hosted checkout for the 3DS2
-      // challenge. Card details go browser -> Cashfree and never touch our
-      // backend, which is what keeps CashU inside PCI DSS SAQ-A. This redirects
-      // the tab, so nothing below runs on success; the issuer returns the user
-      // to /transfer/status/<transfer_id> (backend CASHFREE_RETURN_URL).
+      // Razorpay: card details go browser -> Razorpay and never touch our
+      // backend, which is what keeps CashU inside PCI DSS SAQ-A. The handler
+      // payload comes back here and goes straight to the server to be verified
+      // - it is never treated as proof the card was charged.
+      if (checkout.provider === 'RAZORPAY' && checkout.key) {
+        setStage('awaiting');
+
+        let result;
+        try {
+          result = await razorpay.open({
+            key: checkout.key,
+            order_id: checkout.order_id,
+            // Amount comes from the gateway's own order, never from this
+            // screen. A browser that could choose the amount could charge a
+            // rupee for a fifty thousand rupee transfer.
+            amount: checkout.amount_paise,
+            currency: checkout.currency || 'INR',
+            name: 'CashU',
+            description: `Transfer to ${bank.masked_account || 'your bank'}`,
+            // Only pin the method when UPI is not on offer. Forcing
+            // `method: 'card'` would hide the UPI screen even where the
+            // server has allowed it.
+            prefill: {
+              ...(checkout.prefill || {}),
+              ...(mode === 'UPI' ? { method: 'upi' } : {}),
+              ...(mode !== 'UPI' && !checkout.upi_enabled
+                ? { method: 'card' }
+                : {}),
+            },
+            notes: { transfer_id: transfer.transfer_id },
+            theme: { color: '#00F5B8' },
+          });
+        } catch (openError) {
+          toast.error(openError.message);
+          setStage('method');
+          setSubmitting(false);
+          return;
+        }
+
+        if (result.outcome === 'dismissed') {
+          // Nothing charged. The transfer stays AUTH_PENDING and the recon
+          // sweep closes it out; sending the user to a status screen for a
+          // payment they never made would just confuse them.
+          toast.error('Payment cancelled. Nothing was charged.');
+          setStage('method');
+          setSubmitting(false);
+          return;
+        }
+
+        setStage('verifying');
+
+        const payload = result.outcome === 'paid' ? {
+          razorpay_payment_id: result.response.razorpay_payment_id,
+          razorpay_order_id: result.response.razorpay_order_id,
+          razorpay_signature: result.response.razorpay_signature,
+        } : {};
+
+        const verified = await endpoints.transfers.verify(
+          transfer.transfer_id, payload,
+        );
+
+        navigate(`/transfer/status/${transfer.transfer_id}`, {
+          state: { transfer: verified.data },
+        });
+        return;
+      }
+
+      // Cashfree hosted checkout: redirects the tab, so nothing below runs.
+      // The issuer returns the user to /transfer/status/<transfer_id>.
       if (!isSimulatedCheckout(transfer) && transfer.payment_session_id) {
         await openCheckout(transfer);
         return;
@@ -131,11 +204,55 @@ export default function Transfer() {
       toast.error(err.message, {
         action: err.recovery ? { label: 'Fix', onClick: () => navigate('/profile') } : undefined,
       });
+      setStage('form');
       setSubmitting(false);
     }
   }
 
   if (cardsLoading || banksLoading) return <TransferSkeleton />;
+
+  /* ── In flight ───────────────────────────────────────────────────── */
+  if (stage === 'awaiting' || stage === 'verifying') {
+    return <PaymentProgress stage={stage} />;
+  }
+
+  /* ── Payment method ──────────────────────────────────────────────── */
+  if (stage === 'method') {
+    return (
+      <div>
+        <div className="mx-auto w-full max-w-2xl">
+          <PageHeader
+            title="Payment method"
+            subtitle={bank ? `To ${bank.masked_account}` : undefined}
+            back={() => setStage('form')}
+          />
+          <div className="px-4 pt-4">
+            <PaymentMethodPicker
+              amount={quote ? quote.total_charged_to_card : numeric}
+              caption={
+                quote
+                  ? `${money(quote.net_payout_amount)} reaches your bank after fees`
+                  : null
+              }
+              methods={methods?.permitted || []}
+              prohibited={methods?.prohibited || []}
+              upiApps={methods?.upi?.apps || []}
+              mode={mode}
+              onMode={setMode}
+              upiApp={upiApp}
+              onUpiApp={setUpiApp}
+              onPay={submit}
+              busy={submitting}
+              error={razorpay.error}
+              payLabel={
+                quote ? `Pay ${money(quote.total_charged_to_card)}` : 'Pay'
+              }
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (limits && !limits.feature_enabled) {
     return (
@@ -199,19 +316,7 @@ export default function Transfer() {
               autoFocus
               placeholder="0"
               value={amount}
-              onChange={(event) => {
-                const raw = event.target.value.replace(/[^\d.]/g, '');
-                // One decimal point, at most two places - paise beyond that
-                // cannot be charged anyway.
-                const parts = raw.split('.');
-                const clean = parts.length > 2
-                  ? `${parts[0]}.${parts.slice(1).join('')}`
-                  : raw;
-                const [whole, decimals] = clean.split('.');
-                setAmount(
-                  decimals !== undefined ? `${whole}.${decimals.slice(0, 2)}` : whole,
-                );
-              }}
+              onChange={(event) => setAmount(sanitizeAmount(event.target.value))}
               className="money w-full bg-transparent text-3xl font-bold text-ink outline-none placeholder:text-slate-light"
             />
           </div>
@@ -293,11 +398,10 @@ export default function Transfer() {
           size="lg"
           full
           disabled={!ready}
-          loading={submitting}
-          onClick={submit}
+          onClick={() => setStage('method')}
         >
           {quote
-            ? `Transfer ${money(quote.net_payout_amount)}`
+            ? 'Continue'
             : 'Enter an amount'}
         </Button>
 

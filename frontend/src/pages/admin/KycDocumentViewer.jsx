@@ -11,15 +11,25 @@ import { Spinner, cx } from '../../components/ui';
  * URL. That URL is revoked on unmount; without that, every document a reviewer
  * opens stays in memory for the life of the tab.
  *
+ * Uploads accept PDF as well as PNG and JPEG, so this branches on the MIME type
+ * the endpoint returns. A PDF rendered into an <img> silently shows nothing,
+ * which would leave a reviewer approving a document they never actually saw.
+ *
  * Zoom exists because the job here is judging whether a PAN card is genuine,
  * and that decision turns on small details: the hologram, the font of the
  * number, the alignment of the photo. A thumbnail cannot support it.
  */
 export default function KycDocumentViewer({ kycId, slot, label, available }) {
   const [url, setUrl] = useState(null);
+  const [type, setType] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [zoomed, setZoomed] = useState(false);
+
+  /* Distinct from `error`: the file arrived, the browser just cannot paint it.
+     For a reviewer that is itself evidence, so it must not look like a network
+     failure and must not take the download link away with it. */
+  const [unrenderable, setUnrenderable] = useState(false);
 
   const objectUrl = useRef(null);
 
@@ -29,16 +39,18 @@ export default function KycDocumentViewer({ kycId, slot, label, available }) {
     let cancelled = false;
     setLoading(true);
     setError('');
+    setUnrenderable(false);
 
     (async () => {
       try {
         const next = await endpoints.admin.kycDocumentUrl(kycId, slot);
         if (cancelled) {
-          URL.revokeObjectURL(next);
+          URL.revokeObjectURL(next.url);
           return;
         }
-        objectUrl.current = next;
-        setUrl(next);
+        objectUrl.current = next.url;
+        setUrl(next.url);
+        setType(next.type || '');
       } catch (err) {
         if (!cancelled) setError(err.message);
       } finally {
@@ -63,7 +75,8 @@ export default function KycDocumentViewer({ kycId, slot, label, available }) {
     );
   }
 
-  const isPdf = url && !error && !loading && url.startsWith('blob:') === false;
+  const isPdf = type === 'application/pdf';
+  const canEnlarge = Boolean(url) && !unrenderable;
 
   return (
     <>
@@ -73,15 +86,19 @@ export default function KycDocumentViewer({ kycId, slot, label, available }) {
             {label}
           </p>
 
-          {url && !error && (
+          {/* Kept available even when the preview fails — a reviewer who cannot
+              see the file in the panel still needs to get at the bytes. */}
+          {url && (
             <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setZoomed(true)}
-                className="rounded-lg px-2 py-1 text-2xs font-semibold text-mint-700 transition hover:bg-mint-50"
-              >
-                Enlarge
-              </button>
+              {canEnlarge && (
+                <button
+                  type="button"
+                  onClick={() => setZoomed(true)}
+                  className="rounded-lg px-2 py-1 text-2xs font-semibold text-mint-700 transition hover:bg-mint-50"
+                >
+                  Enlarge
+                </button>
+              )}
               <a
                 href={url}
                 target="_blank"
@@ -103,7 +120,33 @@ export default function KycDocumentViewer({ kycId, slot, label, available }) {
             </div>
           )}
 
-          {url && !error && (
+          {url && !error && unrenderable && (
+            <div className="px-4 text-center">
+              <p className="text-xs font-semibold text-warn">
+                This file cannot be displayed.
+              </p>
+              <p className="mx-auto mt-1.5 max-w-xs text-2xs leading-relaxed text-slate">
+                The document was uploaded but is not a readable image or PDF —
+                it may be truncated or corrupt. Open it to inspect the raw file.
+                Do not approve a submission you have not been able to see.
+              </p>
+            </div>
+          )}
+
+          {url && !error && !unrenderable && isPdf && (
+            <object
+              data={url}
+              type="application/pdf"
+              aria-label={label}
+              className="h-64 w-full rounded-lg"
+            >
+              <p className="p-4 text-center text-2xs text-slate">
+                Your browser cannot preview PDFs inline. Use Open above.
+              </p>
+            </object>
+          )}
+
+          {url && !error && !unrenderable && !isPdf && (
             <button
               type="button"
               onClick={() => setZoomed(true)}
@@ -114,7 +157,7 @@ export default function KycDocumentViewer({ kycId, slot, label, available }) {
                 src={url}
                 alt={label}
                 className="mx-auto max-h-64 w-auto rounded-lg object-contain shadow-card"
-                onError={() => setError('This file could not be displayed as an image.')}
+                onError={() => setUnrenderable(true)}
               />
             </button>
           )}
@@ -139,12 +182,22 @@ export default function KycDocumentViewer({ kycId, slot, label, available }) {
           </div>
 
           <div className="flex flex-1 items-center justify-center overflow-auto p-5">
-            <img
-              src={url}
-              alt={label}
-              onClick={(event) => event.stopPropagation()}
-              className="max-h-full max-w-full cursor-zoom-out rounded-lg object-contain"
-            />
+            {isPdf ? (
+              <object
+                data={url}
+                type="application/pdf"
+                aria-label={label}
+                onClick={(event) => event.stopPropagation()}
+                className="h-full w-full rounded-lg bg-canvas"
+              />
+            ) : (
+              <img
+                src={url}
+                alt={label}
+                onClick={(event) => event.stopPropagation()}
+                className="max-h-full max-w-full cursor-zoom-out rounded-lg object-contain"
+              />
+            )}
           </div>
         </div>
       )}

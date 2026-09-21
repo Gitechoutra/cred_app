@@ -474,13 +474,21 @@ class VerifyMPIN(Resource):
             locked = _register_failure(user, LoginStatus.FAILED_MPIN)
             if locked:
                 return _locked_response(user)
+            # Deliberately the *same* string the unknown-number branch above
+            # returns. It used to name the attempts remaining, which was a
+            # helpful touch that also turned this endpoint into an account
+            # enumerator: only a registered number could produce a countdown,
+            # so anyone could test a list of phone numbers against it. The
+            # remaining count is still enforced - the lockout below fires - it
+            # is just no longer broadcast to an unauthenticated caller.
             remaining = settings.get_int(Key.AUTH_MAX_FAILED_ATTEMPTS) - (
                 user.failed_auth_attempts or 0
             )
+            logger.info(
+                f'[auth] failed MPIN for {phone[-4:]}; {max(0, remaining)} left'
+            )
             return failure(
-                ErrorCode.MPIN_INVALID,
-                f'Incorrect MPIN. {max(0, remaining)} attempt(s) remaining.',
-                401,
+                ErrorCode.MPIN_INVALID, 'Incorrect phone number or MPIN.', 401
             )
 
         if user.status in (UserStatus.SUSPENDED, UserStatus.BANNED):

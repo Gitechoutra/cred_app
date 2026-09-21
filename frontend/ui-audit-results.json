@@ -1,0 +1,278 @@
+[
+  {
+    "section": 21,
+    "label": "every navigate()/to= target resolves to a declared route",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 21,
+    "label": "a catch-all route exists so no URL renders blank",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 21,
+    "label": "protected routes are wrapped in an auth guard",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 21,
+    "label": "admin routes are wrapped in an admin guard",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 22,
+    "label": "both app shells use the white canvas background",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 22,
+    "label": "primary and mint buttons share one style definition",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 22,
+    "label": "all button sizes share one border radius",
+    "ok": true,
+    "detail": "xl, xl, xl"
+  },
+  {
+    "section": 22,
+    "label": "buttons have a disabled style",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 22,
+    "label": "buttons have a press animation",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 22,
+    "label": "a loading state exists on the shared button",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 22,
+    "label": "no unstyled hand-rolled primary buttons",
+    "ok": true,
+    "detail": "0 found"
+  },
+  {
+    "section": 22,
+    "label": "global horizontal overflow is clipped",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 23,
+    "label": "bottom navigation component exists",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 23,
+    "label": "it is fixed to the bottom",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 23,
+    "label": "it handles the mobile safe area",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 23,
+    "label": "it sits below the modal layer so dialogs are not covered",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 23,
+    "label": "active state is rendered",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 23,
+    "label": "items carry both an icon and a label",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 23,
+    "label": "labels truncate rather than overflow",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 23,
+    "label": "content reserves space so the bar never covers it",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 23,
+    "label": "the old sidebar is gone from the member shell",
+    "ok": true,
+    "detail": "aside element still present"
+  },
+  {
+    "section": 23,
+    "label": "the old sidebar is gone from the admin shell",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 24,
+    "label": "menu closes on an outside click",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 24,
+    "label": "menu closes on Escape",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 24,
+    "label": "menu listeners are removed on unmount",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 24,
+    "label": "menu is constrained to the viewport",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 24,
+    "label": "menu exposes its state to assistive tech",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 24,
+    "label": "menu items are reachable as menu items",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 24,
+    "label": "menu offers Profile",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 24,
+    "label": "menu offers Security",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 24,
+    "label": "menu offers Help & support",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 24,
+    "label": "menu offers Logout",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 26,
+    "label": "Transfer.jsx uses a numeric keypad hint",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 26,
+    "label": "Transfer.jsx sanitises the amount through the shared helper",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 26,
+    "label": "EmiPay.jsx uses a numeric keypad hint",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 26,
+    "label": "EmiPay.jsx sanitises the amount through the shared helper",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 29,
+    "label": "no unguarded fixed width above 320px",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 29,
+    "label": "body cannot scroll horizontally",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 29,
+    "label": "the viewport meta tag is present",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 30,
+    "label": "reduced motion is respected",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 30,
+    "label": "a visible focus style is defined",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 30,
+    "label": "the shared input renders a real <label>",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 30,
+    "label": "inputs expose validation state",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 30,
+    "label": "icon-only buttons carry an accessible name",
+    "ok": true,
+    "detail": "0: "
+  },
+  {
+    "section": 30,
+    "label": "every <img> has alt text",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 30,
+    "label": "decorative SVGs are hidden from assistive tech",
+    "ok": true,
+    "detail": ""
+  }
+]

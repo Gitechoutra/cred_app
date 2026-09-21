@@ -180,3 +180,38 @@ const TRANSACTION_LABELS = {
 export function transactionLabel(type) {
   return TRANSACTION_LABELS[type] || titleCase(type);
 }
+
+/**
+ * Sanitise a typed amount.
+ *
+ * Shared by every amount field so the rules cannot drift between screens - the
+ * transfer form used to allow decimals while the EMI form silently stripped
+ * them, which meant the same keystrokes produced different numbers depending on
+ * which page you were on.
+ *
+ * Keeps digits and at most one decimal point, caps at two decimal places, and
+ * strips everything else. Deliberately returns a string: converting to a Number
+ * here would turn "10." into 10 mid-keystroke and fight the user as they type.
+ */
+export function sanitizeAmount(input) {
+  const raw = String(input ?? '').replace(/[^\d.]/g, '');
+
+  const parts = raw.split('.');
+  const collapsed = parts.length > 2
+    ? `${parts[0]}.${parts.slice(1).join('')}`
+    : raw;
+
+  const [whole, decimals] = collapsed.split('.');
+
+  // "007" is seven rupees, but showing it back as "007" looks like a bug. Keep
+  // a single leading zero only where it is the integer part of a decimal.
+  const trimmed = whole.replace(/^0+(?=\d)/, '');
+
+  if (decimals !== undefined) {
+    return `${trimmed || '0'}.${decimals.slice(0, 2)}`;
+  }
+
+  // A lone "." is not a number. Returning it would leave the field holding
+  // something that parses to NaN and disables the button with no explanation.
+  return trimmed;
+}

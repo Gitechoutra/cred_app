@@ -13,23 +13,33 @@ export function cx(...parts) {
 
 /* ── Button ─────────────────────────────────────────────────────────────── */
 
+/**
+ * One button language for the whole app.
+ *
+ * Mint is the primary action colour - it was already carrying 45 of the 52 call
+ * sites, so `primary` is now an alias for it rather than a second, competing
+ * dark button. Every variant shares the same radius, weight, transition and
+ * press animation; only the fill changes, and it changes for a reason: outline
+ * and ghost are secondary, danger is destructive.
+ */
+const PRIMARY =
+  'bg-mint text-ink shadow-mint hover:bg-mint-400 disabled:bg-mint-100 disabled:text-slate-light disabled:shadow-none';
+
 const BUTTON_VARIANTS = {
-  primary:
-    'bg-ink text-white hover:bg-ink-800 active:scale-[0.98] disabled:bg-slate-light',
-  mint:
-    'bg-mint text-ink font-semibold hover:bg-mint-400 active:scale-[0.98] shadow-mint disabled:bg-mint-100 disabled:shadow-none',
-  ghost:
-    'bg-transparent text-ink hover:bg-mist active:scale-[0.98]',
+  primary: PRIMARY,
+  mint: PRIMARY,
+  ghost: 'bg-transparent text-ink hover:bg-mist disabled:text-slate-light',
   outline:
-    'bg-canvas text-ink border border-line hover:border-ink/25 hover:bg-mist active:scale-[0.98]',
-  danger:
-    'bg-alert text-white hover:brightness-95 active:scale-[0.98]',
+    'bg-canvas text-ink border border-line hover:border-ink/25 hover:bg-mist disabled:text-slate-light',
+  danger: 'bg-alert text-white hover:brightness-95 disabled:bg-slate-light',
 };
 
+/* Radius is deliberately constant across sizes - a 14px-tall pill next to a
+   36px-tall rounded rectangle is the single loudest inconsistency in a UI. */
 const BUTTON_SIZES = {
-  sm: 'h-9 px-3.5 text-sm rounded-xl',
+  sm: 'h-9 px-4 text-sm rounded-xl',
   md: 'h-11 px-5 text-sm rounded-xl',
-  lg: 'h-14 px-6 text-base rounded-2xl',
+  lg: 'h-14 px-6 text-base rounded-xl',
 };
 
 export function Button({
@@ -47,8 +57,9 @@ export function Button({
       type="button"
       disabled={disabled || loading}
       className={cx(
-        'inline-flex items-center justify-center gap-2 font-medium',
-        'transition-all duration-150 disabled:cursor-not-allowed disabled:active:scale-100',
+        'inline-flex items-center justify-center gap-2 font-semibold tracking-tight',
+        'transition-all duration-150 ease-out active:scale-[0.97]',
+        'disabled:cursor-not-allowed disabled:active:scale-100',
         BUTTON_VARIANTS[variant],
         BUTTON_SIZES[size],
         full && 'w-full',

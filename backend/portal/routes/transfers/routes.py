@@ -9,7 +9,7 @@ requires an X-Idempotency-Key so a double-tapped Confirm cannot charge twice.
 from flask_jwt_extended import jwt_required
 from flask_restx import Resource, reqparse
 
-from portal.helpers import fee_calculator, settings, transfer_engine
+from portal.helpers import adapters, fee_calculator, settings, transfer_engine
 from portal.helpers.helpers import (
     ErrorCode, client_ip, device_uuid, failure, idempotency_key, iso,
     paginated, success, to_float,
@@ -23,6 +23,7 @@ from portal.helpers.validators import (
 from portal.models.bank_accounts import BankAccounts
 from portal.models.cards import Cards, CardStatus
 from portal.models.transfers import TransferStatus, Transfers
+from portal.models.users import KYCTier
 
 from . import logger, ns
 
@@ -38,6 +39,35 @@ list_parser = reqparse.RequestParser()
 list_parser.add_argument('page', type=int, default=1, location='args')
 list_parser.add_argument('per_page', type=int, default=20, location='args')
 list_parser.add_argument('status', type=str, required=False, location='args')
+
+
+#: One phrasing per outcome, shared by confirm and verify. Two endpoints
+#: describing the same state differently is how a user comes to believe a
+#: transfer succeeded on one screen and failed on another.
+_OUTCOME_MESSAGES = {
+    TransferStatus.SUCCEEDED: 'Transfer completed successfully.',
+    TransferStatus.PAYOUT_PROCESSING: (
+        'Your card was charged and the transfer to your bank is being processed.'
+    ),
+    TransferStatus.INBOUND_CHARGED: (
+        'Your card was charged. Sending the money to your bank now.'
+    ),
+    TransferStatus.AUTH_PENDING: (
+        'Waiting for your bank to confirm the payment. Do not pay again.'
+    ),
+    TransferStatus.REVERSED_TO_CARD: (
+        'The transfer could not be completed. Your card has been refunded.'
+    ),
+    TransferStatus.FAILED: 'The transfer could not be completed.',
+}
+
+#: Razorpay Checkout hands these back in the browser. Accepted, never trusted -
+#: the signature is verified server-side and the charge is re-read from the
+#: gateway before the payout is dispatched.
+verify_parser = reqparse.RequestParser()
+verify_parser.add_argument('razorpay_payment_id', type=str, required=False, location='json')
+verify_parser.add_argument('razorpay_order_id', type=str, required=False, location='json')
+verify_parser.add_argument('razorpay_signature', type=str, required=False, location='json')
 
 
 def transfer_dict(transfer: Transfers, detailed: bool = False) -> dict:
@@ -74,9 +104,13 @@ def transfer_dict(transfer: Transfers, detailed: bool = False) -> dict:
         'failure_code': transfer.failure_code,
         'failure_reason': transfer.failure_reason,
         'is_terminal': transfer.status in TransferStatus.TERMINAL,
+        # What actually paid, per the gateway - so the status screen and the
+        # receipt name the real instrument rather than assuming the card.
+        'source_instrument': transfer.source_instrument,
     }
 
     if detailed:
+        data['source_vpa'] = transfer.source_vpa
         data['fee_percentage_applied'] = to_float(transfer.fee_percentage_applied)
         data['gateway_order_id'] = transfer.gateway_order_id
         data['payout_reference'] = transfer.payout_reference
@@ -146,10 +180,18 @@ class TransferQuote(Resource):
         user = current_user()
 
         try:
+            # Bounded at both ends. Without a maximum this happily quoted a
+            # fee on a trillion rupees - an amount the risk engine would then
+            # refuse at initiate, after the user had been shown a price for it.
             amount = validate_amount(
                 args['amount'],
                 'amount',
                 minimum=settings.get_decimal(Key.TRANSFER_MIN_AMOUNT),
+                maximum=(
+                    settings.get_decimal(Key.TRANSFER_MAX_SINGLE_FULL_KYC)
+                    if user.kyc_tier == KYCTier.FULL
+                    else settings.get_decimal(Key.TRANSFER_MAX_SINGLE_STANDARD_KYC)
+                ),
             )
         except ValidationError as exc:
             return failure(ErrorCode.VALIDATION_ERROR, exc.message, 400)
@@ -263,6 +305,25 @@ class TransferList(Resource):
         payload['payment_session_id'] = getattr(transfer, 'payment_session_id', None)
         payload['three_ds_url'] = transfer.three_ds_url
 
+        # Checkout parameters, assembled server-side. The amount in paise comes
+        # back from the gateway's own order, never from the client - a browser
+        # that could choose the amount could charge one rupee for a fifty
+        # thousand rupee transfer.
+        payload['checkout'] = {
+            'provider': transfer.gateway_provider,
+            'key': getattr(transfer, 'checkout_key', None),
+            'order_id': transfer.gateway_order_id,
+            'amount_paise': getattr(transfer, 'checkout_amount_paise', None),
+            'currency': 'INR',
+            'prefill': {
+                'name': user.full_name or '',
+                'contact': user.phone or '',
+                'email': user.email or '',
+                'vpa': adapters.test_upi_vpa(),
+            },
+            'upi_enabled': adapters.transfer_upi_funding_allowed(),
+        }
+
         return success(
             payload,
             'Transfer initiated. Complete authentication to continue.',
@@ -326,24 +387,144 @@ class ConfirmTransfer(Resource):
                 500,
             )
 
-        messages = {
-            TransferStatus.SUCCEEDED: 'Transfer completed successfully.',
-            TransferStatus.PAYOUT_PROCESSING: (
-                'Your card was charged and the transfer to your bank is being '
-                'processed.'
+        return success(
+            transfer_dict(transfer, detailed=True),
+            (
+                transfer.failure_reason
+                if transfer.status == TransferStatus.FAILED and transfer.failure_reason
+                else _OUTCOME_MESSAGES.get(transfer.status, 'Transfer status updated.')
             ),
-            TransferStatus.REVERSED_TO_CARD: (
-                'The transfer could not be completed. Your card has been '
-                'refunded.'
-            ),
-            TransferStatus.FAILED: (
-                transfer.failure_reason or 'The transfer could not be completed.'
-            ),
-        }
+        )
+
+
+@ns.route('/methods')
+class TransferPaymentMethods(Resource):
+    @ns.doc('list_transfer_payment_methods', security='Bearer')
+    @jwt_required()
+    def get(self):
+        """
+        Instruments that can fund a transfer.
+
+        Only a credit card. That is not a gateway limitation - it is what the
+        product is: a CashU transfer moves money *from a credit line* to a bank
+        account, the convenience fee exists because it is a card advance, and
+        the ledger posts against the card. Funding one from UPI would move money
+        from a bank to a bank, which is a different product.
+
+        The restriction is returned explicitly, with its reason, so the payment
+        screen can say why UPI is absent here but present on an EMI rather than
+        leaving the user to wonder.
+        """
+        upi_allowed = adapters.transfer_upi_funding_allowed()
+
+        permitted = [{
+            'mode': 'CREDIT_CARD',
+            'label': 'Credit Card',
+            'description': 'Charged to your saved credit card',
+        }]
+        prohibited = []
+
+        if upi_allowed:
+            permitted.append({
+                'mode': 'UPI',
+                'label': 'UPI',
+                'description': 'Pay using Google Pay, PhonePe or any UPI app',
+            })
+        else:
+            prohibited.append({
+                'mode': 'UPI',
+                'label': 'UPI, Google Pay, PhonePe',
+                'reason': 'A transfer moves money from your credit card to a '
+                          'bank account, so it has to be funded by a card. '
+                          'UPI is available for EMI payments.',
+            })
+
+        return success({
+            'permitted': permitted,
+            'prohibited': prohibited,
+            'upi': {
+                'enabled': upi_allowed,
+                'apps': adapters.UPI_APPS if upi_allowed else [],
+                # Prefilled so a tester is not retyping a VPA on every attempt.
+                'test_vpa': adapters.test_upi_vpa() if upi_allowed else '',
+            },
+            'checkout': {
+                'provider': adapters.upi_provider(),
+                'key': adapters.upi_public_key(),
+            },
+        })
+
+
+@ns.route('/<string:transfer_id>/verify')
+class VerifyTransfer(Resource):
+    @ns.doc('verify_transfer', security='Bearer')
+    @jwt_required()
+    @active_user_required
+    def post(self, transfer_id):
+        """
+        Verify a transfer after the user returns from Razorpay Checkout.
+
+        The same contract the EMI path uses, for the same reason: the browser
+        hands back a signed payload, the signature is checked against our API
+        secret here, and the charge is then re-read from Razorpay before a rupee
+        moves or the payout is dispatched. A client POSTing an invented payment
+        id gets a failed verification, not a completed transfer.
+
+        Safe to call twice - a terminal transfer is returned untouched, which is
+        what a double-submit or a refresh during the handler produces.
+        """
+        args = verify_parser.parse_args()
+        user = current_user()
+
+        transfer = Transfers.query.filter_by(
+            transfer_id=transfer_id, user_id=user.user_id
+        ).first()
+
+        if not transfer:
+            return failure(ErrorCode.NOT_FOUND, 'Transfer not found.', 404)
+
+        if transfer.status in TransferStatus.TERMINAL:
+            return success(
+                transfer_dict(transfer, detailed=True),
+                'This transfer has already completed.',
+            )
+
+        claimed_order = args.get('razorpay_order_id')
+        if (
+            claimed_order
+            and transfer.gateway_order_id
+            and claimed_order != transfer.gateway_order_id
+        ):
+            logger.error(
+                f'[transfer] verify for {transfer_id} carried order '
+                f'{claimed_order} but the transfer is against '
+                f'{transfer.gateway_order_id}'
+            )
+            return failure(
+                ErrorCode.VALIDATION_ERROR,
+                'That payment belongs to a different order.',
+                400,
+            )
+
+        try:
+            transfer = transfer_engine.confirm_charge(
+                transfer,
+                gateway_payment_id=args.get('razorpay_payment_id'),
+                signature=args.get('razorpay_signature'),
+            )
+        except transfer_engine.TransferError as exc:
+            return failure(exc.code, exc.message, 400, recovery=exc.recovery)
+        except Exception as exc:
+            logger.exception(f'Verify failed for transfer {transfer_id}: {exc}')
+            return failure(
+                ErrorCode.INTERNAL_ERROR,
+                'We could not verify this transfer. Our team has been notified.',
+                500,
+            )
 
         return success(
             transfer_dict(transfer, detailed=True),
-            messages.get(transfer.status, 'Transfer status updated.'),
+            _OUTCOME_MESSAGES.get(transfer.status, 'Transfer status updated.'),
         )
 
 

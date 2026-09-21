@@ -1,227 +1,135 @@
 import { useEffect, useState } from 'react';
-import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
 import { cx } from '../ui';
+import { BottomNav, ProfileMenu } from './BottomNav';
 import { useAuth } from '../../context/AuthContext';
 import { useProfile } from '../../hooks/useProfile';
 import { initials } from '../../utils/format';
 
 /**
- * CashU web application shell.
+ * CashU application shell.
  *
- * Desktop-first: a persistent sidebar for navigation, a top bar carrying search,
- * notifications and the account menu, and a wide content area that lets the
- * dashboard breathe across multiple columns.
+ * Navigation lives at the bottom of the screen, PhonePe-style: five primary
+ * destinations plus an account slot on the right. A bottom bar beats a sidebar
+ * here because the destinations are few, flat and equally weighted, and because
+ * it gives the content the full width of the window on every breakpoint.
  *
- * It collapses to a drawer below `lg` so the app stays usable on a tablet or
- * phone, but the layout is designed for a browser window rather than a handset.
+ * The top bar keeps only what is contextual - who you are, your KYC state,
+ * notifications - rather than duplicating the navigation underneath it.
  */
 
+/* Five slots is the ceiling before labels start truncating at 320px. Bank
+   accounts sits in the account menu instead, where Profile already links to
+   it, rather than squeezing a sixth slot into the bar. */
 const NAV = [
-  { to: '/home', label: 'Dashboard', icon: IconHome },
+  { to: '/home', label: 'Home', icon: IconHome, end: true },
   { to: '/cards', label: 'Cards', icon: IconCard },
   { to: '/transfer', label: 'Transfer', icon: IconTransfer },
   { to: '/emi', label: 'EMIs', icon: IconEmi },
-  { to: '/transactions', label: 'Transactions', icon: IconReceipt },
-  { to: '/banks', label: 'Bank accounts', icon: IconBank },
-];
-
-const SECONDARY = [
-  { to: '/profile', label: 'Profile', icon: IconUser },
-  { to: '/security', label: 'Security', icon: IconLock },
-  { to: '/support', label: 'Help & support', icon: IconHelp },
+  { to: '/transactions', label: 'History', icon: IconReceipt },
 ];
 
 export default function AppShell({ children }) {
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const { pathname } = useLocation();
-
-  // Close the mobile drawer whenever navigation happens, or it stays open over
-  // the page the user just chose.
-  useEffect(() => {
-    setDrawerOpen(false);
-  }, [pathname]);
-
   return (
-    <div className="min-h-screen bg-mist">
-      <div className="flex min-h-screen">
-        <Sidebar open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+    /* The bottom padding reserves room for the fixed bar; without it the last
+       card on every page sits underneath the navigation. */
+    <div className="min-h-screen bg-canvas pb-24 sm:pb-28">
+      <TopBar />
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          <TopBar onMenu={() => setDrawerOpen(true)} />
+      <main className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <div className="mx-auto w-full max-w-6xl">{children}</div>
+      </main>
 
-          <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-            <div className="mx-auto w-full max-w-6xl">{children}</div>
-          </main>
-
-          <footer className="border-t border-line bg-canvas px-4 py-4 sm:px-6 lg:px-8">
-            <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-2">
-              <p className="text-2xs text-slate">
-                CashU v1.0 — your cards and EMIs, under one glass pane.
-              </p>
-              <p className="text-2xs text-slate-light">
-                Cards are tokenised under RBI Card-on-File rules. We never store
-                your card number, CVV or PIN.
-              </p>
-            </div>
-          </footer>
+      <footer className="border-t border-line bg-canvas px-4 py-4 sm:px-6 lg:px-8">
+        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-2">
+          <p className="text-2xs text-slate">
+            CashU v1.0 — your cards and EMIs, under one glass pane.
+          </p>
+          <p className="text-2xs text-slate-light">
+            Cards are tokenised under RBI Card-on-File rules. We never store
+            your card number, CVV or PIN.
+          </p>
         </div>
-      </div>
+      </footer>
+
+      <MemberNav />
     </div>
   );
 }
 
-/* ── Sidebar ────────────────────────────────────────────────────────────── */
+/* ── Bottom navigation ──────────────────────────────────────────────────── */
 
-function Sidebar({ open, onClose }) {
+function MemberNav() {
   const navigate = useNavigate();
   const { signOut } = useAuth();
   const { profile, isAdmin } = useProfile();
 
-  const content = (
-    <>
-      <button
-        type="button"
-        onClick={() => navigate('/home')}
-        className="flex items-center gap-2.5 px-2 pb-6 text-left"
-      >
-        <Logo className="h-9 w-9" />
-        <div>
-          <p className="text-base font-bold leading-none text-ink">CashU</p>
-          <p className="mt-1 text-2xs text-slate">Credit &amp; EMI hub</p>
-        </div>
-      </button>
+  const items = [
+    { label: 'Profile', icon: IconUser, to: '/profile' },
+    { label: 'Security', icon: IconLock, to: '/security' },
+    { label: 'Bank accounts', icon: IconBank, to: '/banks' },
+    { label: 'Help & support', icon: IconHelp, to: '/support' },
+  ];
 
-      <nav className="flex-1 space-y-0.5">
-        {NAV.map(({ to, label, icon: Icon }) => (
-          <NavItem key={to} to={to} label={label} Icon={Icon} />
-        ))}
+  /* Carried over from the old sidebar: an operator working in the member app
+     needs a way back to the console. */
+  if (isAdmin) {
+    items.push({ divider: true });
+    items.push({ label: 'Operations console', icon: IconShield, to: '/admin' });
+  }
 
-        <div className="pt-5">
-          <p className="px-3 pb-1.5 text-2xs font-semibold uppercase tracking-wider text-slate-light">
-            Account
-          </p>
-          {SECONDARY.map(({ to, label, icon: Icon }) => (
-            <NavItem key={to} to={to} label={label} Icon={Icon} />
-          ))}
-        </div>
-      </nav>
-
-      {isAdmin && (
-        <button
-          type="button"
-          onClick={() => navigate('/admin')}
-          className="mb-3 flex items-center gap-2.5 rounded-xl bg-ink px-3 py-2.5 text-left text-white transition hover:bg-ink-800"
-        >
-          <IconLock className="h-4 w-4 shrink-0 text-mint" />
-          <span className="min-w-0 flex-1">
-            <span className="block text-xs font-semibold">Operations console</span>
-            <span className="block truncate text-2xs text-white/50">
-              {profile?.role?.replace(/_/g, ' ')}
-            </span>
-          </span>
-        </button>
-      )}
-
-      <div className="border-t border-line pt-3">
-        <div className="flex items-center gap-2.5 px-2 pb-3">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-ink text-xs font-bold text-mint">
-            {initials(profile?.full_name)}
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-semibold text-ink">
-              {profile?.full_name || 'Member'}
-            </p>
-            <p className="money truncate text-2xs text-slate">+91 {profile?.phone}</p>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={async () => {
-            await signOut();
-            navigate('/', { replace: true });
-          }}
-          className="w-full rounded-xl px-3 py-2 text-left text-xs font-medium text-slate transition hover:bg-mist hover:text-ink"
-        >
-          Sign out
-        </button>
-      </div>
-    </>
-  );
+  items.push({ divider: true });
+  items.push({
+    label: 'Logout',
+    icon: IconLogout,
+    tone: 'danger',
+    onClick: async () => {
+      await signOut();
+      navigate('/', { replace: true });
+    },
+  });
 
   return (
-    <>
-      {/* Desktop: always present */}
-      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-line bg-canvas p-4 lg:flex">
-        {content}
-      </aside>
-
-      {/* Below lg: a drawer */}
-      {open && (
-        <div className="fixed inset-0 z-50 lg:hidden">
-          <div className="absolute inset-0 bg-ink/40 backdrop-blur-[2px]" onClick={onClose} />
-          <aside className="relative flex h-full w-72 max-w-[85vw] flex-col bg-canvas p-4 shadow-lift">
-            {content}
-          </aside>
-        </div>
-      )}
-    </>
-  );
-}
-
-function NavItem({ to, label, Icon }) {
-  return (
-    <NavLink
-      to={to}
-      end={to === '/home'}
-      className={({ isActive }) =>
-        cx(
-          'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition',
-          isActive
-            ? 'bg-mint-50 text-ink'
-            : 'text-slate hover:bg-mist hover:text-ink',
-        )
-      }
-    >
-      {({ isActive }) => (
-        <>
-          <Icon className={cx('h-[18px] w-[18px] shrink-0', isActive && 'text-mint-700')} />
-          <span className="truncate">{label}</span>
-          {isActive && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-mint" />}
-        </>
-      )}
-    </NavLink>
+    <BottomNav items={NAV}>
+      <ProfileMenu
+        name={profile?.full_name}
+        detail={profile?.phone ? `+91 ${profile.phone}` : null}
+        avatar={initials(profile?.full_name)}
+        items={items}
+      />
+    </BottomNav>
   );
 }
 
 /* ── Top bar ────────────────────────────────────────────────────────────── */
 
-function TopBar({ onMenu }) {
+function TopBar() {
   const navigate = useNavigate();
   const { profile, kycStatus } = useProfile();
 
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-canvas/95 backdrop-blur">
       <div className="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
+        {/* The sidebar used to carry the brand; with it gone, the mark lives
+            here so the app is still identifiable on every page. */}
         <button
           type="button"
-          onClick={onMenu}
-          aria-label="Open menu"
-          className="-ml-1 grid h-9 w-9 shrink-0 place-items-center rounded-lg text-ink transition hover:bg-mist lg:hidden"
+          onClick={() => navigate('/home')}
+          aria-label="CashU home"
+          className="flex shrink-0 items-center gap-2.5 rounded-xl text-left"
         >
-          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
-            <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />
-          </svg>
+          <Logo className="h-9 w-9" />
+          <span className="hidden sm:block">
+            <span className="block text-sm font-bold leading-none text-ink">CashU</span>
+            <span className="mt-1 block text-2xs text-slate">Credit &amp; EMI hub</span>
+          </span>
         </button>
 
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-ink">
+          <p className="truncate text-sm font-semibold text-ink sm:text-right lg:text-left">
             {greeting()}, {(profile?.full_name || '').split(' ')[0] || 'there'}
-          </p>
-          <p className="hidden text-2xs text-slate sm:block">
-            Here is where your money stands today.
           </p>
         </div>
 
@@ -234,20 +142,11 @@ function TopBar({ onMenu }) {
           <button
             type="button"
             onClick={() => navigate('/kyc')}
-            className="rounded-full border border-line bg-mist px-2.5 py-1 text-2xs font-semibold text-slate transition hover:text-ink"
+            className="rounded-full border border-line bg-canvas px-2.5 py-1 text-2xs font-semibold text-slate transition hover:bg-mist hover:text-ink"
           >
             Verify KYC
           </button>
         )}
-
-        <button
-          type="button"
-          onClick={() => navigate('/transfer')}
-          className="hidden h-9 items-center gap-1.5 rounded-xl bg-mint px-3.5 text-xs font-semibold text-ink shadow-mint transition hover:bg-mint-400 sm:inline-flex"
-        >
-          <IconTransfer className="h-4 w-4" />
-          Transfer
-        </button>
 
         <NotificationBell />
       </div>
@@ -542,6 +441,16 @@ export function IconHelp(props) {
     <svg {...base(props)}>
       <circle cx="12" cy="12" r="9" />
       <path d="M9.5 9.5a2.5 2.5 0 1 1 3.2 2.4c-.6.2-.7.6-.7 1.1v.5M12 16.5h.01" />
+    </svg>
+  );
+}
+
+export function IconLogout(props) {
+  return (
+    <svg {...base(props)}>
+      <path d="M15 17l5-5-5-5" />
+      <path d="M20 12H9" />
+      <path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h6" />
     </svg>
   );
 }

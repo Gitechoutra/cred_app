@@ -19,6 +19,12 @@ PAN_RE = re.compile(r'^[A-Z]{5}[0-9]{4}[A-Z]$')
 IFSC_RE = re.compile(r'^[A-Z]{4}0[A-Z0-9]{6}$')
 AADHAAR_RE = re.compile(r'^\d{12}$')
 UPI_VPA_RE = re.compile(r'^[\w.\-]{2,256}@[a-zA-Z]{2,64}$')
+
+#: Money as a human writes it. Deliberately excludes exponents, currency
+#: symbols, thousands separators and whitespace: anything that needs
+#: interpreting is not an amount. More than two decimals is allowed through
+#: here so the precision check below can give the specific message.
+AMOUNT_RE = re.compile(r'^-?\d{1,12}(\.\d+)?$')
 EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[a-zA-Z]{2,}$')
 OTP_RE = re.compile(r'^\d{6}$')
 MPIN_RE = re.compile(r'^\d{6}$')
@@ -122,8 +128,17 @@ def validate_amount(
     Returns Decimal, never float - binary floats cannot represent 0.01 exactly
     and the rounding error compounds across a fee calculation.
     """
+    # Decimal() happily parses '1e9' as a billion, and '  12 ' as twelve. An
+    # amount arriving over the wire must look like money, so the raw text is
+    # matched against a plain decimal before it is interpreted at all. The
+    # 12-digit cap is a sanity bound, not the business limit - the tier limits
+    # below and in the risk engine are what actually price a transfer.
+    raw = '' if value is None else str(value).strip()
+    if not AMOUNT_RE.match(raw):
+        raise ValidationError('Enter a valid amount.', field)
+
     try:
-        amount = Decimal(str(value))
+        amount = Decimal(raw)
     except (InvalidOperation, TypeError, ValueError):
         raise ValidationError('Enter a valid amount.', field)
 
@@ -217,6 +232,37 @@ def validate_idempotency_key(value: str) -> str:
             'X-Idempotency-Key must be between 8 and 64 characters.', 'X-Idempotency-Key'
         )
     return value
+
+
+#: A person's name. Permits the letters, spaces, apostrophes, hyphens and full
+#: stops that real Indian names carry - "D'Souza", "Ram Kumar Jr.", "Anne-Marie"
+#: - and nothing else. That whitelist is also what keeps markup out: a name
+#: containing "<", ">" or "/" is not a name.
+NAME_RE = re.compile(r"^[A-Za-z][A-Za-z .'\-]{0,199}$")
+
+
+def validate_name(value: str, field: str = 'full_name') -> str:
+    """
+    Validate a human name.
+
+    Trims first, then checks - so "   " is an empty name rather than a
+    three-character one. That mattered: the profile endpoint used to accept
+    whitespace and quietly store an empty string, leaving an account with no
+    name and no error to explain it.
+    """
+    cleaned = sanitize_text(value, 200)
+
+    if not cleaned:
+        raise ValidationError('Enter your name.', field)
+    if len(cleaned) < 2:
+        raise ValidationError('Name must be at least 2 characters.', field)
+    if not NAME_RE.match(cleaned):
+        raise ValidationError(
+            'Name can only contain letters, spaces, apostrophes and hyphens.',
+            field,
+        )
+
+    return cleaned
 
 
 def sanitize_text(value: str, max_length: int = 500) -> str:

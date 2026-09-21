@@ -94,6 +94,14 @@ class Transfers(db.Model, TimestampMixin, CRUDMixin):
     )
 
     # -- Gateway (inbound card charge) ------------------------------------
+    # What actually paid, as the gateway reports it: 'card', 'upi',
+    # 'netbanking'. The card stays selected on every transfer - it is the
+    # instrument the limit and the risk check are assessed against - but during
+    # testing the charge itself may be settled by UPI, and the credit line must
+    # not be consumed for money that came out of a bank account.
+    source_instrument = db.Column(db.String(20), nullable=True)
+    source_vpa = db.Column(db.String(120), nullable=True)
+
     gateway_provider = db.Column(db.String(30), nullable=True)
     gateway_order_id = db.Column(db.String(150), nullable=True, index=True)
     gateway_payment_id = db.Column(db.String(150), nullable=True)

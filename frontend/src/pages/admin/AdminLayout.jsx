@@ -1,26 +1,39 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useNavigate } from 'react-router-dom';
 
-import { Logo } from '../../components/layout/AppShell';
+import {
+  IconHome,
+  IconLock,
+  IconLogout,
+  IconReceipt,
+  IconShield,
+  IconTransfer,
+  IconUser,
+  Logo,
+} from '../../components/layout/AppShell';
+import { BottomNav, ProfileMenu } from '../../components/layout/BottomNav';
 import { cx } from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
 import { useProfile } from '../../hooks/useProfile';
+import { initials } from '../../utils/format';
 
 /**
  * Operations console shell (PRD section 16).
  *
- * Deliberately a different shape from the member app: this is a desk tool, so
- * it uses the full width and a persistent sidebar rather than the one-handed
- * phone column. Nav items are filtered by RBAC tier, so an L1 agent never sees
- * a door they cannot open.
+ * Shares the member app's bottom navigation so the product reads as one thing,
+ * but keeps its own full-bleed content area: this is a desk tool, and the
+ * transaction and audit tables want every pixel of width they can get.
+ *
+ * Nav items are filtered by RBAC tier, so an L1 agent never sees a door they
+ * cannot open - which also keeps the bar short for the lower tiers.
  */
 
 const NAV = [
-  { to: '/admin', end: true, label: 'Overview', roles: ['L1_SUPPORT', 'L2_RISK_RECON', 'L3_SUPER_ADMIN'] },
-  { to: '/admin/users', label: 'Users', roles: ['L1_SUPPORT', 'L2_RISK_RECON', 'L3_SUPER_ADMIN'] },
-  { to: '/admin/kyc', label: 'KYC queue', roles: ['L1_SUPPORT', 'L2_RISK_RECON', 'L3_SUPER_ADMIN'] },
-  { to: '/admin/transfers', label: 'Transfers', roles: ['L1_SUPPORT', 'L2_RISK_RECON', 'L3_SUPER_ADMIN'] },
-  { to: '/admin/reconciliation', label: 'Reconciliation', roles: ['L2_RISK_RECON', 'L3_SUPER_ADMIN'] },
-  { to: '/admin/settings', label: 'Settings', roles: ['L3_SUPER_ADMIN'] },
+  { to: '/admin', end: true, label: 'Overview', icon: IconHome, roles: ['L1_SUPPORT', 'L2_RISK_RECON', 'L3_SUPER_ADMIN'] },
+  { to: '/admin/users', label: 'Users', icon: IconUser, roles: ['L1_SUPPORT', 'L2_RISK_RECON', 'L3_SUPER_ADMIN'] },
+  { to: '/admin/kyc', label: 'KYC', icon: IconShield, roles: ['L1_SUPPORT', 'L2_RISK_RECON', 'L3_SUPER_ADMIN'] },
+  { to: '/admin/transfers', label: 'Transfers', icon: IconTransfer, roles: ['L1_SUPPORT', 'L2_RISK_RECON', 'L3_SUPER_ADMIN'] },
+  { to: '/admin/reconciliation', label: 'Recon', icon: IconReceipt, roles: ['L2_RISK_RECON', 'L3_SUPER_ADMIN'] },
+  { to: '/admin/settings', label: 'Settings', icon: IconLock, roles: ['L3_SUPER_ADMIN'] },
 ];
 
 export default function AdminLayout() {
@@ -31,112 +44,50 @@ export default function AdminLayout() {
   const items = NAV.filter((item) => item.roles.includes(role));
 
   return (
-    <div className="min-h-screen bg-mist">
-      {/* Full bleed, deliberately. A capped, centred container leaves dead space
-          down both sides of a wide monitor, and this console is a data tool —
-          the transaction and audit tables want every pixel of width they can
-          get. The sidebar sits flush to the left edge, content runs to the
-          right. */}
-      <div className="flex min-h-screen w-full">
-        {/* ── Sidebar ─────────────────────────────────────────────── */}
-        <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-line bg-canvas p-4 lg:flex">
-          <div className="flex items-center gap-2.5 px-1 pb-6">
-            <Logo className="h-8 w-8" />
-            <div>
-              <p className="text-sm font-bold text-ink">CashU</p>
-              <p className="text-2xs text-slate">Operations</p>
-            </div>
+    <div className="min-h-screen bg-canvas pb-24 sm:pb-28">
+      <header className="sticky top-0 z-40 border-b border-line bg-canvas/95 backdrop-blur">
+        <div className="flex items-center gap-2.5 px-4 py-3 sm:px-6 lg:px-8">
+          <Logo className="h-8 w-8 shrink-0" />
+          <div className="min-w-0">
+            <p className="truncate text-sm font-bold leading-none text-ink">CashU</p>
+            <p className="mt-1 text-2xs text-slate">Operations</p>
           </div>
 
-          <nav className="flex-1 space-y-1">
-            {items.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) =>
-                  cx(
-                    'block rounded-xl px-3 py-2.5 text-sm font-medium transition',
-                    isActive ? 'bg-ink text-white' : 'text-slate hover:bg-mist hover:text-ink',
-                  )
-                }
-              >
-                {item.label}
-              </NavLink>
-            ))}
-          </nav>
+          <span className="ml-auto hidden truncate rounded-full border border-line bg-canvas px-2.5 py-1 text-2xs font-semibold text-slate sm:inline-block">
+            {role?.replace(/_/g, ' ')}
+          </span>
+        </div>
+      </header>
 
-          <div className="space-y-2 border-t border-line pt-4">
-            <div className="px-1">
-              <p className="truncate text-xs font-medium text-ink">{profile?.full_name}</p>
-              <p className="truncate text-2xs text-slate">{role?.replace(/_/g, ' ')}</p>
-            </div>
+      {/* Full bleed, deliberately. A capped, centred container leaves dead space
+          down both sides of a wide monitor. */}
+      <main className="min-w-0 p-4 sm:p-6 lg:px-8 lg:py-7">
+        <Outlet />
+      </main>
 
-            <button
-              type="button"
-              onClick={() => navigate('/home')}
-              className="w-full rounded-xl px-3 py-2 text-left text-xs font-medium text-slate transition hover:bg-mist hover:text-ink"
-            >
-              Switch to member app
-            </button>
-
-            <button
-              type="button"
-              onClick={async () => {
+      <BottomNav items={items}>
+        <ProfileMenu
+          name={profile?.full_name}
+          detail={role?.replace(/_/g, ' ')}
+          avatar={initials(profile?.full_name)}
+          items={[
+            { label: 'Switch to member app', icon: IconHome, to: '/home' },
+            { divider: true },
+            {
+              label: 'Logout',
+              icon: IconLogout,
+              tone: 'danger',
+              onClick: async () => {
                 await signOut();
                 navigate('/', { replace: true });
-              }}
-              className="w-full rounded-xl px-3 py-2 text-left text-xs font-medium text-slate transition hover:bg-mist hover:text-ink"
-            >
-              Sign out
-            </button>
-          </div>
-        </aside>
-
-        {/* ── Content ─────────────────────────────────────────────── */}
-        <main className="min-w-0 flex-1">
-          {/* Mobile nav - horizontal scroller, since a sidebar cannot fit. */}
-          <div className="sticky top-0 z-30 border-b border-line bg-canvas lg:hidden">
-            <div className="flex items-center gap-2 px-4 py-3">
-              <Logo className="h-7 w-7" />
-              <p className="flex-1 text-sm font-bold text-ink">CashU Operations</p>
-              <button
-                type="button"
-                onClick={() => navigate('/home')}
-                className="text-xs font-medium text-slate"
-              >
-                Exit
-              </button>
-            </div>
-
-            <div className="sheet-scroll flex gap-1 overflow-x-auto px-4 pb-2">
-              {items.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.end}
-                  className={({ isActive }) =>
-                    cx(
-                      'shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition',
-                      isActive ? 'bg-ink text-white' : 'bg-mist text-slate',
-                    )
-                  }
-                >
-                  {item.label}
-                </NavLink>
-              ))}
-            </div>
-          </div>
-
-          <div className="p-4 sm:p-6 lg:px-8 lg:py-7">
-            <Outlet />
-          </div>
-        </main>
-      </div>
+              },
+            },
+          ]}
+        />
+      </BottomNav>
     </div>
   );
 }
-
 /* ── Shared admin pieces ────────────────────────────────────────────────── */
 
 export function AdminHeader({ title, subtitle, action }) {

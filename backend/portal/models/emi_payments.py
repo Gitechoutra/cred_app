@@ -39,10 +39,14 @@ class EMIPaymentState:
 
     TERMINAL = [SETTLED, CANCELLED, FAILED, REFUNDED]
 
+    # PROCESSING and PENDING both reach CANCELLED: a user who dismisses UPI
+    # checkout abandons an attempt that has already left INITIATED. The engine
+    # only takes that route once the gateway confirms nothing was collected, so
+    # the transition is reachable but never a way to discard a real payment.
     ALLOWED = {
         INITIATED: [PROCESSING, CANCELLED, FAILED],
-        PROCESSING: [SUCCESSFUL, PENDING, FAILED],
-        PENDING: [SUCCESSFUL, FAILED],
+        PROCESSING: [SUCCESSFUL, PENDING, CANCELLED, FAILED],
+        PENDING: [SUCCESSFUL, CANCELLED, FAILED],
         SUCCESSFUL: [SETTLED, REVERSED],
         REVERSED: [REFUNDED],
         SETTLED: [],
@@ -79,8 +83,28 @@ class EMIPayments(db.Model, TimestampMixin, CRUDMixin):
 
     gateway_provider = db.Column(db.String(30), nullable=True)
     gateway_order_id = db.Column(db.String(150), nullable=True, index=True)
-    gateway_payment_id = db.Column(db.String(150), nullable=True)
+
+    # Unique, not merely indexed. A gateway payment id identifies exactly one
+    # collection of money, so two payment rows claiming the same one would mean
+    # one UPI debit had settled two installments. The database refuses it
+    # rather than leaving the guarantee to whichever handler wins the race.
+    gateway_payment_id = db.Column(
+        db.String(150), nullable=True, unique=True, index=True
+    )
+
+    # The HMAC Checkout returned in the browser, kept for dispute forensics.
+    # It is evidence that the handler payload was genuine - never the reason a
+    # payment is treated as settled, which is always a fresh API read.
+    gateway_signature = db.Column(db.String(255), nullable=True)
+
     checkout_url = db.Column(db.String(1000), nullable=True)
+
+    # UPI specifics. `upi_app` is the app the user chose before handoff, which
+    # is a preference rather than a fact - the UPI stack lets them switch apps
+    # mid-flow, and `upi_vpa` records the address that actually paid.
+    upi_app = db.Column(db.String(30), nullable=True)
+    upi_vpa = db.Column(db.String(120), nullable=True)
+    upi_rrn = db.Column(db.String(50), nullable=True, index=True)
 
     bbps_rrn = db.Column(db.String(50), nullable=True, index=True)
     biller_ack_utr = db.Column(db.String(50), nullable=True)

@@ -225,7 +225,11 @@ export async function fetchBlobUrl(path) {
     throw new ApiError({ code: 'DOCUMENT_ERROR', message, status: response.status });
   }
 
-  return URL.createObjectURL(await response.blob());
+  const blob = await response.blob();
+
+  // The MIME type comes back too: the KYC viewer has to know whether it is
+  // about to show a PNG or a PDF, and an object URL does not carry that.
+  return { url: URL.createObjectURL(blob), type: blob.type };
 }
 
 /* ── Verbs ──────────────────────────────────────────────────────────────── */
@@ -293,6 +297,11 @@ export const endpoints = {
     lookupAccount: (data) => api.post('/bank-accounts/lookup-account', data),
   },
   transfers: {
+    // Which instruments may fund a transfer, and why UPI is not among them.
+    methods: () => api.get('/transfers/methods'),
+    // Hands Razorpay Checkout's signed payload to the server, which verifies
+    // the signature and re-reads the charge before dispatching the payout.
+    verify: (id, data) => api.post(`/transfers/${id}/verify`, data),
     quote: (amount) => api.post('/transfers/quote', { amount }),
     limits: () => api.get('/transfers/limits'),
     list: (page = 1) => api.get(`/transfers?page=${page}`),
@@ -315,6 +324,12 @@ export const endpoints = {
     list: (emiId) => api.get(`/emi-payments${emiId ? `?emi_id=${emiId}` : ''}`),
     pay: (data) => api.pay('/emi-payments', data),
     confirm: (id) => api.post(`/emi-payments/${id}/confirm`),
+    // Hands Razorpay Checkout's signed handler payload to the server, which
+    // verifies the signature and then re-reads the payment from Razorpay. The
+    // browser never decides whether a payment succeeded.
+    verify: (id, data) => api.post(`/emi-payments/${id}/verify`, data),
+    cancel: (id) => api.post(`/emi-payments/${id}/cancel`),
+    get: (id) => api.get(`/emi-payments/${id}`),
     receipt: (id) => api.get(`/emi-payments/${id}/receipt`),
   },
   mandates: {

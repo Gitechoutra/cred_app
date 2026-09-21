@@ -15,6 +15,7 @@ from portal.helpers import audit
 from portal.helpers.helpers import ErrorCode, failure, iso, success, to_float
 from portal.helpers.jwt import active_user_required, current_user
 from portal.helpers.validators import (
+    validate_name,
     ValidationError, sanitize_text, validate_date, validate_email,
 )
 from portal.models.base import utcnow
@@ -107,8 +108,8 @@ class Me(Resource):
         before = {'full_name': user.full_name, 'email': user.email}
 
         try:
-            if args.get('full_name'):
-                user.full_name = sanitize_text(args['full_name'], 200)
+            if args.get('full_name') is not None:
+                user.full_name = validate_name(args['full_name'])
             if args.get('email'):
                 email = validate_email(args['email'])
                 from portal.models.users import Users
