@@ -17,6 +17,7 @@ import AdminLogin from '../pages/auth/AdminLogin';
 
 /* Member */
 import Home from '../pages/user/Home';
+import Hub from '../pages/user/Hub';
 import Cards from '../pages/user/Cards';
 import CardDetail from '../pages/user/CardDetail';
 import AddCard from '../pages/user/AddCard';
@@ -137,7 +138,10 @@ export default function App() {
       />
 
       {/* Member */}
-      <Route path="/home" element={<RequireAuth><Shell><Home /></Shell></RequireAuth>} />
+      {/* /home is the feature hub - the first screen after signing in.
+          The dashboard is unchanged, just no longer the landing page. */}
+      <Route path="/home" element={<RequireAuth><Shell><Hub /></Shell></RequireAuth>} />
+      <Route path="/dashboard" element={<RequireAuth><Shell><Home /></Shell></RequireAuth>} />
       <Route path="/cards" element={<RequireAuth><Shell><Cards /></Shell></RequireAuth>} />
       <Route path="/cards/add" element={<RequireAuth><Shell><AddCard /></Shell></RequireAuth>} />
       <Route path="/cards/:cardId" element={<RequireAuth><Shell><CardDetail /></Shell></RequireAuth>} />

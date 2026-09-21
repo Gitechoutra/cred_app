@@ -37,6 +37,11 @@ _TIMEOUT = 30
 
 _BASE_URL = 'https://api.razorpay.com/v1'
 
+#: Razorpay's own floor for INR. An order below this is refused by the API,
+#: so it is the real lower bound on every amount this platform can collect -
+#: no configured minimum below it could ever be honoured.
+MIN_PAISE = 100
+
 
 class RazorpayError(Exception):
     """Raised only for configuration faults, never for a declined payment."""
@@ -175,8 +180,22 @@ def create_order(
     `receipt` is our own payment id, and Razorpay indexes it - it is the thread
     back from a stray dashboard entry to the row that created it.
     """
+    paise = to_paise(amount)
+
+    # Caught here rather than at the API. Every caller already applies its own
+    # minimum, but this is the one place every order passes through, so a new
+    # payment path cannot quietly reintroduce a sub-rupee charge and surface it
+    # to the user as an opaque gateway error.
+    if paise < MIN_PAISE:
+        return {
+            'ok': False,
+            'error': f'The minimum payment amount is Rs. {MIN_PAISE // 100}.',
+            'error_code': 'AMOUNT_BELOW_MINIMUM',
+            'timeout': False,
+        }
+
     result = _request('POST', '/orders', payload={
-        'amount': to_paise(amount),
+        'amount': paise,
         'currency': currency,
         'receipt': receipt[:40],
         'payment_capture': 1,

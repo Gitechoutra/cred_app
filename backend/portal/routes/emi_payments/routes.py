@@ -9,11 +9,12 @@ CREDIT_CARD is not a member of PaymentMode, so no request can select it.
 from flask_jwt_extended import jwt_required
 from flask_restx import Resource, reqparse
 
-from portal.helpers import adapters, emi_engine
+from portal.helpers import adapters, emi_engine, settings
 from portal.helpers.helpers import (
     ErrorCode, failure, idempotency_key, iso, paginated, success, to_float,
 )
 from portal.helpers.jwt import active_user_required, current_user
+from portal.helpers.settings import Key
 from portal.helpers.validators import (
     ValidationError, validate_amount, validate_choice, validate_idempotency_key,
     validate_pagination, validate_upi_vpa,
@@ -213,8 +214,14 @@ class EMIPaymentList(Resource):
             )
 
         try:
+            # Previously only "> 0", which let Rs. 0.50 through to a gateway
+            # that rejects anything under 100 paise - so the user got an opaque
+            # provider error instead of a straight answer.
             amount = (
-                validate_amount(args['amount'], 'amount')
+                validate_amount(
+                    args['amount'], 'amount',
+                    minimum=settings.get_decimal(Key.PAYMENT_MIN_AMOUNT),
+                )
                 if args.get('amount') else obligation.emi_amount
             )
         except ValidationError as exc:
@@ -222,15 +229,13 @@ class EMIPaymentList(Resource):
 
         # The VPA was accepted by the parser and then never looked at, so
         # "mahesh 2605@ibl" opened a real gateway order that could only ever
-        # fail. A collect request cannot be sent without an address, so it is
-        # required for that mode and format-checked whenever it is supplied.
+        # fail. It is format-checked here whenever it is supplied.
+        #
+        # Deliberately optional, including for UPI_COLLECT. Razorpay Checkout
+        # gathers the payer's UPI ID in its own sheet, so demanding one up front
+        # would refuse a flow the gateway handles perfectly well. A client that
+        # does collect the address still gets it validated.
         upi_vpa = (args.get('upi_vpa') or '').strip()
-        if payment_mode == PaymentMode.UPI_COLLECT and not upi_vpa:
-            return failure(
-                ErrorCode.VALIDATION_ERROR,
-                'Enter the UPI ID that should receive the collect request.',
-                400,
-            )
         if upi_vpa:
             try:
                 upi_vpa = validate_upi_vpa(upi_vpa)

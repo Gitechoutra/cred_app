@@ -454,3 +454,11 @@ export function IconLogout(props) {
     </svg>
   );
 }
+
+export function IconChart(props) {
+  return (
+    <svg {...base(props)}>
+      <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
+    </svg>
+  );
+}

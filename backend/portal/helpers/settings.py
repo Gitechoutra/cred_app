@@ -23,6 +23,9 @@ class Key:
 
     # -- Transfer limits and pricing (PRD 9.2) -------------------------------
     TRANSFER_MIN_AMOUNT = 'TRANSFER_MIN_AMOUNT'
+    #: Floor for any collected payment - EMI, UPI, gateway. Transfers have
+    #: their own key above; this covers everything that had no minimum at all.
+    PAYMENT_MIN_AMOUNT = 'PAYMENT_MIN_AMOUNT'
     TRANSFER_MAX_SINGLE_STANDARD_KYC = 'TRANSFER_MAX_SINGLE_STANDARD_KYC'
     TRANSFER_MAX_SINGLE_FULL_KYC = 'TRANSFER_MAX_SINGLE_FULL_KYC'
     TRANSFER_DAILY_LIMIT = 'TRANSFER_DAILY_LIMIT'
@@ -75,7 +78,8 @@ class Flag:
 #: Fallbacks used when the row is missing. Mirrors the seeder so behaviour is
 #: identical on a fresh database and a seeded one.
 _DEFAULTS = {
-    Key.TRANSFER_MIN_AMOUNT: '1000',
+    Key.TRANSFER_MIN_AMOUNT: '1',
+    Key.PAYMENT_MIN_AMOUNT: '1',
     Key.TRANSFER_MAX_SINGLE_STANDARD_KYC: '50000',
     Key.TRANSFER_MAX_SINGLE_FULL_KYC: '100000',
     Key.TRANSFER_DAILY_LIMIT: '100000',

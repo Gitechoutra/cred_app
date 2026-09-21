@@ -66,7 +66,9 @@ export default function Transfer() {
   // "Cannot access 'numeric' before initialization" on every render - which
   // unmounts the whole tree and renders a blank page rather than an error.
   const numeric = Number(amount) || 0;
-  const minimum = limits?.limits?.minimum ?? 1000;
+  // Falls back only for the moment before /transfers/limits answers. It
+  // matches the server's floor so the two never disagree, even briefly.
+  const minimum = limits?.limits?.minimum ?? 1;
   const dailyRemaining = limits?.limits?.daily_remaining;
 
   const cardBalance = card ? (card.available_limit ?? card.card_limit ?? 0) : 0;

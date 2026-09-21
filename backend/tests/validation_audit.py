@@ -305,6 +305,22 @@ def main():
     check(9, 'quote accepts a valid amount', response.status_code == 200,
           response.text[:160])
 
+    # The floor is Rs. 1, which is also the gateway's own minimum: an order
+    # under 100 paise is refused by Razorpay, so nothing below it could be
+    # honoured however the setting is configured.
+    response = post('/transfers/quote', {'amount': 1}, token=token_a)
+    check(9, 'quote accepts the minimum of Rs. 1', response.status_code == 200,
+          response.text[:200])
+
+    response = post('/transfers/quote', {'amount': '0.99'}, token=token_a)
+    check(9, 'quote rejects just below the minimum',
+          response.status_code == 400, f'got {response.status_code}')
+
+    response = get('/transfers/limits', token_a)
+    reported = ((data_of(response).get('limits') or {}) or {}).get('minimum')
+    check(9, 'the limit the client is told matches the server floor',
+          reported in (1, 1.0, '1', '1.00'), str(reported))
+
     # ================= 8. UPI ID validation ==========================
     print('\n[8] UPI ID')
 

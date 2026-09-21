@@ -18,9 +18,17 @@ D = SettingDataType
 # (key, value, type, category, display name, description, min, max, editable)
 SETTINGS = [
     # -- Transfer limits and pricing (PRD 9.2) -----------------------------
-    (Key.TRANSFER_MIN_AMOUNT, '1000', D.DECIMAL, 'TRANSFERS',
+    (Key.TRANSFER_MIN_AMOUNT, '1', D.DECIMAL, 'TRANSFERS',
      'Minimum Transfer Amount', 'Smallest permitted credit-to-bank transfer.',
-     '100', '10000', True),
+     # The lower bound is Rs. 1 because that is the payment gateway's own floor
+     # - an order below 100 paise is rejected by Razorpay, so no configuration
+     # below it could ever be honoured.
+     '1', '10000', True),
+    (Key.PAYMENT_MIN_AMOUNT, '1', D.DECIMAL, 'PAYMENTS',
+     'Minimum Payment Amount',
+     'Smallest amount any payment may collect - EMI, UPI or gateway. Bounded '
+     'below by the gateway floor of 100 paise.',
+     '1', '1000', True),
     (Key.TRANSFER_MAX_SINGLE_STANDARD_KYC, '50000', D.DECIMAL, 'TRANSFERS',
      'Max Single Transfer (Standard KYC)',
      'Per-transaction ceiling for a minimum-KYC user.', '1000', '100000', True),
