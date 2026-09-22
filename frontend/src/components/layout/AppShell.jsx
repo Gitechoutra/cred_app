@@ -30,9 +30,8 @@ import { initials } from '../../utils/format';
 const NAV = [
   { to: '/home', label: 'Home', icon: IconHome, end: true },
   { to: '/cards', label: 'Cards', icon: IconCard },
-  { to: '/transfer', label: 'Transfer', icon: IconTransfer },
-  { to: '/scan', label: 'Scan', icon: IconQr },
-  { to: '/emi', label: 'EMIs', icon: IconEmi },
+  { to: '/scan', label: 'Scanner', icon: IconQr, isScanner: true },
+  { id: 'search', label: 'Search', icon: IconSearch },
   { to: '/transactions', label: 'History', icon: IconReceipt },
 ];
 
@@ -67,26 +66,30 @@ export default function AppShell({ children }) {
 /* ── Bottom navigation ──────────────────────────────────────────────────── */
 
 function MemberNav() {
+  return <BottomNav items={NAV} />;
+}
+
+/* ── Top bar ────────────────────────────────────────────────────────────── */
+
+function TopBar() {
   const navigate = useNavigate();
   const { signOut } = useAuth();
-  const { profile, isAdmin } = useProfile();
+  const { profile, isAdmin, kycStatus } = useProfile();
 
-  const items = [
+  const profileMenuItems = [
     { label: 'Profile', icon: IconUser, to: '/profile' },
     { label: 'Security', icon: IconLock, to: '/security' },
     { label: 'Bank accounts', icon: IconBank, to: '/banks' },
     { label: 'Help & support', icon: IconHelp, to: '/support' },
   ];
 
-  /* Carried over from the old sidebar: an operator working in the member app
-     needs a way back to the console. */
   if (isAdmin) {
-    items.push({ divider: true });
-    items.push({ label: 'Operations console', icon: IconShield, to: '/admin' });
+    profileMenuItems.push({ divider: true });
+    profileMenuItems.push({ label: 'Operations console', icon: IconShield, to: '/admin' });
   }
 
-  items.push({ divider: true });
-  items.push({
+  profileMenuItems.push({ divider: true });
+  profileMenuItems.push({
     label: 'Logout',
     icon: IconLogout,
     tone: 'danger',
@@ -97,25 +100,7 @@ function MemberNav() {
   });
 
   return (
-    <BottomNav items={NAV}>
-      <ProfileMenu
-        name={profile?.full_name}
-        detail={profile?.phone ? `+91 ${profile.phone}` : null}
-        avatar={initials(profile?.full_name)}
-        items={items}
-      />
-    </BottomNav>
-  );
-}
-
-/* ── Top bar ────────────────────────────────────────────────────────────── */
-
-function TopBar() {
-  const navigate = useNavigate();
-  const { profile, kycStatus } = useProfile();
-
-  return (
-    <header className="sticky top-0 z-40 border-b border-line bg-canvas/95 backdrop-blur">
+    <header className="sticky top-0 z-40 border-b border-line/80 bg-canvas/90 backdrop-blur-xl">
       <div className="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
         {/* The sidebar used to carry the brand; with it gone, the mark lives
             here so the app is still identifiable on every page. */}
@@ -123,12 +108,12 @@ function TopBar() {
           type="button"
           onClick={() => navigate('/home')}
           aria-label="CashU home"
-          className="flex shrink-0 items-center gap-2.5 rounded-xl text-left"
+          className="group flex shrink-0 items-center gap-2.5 rounded-xl text-left transition-transform active:scale-98"
         >
-          <Logo className="h-9 w-9" />
+          <Logo className="h-9 w-9 transition-transform duration-base group-hover:scale-105" />
           <span className="hidden sm:block">
             <span className="block text-sm font-bold leading-none text-ink">CashU</span>
-            <span className="mt-1 block text-2xs text-slate">Credit &amp; EMI hub</span>
+            <span className="mt-1 block text-2xs font-medium text-slate">Credit &amp; EMI hub</span>
           </span>
         </button>
 
@@ -139,7 +124,8 @@ function TopBar() {
         </div>
 
         {kycStatus === 'APPROVED' ? (
-          <span className="hidden items-center gap-1.5 rounded-full border border-mint-200 bg-mint-50 px-2.5 py-1 text-2xs font-semibold text-mint-800 sm:inline-flex">
+          <span className="hidden items-center gap-1.5 rounded-full border border-mint-200/80 bg-mint-50/80 px-2.5 py-1 text-2xs font-semibold text-mint-800 shadow-[inset_0_0_0_1px_rgba(0,245,184,0.15)] sm:inline-flex">
+            <span className="h-1.5 w-1.5 rounded-full bg-mint-600" />
             <IconShield className="h-3 w-3" />
             KYC verified
           </span>
@@ -153,7 +139,16 @@ function TopBar() {
           </button>
         )}
 
-        <NotificationBell />
+        <div className="flex items-center gap-2">
+          <NotificationBell />
+          <ProfileMenu
+            name={profile?.full_name}
+            detail={profile?.phone ? `+91 ${profile.phone}` : null}
+            avatar={initials(profile?.full_name)}
+            items={profileMenuItems}
+            placement="bottom"
+          />
+        </div>
       </div>
     </header>
   );
@@ -185,11 +180,11 @@ function NotificationBell() {
       type="button"
       onClick={() => navigate('/notifications')}
       aria-label={`Notifications${unread ? `, ${unread} unread` : ''}`}
-      className="relative grid h-9 w-9 shrink-0 place-items-center rounded-lg text-ink transition hover:bg-mist"
+      className="relative grid h-9 w-9 shrink-0 place-items-center rounded-xl text-ink transition-all duration-base hover:bg-mist active:scale-95"
     >
       <IconBell className="h-5 w-5" />
       {unread > 0 && (
-        <span className="absolute right-1 top-1 grid h-4 min-w-4 place-items-center rounded-full bg-alert px-1 text-[9px] font-bold text-white">
+        <span className="absolute right-1 top-1 grid h-4 min-w-4 place-items-center rounded-full bg-alert px-1 text-[9px] font-bold text-white shadow-sm ring-2 ring-canvas">
           {unread > 9 ? '9+' : unread}
         </span>
       )}
@@ -478,3 +473,13 @@ export function IconQr(props) {
     </svg>
   );
 }
+
+export function IconSearch(props) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="M21 21l-4.35-4.35" />
+    </svg>
+  );
+}
+
