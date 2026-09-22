@@ -57,6 +57,10 @@ export default function MpinLogin() {
         <div className="mx-auto w-full max-w-md">
           <PageHeader title="" back="/" sticky={false} />
 
+          {/* Each line arrives just behind the one above it. 60ms is enough to
+              read as a sequence without making anyone wait to type - the input
+              is focused immediately regardless of where its row is in the
+              animation. `both` fill keeps each element hidden until its turn. */}
           <form
             className="px-6 pt-4"
             onSubmit={(event) => {
@@ -64,12 +68,17 @@ export default function MpinLogin() {
               if (phoneValid) setStage('pin');
             }}
           >
-            <h1 className="text-2xl font-bold tracking-tight text-ink">Welcome back</h1>
-            <p className="mt-2 text-sm text-slate">
+            <h1 className="animate-fade-up text-2xl font-bold tracking-tight text-ink">
+              Welcome back
+            </h1>
+            <p
+              className="mt-2 animate-fade-up text-sm text-slate"
+              style={{ animationDelay: '60ms' }}
+            >
               Sign in with your mobile number and MPIN.
             </p>
 
-            <div className="mt-8">
+            <div className="mt-8 animate-fade-up" style={{ animationDelay: '120ms' }}>
               <Input
                 label="Mobile number"
                 prefix={<span className="font-medium text-ink">+91</span>}
@@ -83,24 +92,26 @@ export default function MpinLogin() {
               />
             </div>
 
-            <Button
-              type="submit"
-              variant="mint"
-              size="lg"
-              full
-              className="mt-6"
-              disabled={!phoneValid}
-            >
-              Continue
-            </Button>
+            <div className="animate-fade-up" style={{ animationDelay: '180ms' }}>
+              <Button
+                type="submit"
+                variant="mint"
+                size="lg"
+                full
+                className="mt-6"
+                disabled={!phoneValid}
+              >
+                Continue
+              </Button>
 
-            <button
-              type="button"
-              onClick={() => navigate('/signin')}
-              className="mt-5 w-full text-center text-sm font-medium text-slate hover:text-ink"
-            >
-              Sign in with OTP instead
-            </button>
+              <button
+                type="button"
+                onClick={() => navigate('/signin')}
+                className="mt-5 w-full text-center text-sm font-medium text-slate transition-colors duration-base ease-glide hover:text-ink"
+              >
+                Sign in with OTP instead
+              </button>
+            </div>
           </form>
         </div>
       </div>
@@ -129,7 +140,7 @@ export default function MpinLogin() {
           }
         />
 
-        <div className="flex flex-1 flex-col items-center justify-center px-6 py-8">
+        <div className="flex flex-1 animate-fade-up flex-col items-center justify-center px-6 py-8">
           <h1 className="text-center text-2xl font-bold tracking-tight text-ink">
             Enter your MPIN
           </h1>
@@ -137,10 +148,16 @@ export default function MpinLogin() {
 
           <PinDots length={6} filled={pin.length} error={Boolean(error)} className="mt-10" />
 
-          {error && <p className="mt-4 max-w-xs text-center text-sm text-alert">{error}</p>}
+          {/* Drops in rather than appearing, so a wrong PIN registers as an
+              event without the layout jumping under the dots. */}
+          {error && (
+            <p className="mt-4 max-w-xs animate-slide-down text-center text-sm text-alert">
+              {error}
+            </p>
+          )}
         </div>
 
-        <div className="px-6">
+        <div className="animate-fade-up px-6" style={{ animationDelay: '80ms' }}>
           <PinPad
             onPress={press}
             onBackspace={() => {
@@ -153,7 +170,7 @@ export default function MpinLogin() {
           <button
             type="button"
             onClick={() => navigate('/signin')}
-            className="mb-6 w-full text-center text-sm font-medium text-slate hover:text-ink"
+            className="mb-6 w-full text-center text-sm font-medium text-slate transition-colors duration-base ease-glide hover:text-ink"
           >
             Forgot MPIN? Sign in with OTP
           </button>

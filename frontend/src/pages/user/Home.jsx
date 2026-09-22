@@ -9,6 +9,7 @@ import {
   AnimatedMoney, Button, Card, EmptyState, Section, Skeleton, cx,
 } from '../../components/ui';
 import { useFetch } from '../../hooks/useProfile';
+import { Reveal } from '../../hooks/useReveal';
 import { money, moneyCompact } from '../../utils/format';
 
 /**
@@ -87,8 +88,21 @@ export default function Home() {
 
       {/* ── Top row: debt summary + next payment ────────────────────── */}
       <div className="grid gap-4 lg:grid-cols-3">
-        <section className="rounded-2xl bg-ink p-6 text-white lg:col-span-2">
-          <div className="flex flex-wrap items-start justify-between gap-6">
+        <section className="relative overflow-hidden rounded-2xl bg-ink p-6 text-white shadow-lift lg:col-span-2">
+          {/* The same treatment CardTile uses: a hairline along the top edge and
+              one soft corner bloom. It stops a flat ink panel reading as a plain
+              rectangle without tipping into skeuomorphism. Both are aria-hidden
+              and pointer-events-none, so nothing here is reachable or readable. */}
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/15"
+          />
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute -right-16 -top-24 h-56 w-56 rounded-full bg-mint/10 blur-3xl"
+          />
+
+          <div className="relative flex flex-wrap items-start justify-between gap-6">
             <div>
               <p className="text-xs text-white/55">Total outstanding</p>
               <AnimatedMoney
@@ -120,7 +134,7 @@ export default function Home() {
           </div>
 
           {summary.credit_utilization_percentage !== null && (
-            <div className="mt-6 border-t border-white/10 pt-4">
+            <div className="relative mt-6 border-t border-white/10 pt-4">
               <div className="flex items-center justify-between">
                 <span className="text-2xs text-white/55">Credit utilisation</span>
                 <span
@@ -183,15 +197,15 @@ export default function Home() {
       {/* ── Monthly commitment strip ────────────────────────────────── */}
       {summary.monthly_emi_commitment > 0 && (
         <div className="mt-4 grid gap-4 sm:grid-cols-3">
-          <StatStrip
-            label="Monthly EMI commitment"
-            value={money(summary.monthly_emi_commitment)}
-          />
-          <StatStrip label="EMI outstanding" value={money(summary.emi_outstanding)} />
-          <StatStrip
-            label="Card outstanding"
-            value={money(summary.total_outstanding_amount)}
-          />
+          {[
+            ['Monthly EMI commitment', summary.monthly_emi_commitment],
+            ['EMI outstanding', summary.emi_outstanding],
+            ['Card outstanding', summary.total_outstanding_amount],
+          ].map(([label, value], index) => (
+            <Reveal key={label} delay={index * 70} className="h-full">
+              <StatStrip label={label} value={money(value)} />
+            </Reveal>
+          ))}
         </div>
       )}
 
@@ -199,14 +213,21 @@ export default function Home() {
       {data.upcoming_dues?.length > 1 && (
         <Section title="Upcoming payments" className="mt-8">
           <div className="grid gap-2 lg:grid-cols-2">
-            {data.upcoming_dues.map((item) => (
-              <DueItem
+            {data.upcoming_dues.map((item, index) => (
+              <Reveal
                 key={`${item.type}-${item.id}`}
-                item={item}
-                onClick={() =>
-                  navigate(item.type === 'EMI' ? `/emi/${item.id}` : `/cards/${item.id}`)
-                }
-              />
+                // Capped so a long list never leaves the last row waiting; past
+                // the sixth item the delay stops growing and they arrive together.
+                delay={Math.min(index, 5) * 60}
+                className="h-full [&>*]:h-full"
+              >
+                <DueItem
+                  item={item}
+                  onClick={() =>
+                    navigate(item.type === 'EMI' ? `/emi/${item.id}` : `/cards/${item.id}`)
+                  }
+                />
+              </Reveal>
             ))}
           </div>
         </Section>
@@ -243,30 +264,31 @@ export default function Home() {
           </Card>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {data.cards.map((card) => (
-              <CardTile
-                key={card.card_id}
-                card={card}
-                onClick={() => navigate(`/cards/${card.card_id}`)}
-              />
+            {data.cards.map((card, index) => (
+              <Reveal key={card.card_id} delay={Math.min(index, 5) * 60} className="h-full [&>*]:h-full">
+                <CardTile card={card} onClick={() => navigate(`/cards/${card.card_id}`)} />
+              </Reveal>
             ))}
 
-            <button
-              type="button"
-              onClick={() => navigate('/cards/add')}
-              className="grid min-h-[156px] place-items-center rounded-2xl border-2 border-dashed border-line text-slate transition hover:border-ink/20 hover:text-ink"
-            >
-              <span className="flex flex-col items-center gap-2">
-                <IconPlus className="h-5 w-5" />
-                <span className="text-sm font-medium">Add card</span>
-              </span>
-            </button>
+            <Reveal delay={Math.min(data.cards.length, 6) * 60} className="h-full [&>*]:h-full">
+              <button
+                type="button"
+                onClick={() => navigate('/cards/add')}
+                className="group grid h-full min-h-[156px] w-full place-items-center rounded-2xl border-2 border-dashed border-line text-slate transition-all duration-base ease-glide hover:border-mint-600/40 hover:bg-mint-50/40 hover:text-ink active:scale-[0.985]"
+              >
+                <span className="flex flex-col items-center gap-2">
+                  <IconPlus className="h-5 w-5 transition-transform duration-base ease-glide group-hover:scale-110" />
+                  <span className="text-sm font-medium">Add card</span>
+                </span>
+              </button>
+            </Reveal>
           </div>
         )}
       </Section>
 
       {/* ── EMIs + activity, side by side ───────────────────────────── */}
       <div className="mt-8 grid gap-6 lg:grid-cols-2">
+        <Reveal>
         <Section
           title="Active EMIs"
           action={
@@ -307,7 +329,9 @@ export default function Home() {
             </div>
           )}
         </Section>
+        </Reveal>
 
+        <Reveal delay={90}>
         <Section
           title="Recent activity"
           action={
@@ -343,6 +367,7 @@ export default function Home() {
             </Card>
           )}
         </Section>
+        </Reveal>
       </div>
     </div>
   );
@@ -352,7 +377,10 @@ export default function Home() {
 
 function StatStrip({ label, value }) {
   return (
-    <div className="rounded-2xl border border-line bg-canvas p-4">
+    // h-full so the three strips stay level once each is wrapped in its own
+    // reveal; shadow-card for depth, but no hover lift - nothing here is
+    // clickable, and a tile that rises under the cursor promises otherwise.
+    <div className="h-full rounded-2xl border border-line bg-canvas p-4 shadow-card">
       <p className="text-2xs font-semibold uppercase tracking-wider text-slate">{label}</p>
       <p className="money mt-1.5 text-xl font-bold text-ink">{value}</p>
     </div>
@@ -366,7 +394,7 @@ function NextDueCard({ item, onPay }) {
   return (
     <section
       className={cx(
-        'flex h-full flex-col rounded-2xl border p-5',
+        'flex h-full flex-col rounded-2xl border p-5 shadow-card',
         overdue
           ? 'border-alert/30 bg-red-50/40'
           : urgent
@@ -419,9 +447,9 @@ function SetupPrompt({ title, description, cta, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className="mb-4 flex w-full items-center gap-3 rounded-2xl border border-mint-200 bg-mint-50 p-4 text-left transition hover:shadow-card"
+      className="group mb-4 flex w-full items-center gap-3 rounded-2xl border border-mint-200 bg-mint-50 p-4 text-left transition-all duration-base ease-glide hover:-translate-y-0.5 hover:border-mint-300 hover:shadow-lift active:translate-y-0 active:scale-[0.995]"
     >
-      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-mint text-ink">
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-mint text-ink transition-transform duration-base ease-glide group-hover:scale-105">
         <IconPlus className="h-5 w-5" />
       </span>
 
@@ -430,7 +458,7 @@ function SetupPrompt({ title, description, cta, onClick }) {
         <p className="truncate text-xs text-mint-800/70">{description}</p>
       </div>
 
-      <span className="shrink-0 rounded-lg bg-ink px-3 py-1.5 text-xs font-semibold text-white">
+      <span className="shrink-0 rounded-lg bg-ink px-3 py-1.5 text-xs font-semibold text-white transition-colors duration-base ease-glide group-hover:bg-ink-700">
         {cta}
       </span>
     </button>

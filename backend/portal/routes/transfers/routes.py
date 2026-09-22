@@ -34,6 +34,7 @@ initiate_parser = reqparse.RequestParser()
 initiate_parser.add_argument('card_id', type=str, required=True, location='json')
 initiate_parser.add_argument('bank_account_id', type=str, required=True, location='json')
 initiate_parser.add_argument('amount', type=float, required=True, location='json')
+initiate_parser.add_argument('payment_method', type=str, required=False, location='json')
 
 list_parser = reqparse.RequestParser()
 list_parser.add_argument('page', type=int, default=1, location='args')
@@ -294,6 +295,7 @@ class TransferList(Resource):
                 idempotency_key=key,
                 device_uuid=device_uuid(),
                 ip=client_ip(),
+                payment_method=args.get('payment_method'),
             )
         except transfer_engine.TransferError as exc:
             return failure(
@@ -431,12 +433,25 @@ class TransferPaymentMethods(Resource):
                 'description': 'Pay using Google Pay, PhonePe or any UPI app',
             })
         else:
+            # Two different reasons, and telling them apart matters: one is a
+            # product rule, the other is a gateway account setting somebody can
+            # go and change. A single vague message would send an operator
+            # looking in the wrong place.
+            from portal.helpers import razorpay as _rzp
+
+            gateway_lacks_upi = _rzp.is_configured() and not _rzp.supports('upi')
+
             prohibited.append({
                 'mode': 'UPI',
                 'label': 'UPI, Google Pay, PhonePe',
-                'reason': 'A transfer moves money from your credit card to a '
-                          'bank account, so it has to be funded by a card. '
-                          'UPI is available for EMI payments.',
+                'reason': (
+                    'UPI is not enabled on the connected payment gateway '
+                    'account, so it cannot be offered here yet.'
+                    if gateway_lacks_upi else
+                    'A transfer moves money from your credit card to a bank '
+                    'account, so it has to be funded by a card. UPI is '
+                    'available for EMI payments.'
+                ),
             })
 
         return success({

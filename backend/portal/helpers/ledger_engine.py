@@ -228,6 +228,60 @@ def post(
     return txn
 
 
+def post_entries(transaction, entries: list, *, commit: bool = True):
+    """
+    Attach a further balanced journal posting to an existing transaction.
+
+    A transfer moves money twice - the card is charged, then the bank is paid -
+    and both legs belong in the ledger. They do not both belong in the
+    transaction list: one transfer is one thing that happened to the user, and
+    posting the payout as its own MasterTransactions row made every transfer
+    appear twice in their history, once at the principal and once at the total
+    charged. The summary then added both together.
+
+    So the second leg posts its entries here, against the transaction the
+    charge already created. The ledger keeps all four entries and still
+    balances; the user sees one payment.
+
+    Idempotent by construction: if this transaction already carries an entry
+    for the same account with the same amount, the posting has been made and
+    the call is a no-op. Payout confirmation can arrive from the webhook and
+    the poller at once.
+    """
+    _validate_entries(entries)
+
+    existing = DoubleEntryLedger.query.filter_by(
+        transaction_id=transaction.transaction_id
+    ).all()
+
+    def already_posted(entry):
+        debit = money(entry.get('debit', 0))
+        credit = money(entry.get('credit', 0))
+        return any(
+            row.account_code == entry['account']
+            and money(row.debit_amount) == debit
+            and money(row.credit_amount) == credit
+            for row in existing
+        )
+
+    if all(already_posted(entry) for entry in entries):
+        return transaction
+
+    for entry in entries:
+        db.session.add(DoubleEntryLedger(
+            transaction_id=transaction.transaction_id,
+            account_code=entry['account'],
+            debit_amount=money(entry.get('debit', 0)),
+            credit_amount=money(entry.get('credit', 0)),
+            narration=entry.get('narration'),
+        ))
+
+    if commit:
+        db.session.commit()
+
+    return transaction
+
+
 def transition(
     txn: MasterTransactions,
     new_status: str,
@@ -393,6 +447,29 @@ def entries_for_emi_payment(amount, source_ref, biller_ref):
             'account': Account.BILLER_PAYABLE,
             'credit': amount,
             'narration': f'Payable to biller {biller_ref}',
+        },
+    ]
+
+
+def entries_for_qr_payment(amount, payer_ref, payee_ref):
+    """
+    A scanned UPI payment to a merchant.
+
+    CashU collects over UPI and owes the payee the same amount, so the entry is
+    a clean pass-through: no fee, no GST, nothing retained. If a commercial
+    model is added later it belongs here as a FEE_INCOME credit, not as an
+    adjustment to either side of this pair.
+    """
+    return [
+        {
+            'account': Account.GATEWAY_RECEIVABLE,
+            'debit': amount,
+            'narration': f'UPI collection {payer_ref}',
+        },
+        {
+            'account': Account.BILLER_PAYABLE,
+            'credit': amount,
+            'narration': f'Payable to {payee_ref}',
         },
     ]
 

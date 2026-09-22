@@ -13,7 +13,7 @@ from flask_jwt_extended import jwt_required
 from flask_restx import Resource, reqparse
 
 from portal import db
-from portal.helpers import adapters, audit, settings
+from portal.helpers import adapters, audit, settings, test_cards
 from portal.helpers.encryption import encrypt, mask_pan
 from portal.helpers.helpers import ErrorCode, failure, iso, success, to_float
 from portal.helpers.jwt import active_user_required, current_user
@@ -75,6 +75,10 @@ def card_dict(card: Cards, detailed: bool = False) -> dict:
         'due_day': card.due_day,
         'next_due_date': iso(card.next_due_date),
         'status': card.status,
+        # Present only on a simulated card, so the client can badge it TEST
+        # MODE without having to know the catalogue.
+        'test_scenario': card.test_scenario,
+        'is_test_card': bool(card.test_scenario),
         'is_transfer_eligible': card.is_transfer_eligible,
         'linked_at': iso(card.linked_at),
     }
@@ -152,6 +156,24 @@ class CardList(Resource):
                 400,
             )
 
+        # A predefined test card, if this is one. Resolved before validation so
+        # the refusal below cannot be sidestepped with a malformed payload.
+        test_card = test_cards.find(bin_prefix, last4)
+
+        if test_card and not test_cards.enabled():
+            # Reached only by a client sending a test PAN where test mode is
+            # off - most likely production.
+            logger.warning(
+                f'Test card {bin_prefix[:6]}...{last4} refused: test mode off '
+                f'(user {user.user_id})'
+            )
+            return failure(
+                ErrorCode.ERR_001_INVALID_CARD,
+                'This is a test card and test mode is not enabled here.',
+                400,
+                recovery='Use a real card, or enable test mode in development.',
+            )
+
         try:
             expiry_month, expiry_year = validate_expiry(
                 args['expiry_month'], args['expiry_year']
@@ -217,7 +239,11 @@ class CardList(Resource):
             )
 
         token = adapters.tokenize_card(
-            reference=f'{user.user_id}:{last4}',
+            reference=(
+                f'{user.user_id}:{last4}:'
+                f'{test_cards.simulation_token(test_card["scenario"])}'
+                if test_card else f'{user.user_id}:{last4}'
+            ),
             last4=last4,
             network=network_row.network,
             issuer_bank=network_row.issuer_bank,
@@ -258,12 +284,22 @@ class CardList(Resource):
             nickname=sanitize_text(args.get('nickname'), 100) or None,
             status=CardStatus.ACTIVE,
             linked_at=utcnow(),
+            # NULL on every real card. Its presence is what marks a card as
+            # simulated, both to the payment path and to the UI badge.
+            test_scenario=test_card['scenario'] if test_card else None,
         )
 
         try:
             if args.get('card_limit'):
                 card.card_limit = validate_amount(args['card_limit'], 'card_limit')
                 card.available_limit = card.card_limit
+                card.outstanding_amount = 0
+            elif test_card:
+                # The catalogue's limit, so the insufficient-limit card really
+                # is short. That scenario is produced by the ordinary balance
+                # check meeting a small limit, not by a special case.
+                card.card_limit = test_card['limit']
+                card.available_limit = test_card['limit']
                 card.outstanding_amount = 0
             if args.get('statement_day'):
                 card.statement_day = validate_day_of_month(
@@ -461,6 +497,40 @@ class CardDetail(Resource):
         )
 
         return success(None, 'Card removed successfully.')
+
+
+@ns.route('/test-cards')
+class TestCards(Resource):
+    @ns.doc('list_test_cards', security='Bearer')
+    @jwt_required()
+    def get(self):
+        """
+        Predefined dummy cards, one per payment outcome (development only).
+
+        Returns 404 rather than an empty list when test mode is off, so a
+        production deployment does not advertise that the feature exists.
+
+        Serving full numbers here is safe: they are published network test
+        values that cannot be issued to anyone, and the endpoint is unreachable
+        unless test mode is on - which requires the sandbox adapters and a
+        non-production build.
+        """
+        if not test_cards.enabled():
+            return failure(
+                ErrorCode.NOT_FOUND,
+                'Test cards are not available in this environment.',
+                404,
+            )
+
+        return success({
+            'test_mode': True,
+            'notice': (
+                'These are simulated cards. No real card is charged, no money '
+                'moves, and no payment network is contacted.'
+            ),
+            'cards': test_cards.catalogue(),
+            'scenarios': test_cards.Scenario.CHOICES,
+        })
 
 
 @ns.route('/networks/lookup/<string:bin_prefix>')

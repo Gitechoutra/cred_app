@@ -9,10 +9,14 @@ class TransactionType:
     FEE_DEBIT = "FEE_DEBIT"
     REVERSAL_REFUND = "REVERSAL_REFUND"
     PENNY_DROP = "PENNY_DROP"
+    #: Scanned UPI payment to a merchant. A separate type because it is a
+    #: separate product: the money leaves the user's bank, not their card, and
+    #: the destination is a third party rather than their own account.
+    QR_UPI_PAYMENT = "QR_UPI_PAYMENT"
 
     CHOICES = [
         CARD_TO_BANK_TRANSFER, EMI_MANUAL_PAY, EMI_AUTO_PAY,
-        FEE_DEBIT, REVERSAL_REFUND, PENNY_DROP,
+        FEE_DEBIT, REVERSAL_REFUND, PENNY_DROP, QR_UPI_PAYMENT,
     ]
 
 
@@ -45,8 +49,12 @@ class DestType:
     BANK_ACCOUNT_IMPS = "BANK_ACCOUNT_IMPS"
     BBPS_BILLER_COLLECTION = "BBPS_BILLER_COLLECTION"
     CARD_REFUND = "CARD_REFUND"
+    #: A merchant's UPI address, from a scanned QR.
+    MERCHANT_VPA = "MERCHANT_VPA"
 
-    CHOICES = [BANK_ACCOUNT_IMPS, BBPS_BILLER_COLLECTION, CARD_REFUND]
+    CHOICES = [
+        BANK_ACCOUNT_IMPS, BBPS_BILLER_COLLECTION, CARD_REFUND, MERCHANT_VPA,
+    ]
 
 
 class GatewayProvider:

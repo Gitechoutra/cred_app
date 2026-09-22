@@ -20,13 +20,18 @@ import { initials } from '../../utils/format';
  * notifications - rather than duplicating the navigation underneath it.
  */
 
-/* Five slots is the ceiling before labels start truncating at 320px. Bank
-   accounts sits in the account menu instead, where Profile already links to
-   it, rather than squeezing a sixth slot into the bar. */
+/* Six slots plus Profile. Scan sits dead centre, which is both the easiest
+   reach for a thumb and where every UPI app people already use puts it.
+
+   This is one past the comfortable ceiling: at 320px the labels share roughly
+   43px each, so "Transfer" and "History" are close to truncating. Scan earns
+   the squeeze because it is a primary action people arrive wanting to do;
+   bank accounts still lives in the account menu rather than taking a slot. */
 const NAV = [
   { to: '/home', label: 'Home', icon: IconHome, end: true },
   { to: '/cards', label: 'Cards', icon: IconCard },
   { to: '/transfer', label: 'Transfer', icon: IconTransfer },
+  { to: '/scan', label: 'Scan', icon: IconQr },
   { to: '/emi', label: 'EMIs', icon: IconEmi },
   { to: '/transactions', label: 'History', icon: IconReceipt },
 ];
@@ -459,6 +464,17 @@ export function IconChart(props) {
   return (
     <svg {...base(props)}>
       <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
+    </svg>
+  );
+}
+
+export function IconQr(props) {
+  return (
+    <svg {...base(props)}>
+      <rect x="3" y="3" width="7" height="7" rx="1.5" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" />
+      <path d="M14 14h3v3h-3zM20 14v3M14 20h3M20 20h1" />
     </svg>
   );
 }

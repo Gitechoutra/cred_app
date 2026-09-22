@@ -100,10 +100,40 @@ for (const pid of pids) {
   console.log(`  Freed port ${PORT} — stopped an orphaned dev server (PID ${pid}).`);
 }
 
-// Give the OS a moment to release the socket, or Vite can still see it bound.
+// Wait for the socket to actually be released rather than guessing at it.
+//
+// This used to spin for a flat 400ms, which is a guess - and on Windows a
+// killed process can hold the listener for longer than that, so Vite would
+// still fail to bind and the whole hook would look like it had not run. Now it
+// polls until the port is genuinely free, or gives up loudly after five
+// seconds rather than letting Vite fail with a less useful message.
 if (freed > 0) {
-  const until = Date.now() + 400;
-  while (Date.now() < until) {
-    /* brief spin; execSync-based script has no event loop to await on */
+  const deadline = Date.now() + 5000;
+  let released = false;
+
+  while (Date.now() < deadline) {
+    if (listeners().length === 0) {
+      released = true;
+      break;
+    }
+    sleep(120);
   }
+
+  if (!released) {
+    console.warn(
+      `\n  Port ${PORT} is still held after stopping the process.\n` +
+        '  Wait a moment and try again.\n',
+    );
+  }
+}
+
+/**
+ * Sleep without an event loop.
+ *
+ * This script runs synchronously through execSync, so there is no loop to await
+ * a timer on. Atomics.wait blocks the thread properly instead of burning a core
+ * in a date-comparison spin.
+ */
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }

@@ -307,6 +307,7 @@ export default function EmiPay() {
               methods={methods?.permitted || []}
               prohibited={methods?.prohibited || []}
               upiApps={upiConfig?.apps || []}
+              testMode={String(upiConfig?.checkout_key || '').startsWith('rzp_test_')}
               mode={mode}
               onMode={setMode}
               upiApp={upiApp}

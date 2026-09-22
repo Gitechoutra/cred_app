@@ -44,6 +44,13 @@ class Simulate:
     TOKEN_EXPIRED = 'SIMTOKENEXP'  # expired card token (ERR-009)
     BILLER_DOWN = 'SIMBILLERDOWN'  # BBPS biller offline (ERR-010)
 
+    #: Declines at *authorisation* rather than at order creation, which is how
+    #: an issuer decline actually reaches a customer: the order opens, they
+    #: reach a payment screen, and the charge is refused there. DECLINE above
+    #: refuses up front, which models a pre-auth rejection and skips the
+    #: processing state entirely.
+    AUTH_DECLINE = 'SIMAUTHDECL'
+
 
 def _simulating(reference: str, directive: str) -> bool:
     return bool(reference) and directive in str(reference).upper()
@@ -228,7 +235,10 @@ def get_payment_status(order_id: str) -> dict:
     payment actually settled.
     """
     if _use_sandbox():
-        if _simulating(order_id, Simulate.DECLINE):
+        if (
+            _simulating(order_id, Simulate.DECLINE)
+            or _simulating(order_id, Simulate.AUTH_DECLINE)
+        ):
             return {
                 'ok': True, 'status': 'FAILED', 'paid': False,
                 'failure_code': 'CARD_DECLINED',
@@ -459,10 +469,24 @@ UPI_APPS = [
 
 
 def upi_provider() -> str:
-    """Which rail a UPI collection would actually use right now."""
+    """
+    Which rail a UPI collection would actually use right now.
+
+    Falls back to the simulator when the merchant account has UPI switched off,
+    rather than handing the user to a checkout that cannot serve it. A Razorpay
+    account does not have UPI enabled by default.
+    """
     if not current_app.config.get('RAZORPAY_UPI_ENABLED', True):
         return 'SANDBOX'
-    return 'RAZORPAY' if razorpay.is_configured() else 'SANDBOX'
+    if not razorpay.is_configured():
+        return 'SANDBOX'
+    if not razorpay.supports('upi'):
+        current_app.logger.info(
+            '[adapters] UPI is not enabled on the Razorpay account; '
+            'using the simulator for UPI collection.'
+        )
+        return 'SANDBOX'
+    return 'RAZORPAY'
 
 
 def upi_public_key() -> str:
@@ -705,7 +729,29 @@ def transfer_upi_funding_allowed() -> bool:
     explicit = current_app.config.get('TRANSFER_UPI_FUNDING', '')
     if explicit:
         return explicit == 'True'
+
+    # Offered whenever the gateway is in test mode, regardless of whether the
+    # account has UPI switched on: if it has not, the payment is simulated
+    # rather than withheld. See upi_needs_simulation().
     return razorpay_available() and razorpay.is_test_mode()
+
+
+def upi_needs_simulation() -> bool:
+    """
+    Whether a UPI payment has to be simulated rather than sent to the gateway.
+
+    True when the merchant account does not have UPI switched on. Offering UPI
+    and then handing the user to a checkout that cannot serve it is what
+    produced the "international cards are not supported" dead end: Checkout
+    falls back to a card, and the card fails.
+
+    Simulating instead keeps the whole journey exercisable today, and the day
+    UPI is enabled in the Razorpay dashboard this returns False and the same
+    flow starts going to the real rail with no code change.
+    """
+    if not razorpay.is_configured():
+        return True
+    return not razorpay.supports('upi')
 
 
 def test_upi_vpa() -> str:
@@ -714,6 +760,16 @@ def test_upi_vpa() -> str:
 
 
 def razorpay_available() -> bool:
-    """Whether the Razorpay rail is live for any instrument."""
-    return upi_provider() == 'RAZORPAY'
+    """
+    Whether the Razorpay rail is usable at all.
+
+    Deliberately about configuration, not about UPI. This used to be defined as
+    `upi_provider() == 'RAZORPAY'`, which quietly coupled the card rail to a
+    UPI account setting: switching UPI off would have moved every card transfer
+    away from Razorpay as well, even though the account serves cards perfectly
+    well. Per-method support is `supports()`.
+    """
+    if not current_app.config.get('RAZORPAY_UPI_ENABLED', True):
+        return False
+    return razorpay.is_configured()
 

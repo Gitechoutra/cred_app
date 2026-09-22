@@ -38,6 +38,7 @@ def init_app(app):
     from portal.routes.transfers import ns as transfers_ns
     from portal.routes.emi import ns as emi_ns
     from portal.routes.emi_payments import ns as emi_payments_ns
+    from portal.routes.qr_payments import ns as qr_payments_ns
     from portal.routes.mandates import ns as mandates_ns
     from portal.routes.transactions import ns as transactions_ns
     from portal.routes.notifications import ns as notifications_ns
@@ -55,6 +56,7 @@ def init_app(app):
     api.add_namespace(transfers_ns, path='/transfers')
     api.add_namespace(emi_ns, path='/emi')
     api.add_namespace(emi_payments_ns, path='/emi-payments')
+    api.add_namespace(qr_payments_ns, path='/qr-payments')
     api.add_namespace(mandates_ns, path='/mandates')
     api.add_namespace(transactions_ns, path='/transactions')
     api.add_namespace(notifications_ns, path='/notifications')

@@ -147,8 +147,17 @@ def test_iso_timestamp_is_accepted(client):
 # -- Payout reference round trip -------------------------------------------
 
 class _FakeTransfer:
-    def __init__(self, transfer_id):
+    """
+    Minimal stand-in for a Transfers row.
+
+    `card` is part of the contract now: order_request_id reads the funding
+    card's test_scenario to append a sandbox directive. None here means an
+    ordinary card, which is the case this test is about.
+    """
+
+    def __init__(self, transfer_id, card=None):
         self.transfer_id = transfer_id
+        self.card = card
 
 
 def test_payout_reference_round_trips():

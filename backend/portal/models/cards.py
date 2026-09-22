@@ -63,6 +63,12 @@ class Cards(db.Model, TimestampMixin, CRUDMixin):
     brand_color = db.Column(db.String(9), nullable=True)
     nickname = db.Column(db.String(100), nullable=True)
 
+    # Set only for a predefined test card, and only while test mode is on. It
+    # is what makes a simulated outcome reproducible: the scenario is chosen
+    # when the card is linked, then replayed on every payment it funds.
+    # NULL on every real card, which is also how the UI knows what to badge.
+    test_scenario = db.Column(db.String(30), nullable=True)
+
     status = db.Column(db.String(20), default=CardStatus.ACTIVE, nullable=False)
     is_transfer_eligible = db.Column(db.Boolean, default=True)
 

@@ -66,6 +66,36 @@ export default function AddCard() {
   const [looking, setLooking] = useState(false);
 
   const digits = number.replace(/\D/g, '');
+
+  // Absent in production - the endpoint 404s, so the picker simply never
+  // renders and nothing else on this screen changes.
+  const [testCards, setTestCards] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    endpoints.cards
+      .testCards()
+      .then((response) => !cancelled && setTestCards(response.data))
+      .catch(() => {
+        /* Test mode is off. Not an error worth showing anyone. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** Fill the form from a catalogue card, so nobody retypes sixteen digits. */
+  function useTestCard(card) {
+    setNumber(card.formatted);
+    setExpiry(`${card.expiry_month}/${String(card.expiry_year).slice(-2)}`);
+    setName(card.cardholder_name);
+    setLimit(String(card.card_limit));
+    setSelectedBank({
+      name: card.issuer_bank,
+      brandColor: card.brand_color,
+      sampleBin: card.bin,
+    });
+  }
   const debounce = useRef();
 
   // Filter banks based on search input (returns empty array if no query)
@@ -500,6 +530,61 @@ export default function AddCard() {
               </div>
             </div>
           </div>
+
+          {/* Test mode. Rendered only when the server says so, and stated
+              plainly rather than tucked away - somebody looking at this screen
+              should never be unsure whether a real card is about to be
+              charged. */}
+          {testCards?.cards?.length > 0 && (
+            <div className="mb-5 overflow-hidden rounded-2xl border border-amber-300 bg-amber-50">
+              <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-100/70 px-4 py-2.5">
+                <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md bg-amber-500 text-white">
+                  <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M12 9v4M12 17h.01" strokeLinecap="round" />
+                    <path d="M10.3 3.9L2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" strokeLinejoin="round" />
+                  </svg>
+                </span>
+                <p className="text-2xs font-bold uppercase tracking-[0.14em] text-amber-900">
+                  Test mode — simulated cards
+                </p>
+              </div>
+
+              <div className="px-4 py-3.5">
+                <p className="text-xs leading-relaxed text-amber-900/80">
+                  {testCards.notice}
+                </p>
+
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {testCards.cards.map((card) => (
+                    <button
+                      key={card.number}
+                      type="button"
+                      onClick={() => useTestCard(card)}
+                      className={cx(
+                        'group rounded-xl border border-amber-200 bg-canvas p-3 text-left',
+                        'transition-all duration-base ease-glide',
+                        'hover:-translate-y-0.5 hover:border-amber-400 hover:shadow-card',
+                        'active:translate-y-0 active:scale-[0.98]',
+                      )}
+                    >
+                      <p className="text-xs font-bold text-ink">{card.label}</p>
+                      <p className="money mt-1 text-2xs tracking-wider text-slate">
+                        {card.formatted}
+                      </p>
+                      <p className="mt-1.5 text-2xs leading-relaxed text-slate">
+                        {card.description}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+
+                <p className="mt-3 text-2xs text-amber-900/70">
+                  CVV {testCards.cards[0]?.cvv} for every card. Pick one to fill
+                  the form.
+                </p>
+              </div>
+            </div>
+          )}
 
           <Input
             label="Card number"

@@ -19,6 +19,7 @@ import { money } from '../../utils/format';
 export function PaymentMethodPicker({
   amount,
   caption,
+  testMode,
   methods = [],
   prohibited = [],
   upiApps = [],
@@ -105,6 +106,38 @@ export function PaymentMethodPicker({
             On a phone, your UPI app opens with the amount filled in. On a
             desktop you will get a QR code to scan.
           </p>
+        </div>
+      )}
+
+      {/* Test mode. Stated here because the gateway's own test cards and ours
+          are different sets, and finding that out at the checkout sheet - as
+          an "international cards are not supported" refusal - is a poor way to
+          learn it. */}
+      {testMode && (
+        <div className="overflow-hidden rounded-xl border border-amber-300 bg-amber-50">
+          <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-100/70 px-3.5 py-2">
+            <span className="grid h-4 w-4 shrink-0 place-items-center rounded bg-amber-500 text-white">
+              <svg viewBox="0 0 24 24" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="3">
+                <path d="M12 9v4M12 17h.01" strokeLinecap="round" />
+              </svg>
+            </span>
+            <p className="text-2xs font-bold uppercase tracking-[0.14em] text-amber-900">
+              Test mode — no real money moves
+            </p>
+          </div>
+
+          <div className="space-y-1.5 px-3.5 py-3 text-2xs leading-relaxed text-amber-900/80">
+            <p>
+              <span className="font-semibold text-amber-900">UPI is the reliable path here.</span>{' '}
+              The gateway&rsquo;s test mode simulates it end to end.
+            </p>
+            <p>
+              Card payments at the gateway need <em>its</em> test card numbers,
+              not CashU&rsquo;s — ours are refused there as international. A
+              CashU test card added from the Cards screen skips the gateway
+              entirely and simulates the whole flow locally.
+            </p>
+          </div>
         </div>
       )}
 

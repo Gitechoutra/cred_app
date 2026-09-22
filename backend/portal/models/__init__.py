@@ -76,4 +76,8 @@ def init_app(app):
             SupportTickets, SupportMessages, SupportSenderRole,
             TicketStatus, TicketCategory,
         )
+        from .transaction_errors import (  # noqa: F401
+            TransactionErrors, ErrorType,
+        )
+        from .qr_payments import QRPayments, QRPaymentState  # noqa: F401
         from .platform_statistics import PlatformStatistics

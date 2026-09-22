@@ -282,9 +282,21 @@ export const endpoints = {
     list: () => api.get('/cards'),
     get: (id) => api.get(`/cards/${id}`),
     lookupBin: (bin) => api.get(`/cards/networks/lookup/${bin}`),
+    // Predefined dummy cards. 404s when test mode is off, which is how the UI
+    // knows not to show the picker at all.
+    testCards: () => api.get('/cards/test-cards'),
     link: (data) => api.post('/cards', data),
     update: (id, data) => api.patch(`/cards/${id}`, data),
     unlink: (id) => api.del(`/cards/${id}`),
+  },
+  qrPayments: {
+    // The scanned string is validated server-side; the client never parses it.
+    decode: (payload) => api.post('/qr-payments/decode', { payload }),
+    pay: (data) => api.pay('/qr-payments', data),
+    get: (id) => api.get(`/qr-payments/${id}`),
+    verify: (id, data) => api.post(`/qr-payments/${id}/verify`, data),
+    cancel: (id) => api.post(`/qr-payments/${id}/cancel`),
+    list: () => api.get('/qr-payments'),
   },
   banks: {
     list: () => api.get('/bank-accounts'),

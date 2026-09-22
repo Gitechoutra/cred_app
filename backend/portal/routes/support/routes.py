@@ -6,12 +6,13 @@ masked, so a dispute can be resolved without exposing identity data.
 """
 
 import random
+import uuid
 
 from flask_jwt_extended import jwt_required
 from flask_restx import Resource, reqparse
 
 from portal import db
-from portal.helpers import audit
+from portal.helpers import audit, support_bot
 from portal.helpers.helpers import (
     ErrorCode, failure, iso, paginated, success,
 )
@@ -24,6 +25,7 @@ from portal.models.support_messages import (
     SupportMessages, SupportSenderRole, SupportTickets, TicketCategory,
     TicketStatus,
 )
+from portal.models.transaction_errors import TransactionErrors
 
 from . import ns
 
@@ -217,3 +219,168 @@ class TicketReply(Resource):
         db.session.commit()
 
         return success(ticket_dict(ticket, with_messages=True), 'Reply sent.')
+
+
+# -- Transaction-aware support -----------------------------------------------
+
+chat_parser = reqparse.RequestParser()
+chat_parser.add_argument('reference_type', type=str, required=True, location='json')
+chat_parser.add_argument('reference_id', type=str, required=True, location='json')
+chat_parser.add_argument('intent', type=str, required=False, location='json')
+
+
+@ns.route('/chat')
+class SupportChat(Resource):
+    @ns.doc('support_chat', security='Bearer')
+    @jwt_required()
+    @active_user_required
+    def post(self):
+        """
+        The transaction-aware assistant.
+
+        Opens with an explanation of *this* payment rather than a greeting, and
+        the client sends an intent rather than free text - the bot only answers
+        questions it can answer truthfully from the record.
+
+        The context is loaded server-side from the reference and scoped to the
+        caller, so nothing the client sends can widen what the bot will discuss.
+        """
+        args = chat_parser.parse_args()
+        user = current_user()
+
+        context = support_bot.load_context(
+            user, args['reference_type'], args['reference_id']
+        )
+
+        if not context:
+            return failure(ErrorCode.NOT_FOUND, 'Payment not found.', 404)
+
+        intent = (args.get('intent') or '').upper()
+        if intent and intent not in support_bot.Intent.CHOICES:
+            return failure(
+                ErrorCode.VALIDATION_ERROR, 'Unknown request.', 400
+            )
+
+        payload = (
+            support_bot.reply(context, intent) if intent
+            else support_bot.opening(context)
+        )
+        payload['context'] = context
+        return success(payload)
+
+
+escalate_parser = reqparse.RequestParser()
+escalate_parser.add_argument('reference_type', type=str, required=True, location='json')
+escalate_parser.add_argument('reference_id', type=str, required=True, location='json')
+escalate_parser.add_argument('note', type=str, required=False, location='json')
+
+
+@ns.route('/escalate')
+class EscalateToSupport(Resource):
+    @ns.doc('escalate_to_support', security='Bearer')
+    @jwt_required()
+    @active_user_required
+    def post(self):
+        """
+        Hand a failed payment to a human, with the details already attached.
+
+        The whole point: the user does not retype the transaction id, the
+        amount, the method or the reason. The ticket opens with a system
+        message carrying all of it, and the error row is linked back so an
+        agent reviewing the failure can see the conversation.
+        """
+        args = escalate_parser.parse_args()
+        user = current_user()
+
+        context = support_bot.load_context(
+            user, args['reference_type'], args['reference_id']
+        )
+        if not context:
+            return failure(ErrorCode.NOT_FOUND, 'Payment not found.', 404)
+
+        category = (
+            TicketCategory.TRANSFER_ISSUE
+            if args['reference_type'] == 'Transfers'
+            else TicketCategory.EMI_ISSUE
+        )
+
+        ticket = SupportTickets(
+            user_id=user.user_id,
+            ticket_number=f'TKT{uuid.uuid4().hex[:8].upper()}',
+            category=category,
+            subject=f'Failed payment - {context["error_code"]}',
+            status=TicketStatus.OPEN,
+            priority='HIGH' if not context['is_retryable'] else 'MEDIUM',
+            related_entity_type=args['reference_type'],
+            related_entity_id=args['reference_id'],
+        )
+        db.session.add(ticket)
+        db.session.flush()
+
+        amount = (
+            f'Rs. {context["amount"]:,.2f}' if context['amount'] is not None
+            else 'unknown'
+        )
+        db.session.add(SupportMessages(
+            ticket_id=ticket.ticket_id,
+            sender_role=SupportSenderRole.SYSTEM,
+            sender_name='CashU',
+            body=(
+                f'Transaction: {context["transaction_id"]}\n'
+                f'Amount: {amount}\n'
+                f'Method: {context["payment_method"]}\n'
+                f'Status: {context["status"]}\n'
+                f'Reason: {context["error_message"]}\n'
+                f'Code: {context["error_code"]} ({context["error_type"]})\n'
+                f'When: {context["created_at"]}'
+            ),
+        ))
+
+        if args.get('note'):
+            db.session.add(SupportMessages(
+                ticket_id=ticket.ticket_id,
+                sender_role=SupportSenderRole.USER,
+                sender_id=str(user.user_id),
+                sender_name=user.full_name,
+                body=sanitize_text(args['note'], 1000),
+            ))
+
+        # Link the error row back, so the admin error view and the ticket are
+        # two doors into the same incident.
+        if context.get('error_id'):
+            error_row = TransactionErrors.query.filter_by(
+                error_id=context['error_id']
+            ).first()
+            if error_row:
+                error_row.support_ticket_id = ticket.ticket_id
+
+        db.session.commit()
+
+        return success({
+            'ticket_id': ticket.ticket_id,
+            'ticket_number': ticket.ticket_number,
+            'status': ticket.status,
+        }, 'Our team has your payment details. We will be in touch.', 201)
+
+
+@ns.route('/transaction-error/<string:reference_type>/<string:reference_id>')
+class TransactionErrorDetail(Resource):
+    @ns.doc('get_transaction_error', security='Bearer')
+    @jwt_required()
+    @active_user_required
+    def get(self, reference_type, reference_id):
+        """
+        Why one payment failed, for the failure screen.
+
+        Returns the user-facing view only: no gateway payload, no provider
+        text. Those are for support, not for the person who just lost a
+        payment.
+        """
+        user = current_user()
+        context = support_bot.load_context(user, reference_type, reference_id)
+
+        if not context:
+            return failure(ErrorCode.NOT_FOUND, 'Payment not found.', 404)
+
+        return success(context)
+

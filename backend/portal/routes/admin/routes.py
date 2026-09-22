@@ -19,7 +19,9 @@ from flask_restx import Resource, reqparse
 from sqlalchemy import func
 
 from portal import db
-from portal.helpers import audit, ledger_engine, settings, transfer_engine
+from portal.helpers import (
+    audit, error_recorder, ledger_engine, settings, transfer_engine,
+)
 from portal.helpers.helpers import (
     ErrorCode, failure, iso, paginated, success, to_float,
 )
@@ -29,6 +31,7 @@ from portal.helpers.validators import (
     sanitize_text, validate_date, validate_pagination,
 )
 from portal.models.audit_logs import AdminActivityLogs, AuditLogs
+from portal.models.transaction_errors import TransactionErrors
 from portal.models.auto_pay_mandates import AutoPayMandates, MandateStatus
 from portal.models.bank_accounts import BankAccounts
 from portal.models.base import utcnow
@@ -1224,3 +1227,166 @@ class VerifyEMI(Resource):
         )
 
         return success({'admin_verified': True}, 'EMI obligation verified.')
+
+
+# -- Transaction error monitoring --------------------------------------------
+
+error_list_parser = reqparse.RequestParser()
+error_list_parser.add_argument('page', type=int, default=1, location='args')
+error_list_parser.add_argument('per_page', type=int, default=25, location='args')
+error_list_parser.add_argument('error_type', type=str, required=False, location='args')
+error_list_parser.add_argument('search', type=str, required=False, location='args')
+error_list_parser.add_argument('resolved', type=str, required=False, location='args')
+
+resolve_parser = reqparse.RequestParser()
+resolve_parser.add_argument('notes', type=str, required=True, location='json')
+
+
+@ns.route('/transaction-errors')
+class AdminTransactionErrors(Resource):
+    @ns.doc('list_transaction_errors', security='Bearer')
+    @jwt_required()
+    @roles_required(RoleTypes.L1_SUPPORT, RoleTypes.L2_RISK_RECON,
+                    RoleTypes.L3_SUPER_ADMIN)
+    def get(self):
+        """
+        Failed payments, newest first.
+
+        L1 sees this because it is the first thing a support agent needs when a
+        customer calls: the reason, in words, against a transaction id they can
+        search. The sanitised gateway payload is included for diagnosis - it
+        has already had card numbers, CVVs and tokens stripped at write time,
+        so there is nothing here to withhold from an agent.
+        """
+        args = error_list_parser.parse_args()
+        page, per_page = validate_pagination(args['page'], args['per_page'])
+
+        query = TransactionErrors.query
+
+        if args.get('error_type'):
+            query = query.filter(TransactionErrors.error_type == args['error_type'])
+
+        if args.get('resolved') in ('true', 'false'):
+            query = query.filter(
+                TransactionErrors.is_resolved.is_(args['resolved'] == 'true')
+            )
+
+        term = (args.get('search') or '').strip()
+        if term:
+            like = f'%{term}%'
+            query = query.filter(db.or_(
+                TransactionErrors.transaction_id.like(like),
+                TransactionErrors.reference_id.like(like),
+                TransactionErrors.error_code.like(like),
+            ))
+
+        pagination = query.order_by(
+            TransactionErrors.created_on.desc()
+        ).paginate(page=page, per_page=per_page, error_out=False)
+
+        return paginated(
+            [error_recorder.to_dict(row, detailed=True) for row in pagination.items],
+            page, per_page, pagination.total,
+        )
+
+
+@ns.route('/transaction-errors/summary')
+class AdminErrorSummary(Resource):
+    @ns.doc('transaction_error_summary', security='Bearer')
+    @jwt_required()
+    @roles_required(RoleTypes.L1_SUPPORT, RoleTypes.L2_RISK_RECON,
+                    RoleTypes.L3_SUPER_ADMIN)
+    def get(self):
+        """
+        Failures grouped by type, and the users hitting them repeatedly.
+
+        The repeat list is the useful half. One declined card is a customer
+        having a bad day; the same user failing six times in an hour is either
+        a broken instrument or someone probing, and both want attention before
+        a ticket arrives.
+        """
+        since = utcnow() - timedelta(days=7)
+
+        by_type = db.session.query(
+            TransactionErrors.error_type,
+            func.count(TransactionErrors.error_id),
+        ).filter(
+            TransactionErrors.created_on >= since
+        ).group_by(TransactionErrors.error_type).all()
+
+        repeats = db.session.query(
+            TransactionErrors.user_id,
+            func.count(TransactionErrors.error_id).label('failures'),
+        ).filter(
+            TransactionErrors.created_on >= since
+        ).group_by(TransactionErrors.user_id).having(
+            func.count(TransactionErrors.error_id) >= 3
+        ).order_by(func.count(TransactionErrors.error_id).desc()).limit(20).all()
+
+        repeat_rows = []
+        for user_id, failures in repeats:
+            user = Users.query.filter_by(user_id=user_id).first()
+            repeat_rows.append({
+                'user_id': user_id,
+                'masked_phone': user.masked_phone() if user else None,
+                'failures': failures,
+            })
+
+        return success({
+            'window_days': 7,
+            'total': sum(count for _, count in by_type),
+            'unresolved': TransactionErrors.query.filter_by(is_resolved=False).count(),
+            'by_type': [
+                {'error_type': t, 'count': c}
+                for t, c in sorted(by_type, key=lambda r: -r[1])
+            ],
+            'repeat_failures': repeat_rows,
+        })
+
+
+@ns.route('/transaction-errors/<string:error_id>/resolve')
+class AdminResolveError(Resource):
+    @ns.doc('resolve_transaction_error', security='Bearer')
+    @jwt_required()
+    @roles_required(RoleTypes.L1_SUPPORT, RoleTypes.L2_RISK_RECON,
+                    RoleTypes.L3_SUPER_ADMIN)
+    def post(self, error_id):
+        """
+        Mark a failure handled.
+
+        Requires a note, and the note goes into the audit trail with the
+        agent's name. Resolving is a statement that somebody looked - an empty
+        one is worth nothing to the next person who opens the record.
+        """
+        args = resolve_parser.parse_args()
+        notes = sanitize_text(args['notes'], 1000)
+
+        if not notes:
+            return failure(
+                ErrorCode.VALIDATION_ERROR,
+                'A resolution note is required.',
+                400,
+            )
+
+        row = TransactionErrors.query.filter_by(error_id=error_id).first()
+        if not row:
+            return failure(ErrorCode.NOT_FOUND, 'Error record not found.', 404)
+
+        actor = current_user()
+        row.is_resolved = True
+        row.resolved_at = utcnow()
+        row.resolved_by = str(actor.user_id)
+        row.resolution_notes = notes
+        db.session.commit()
+
+        audit.record(
+            action='TRANSACTION_ERROR_RESOLVED',
+            entity_type='TransactionErrors',
+            entity_id=error_id,
+            actor_user_id=str(actor.user_id),
+            after={'error_code': row.error_code, 'notes': notes},
+        )
+
+        return success(error_recorder.to_dict(row, detailed=True),
+                       'Marked as resolved.')
+

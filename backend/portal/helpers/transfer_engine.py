@@ -34,6 +34,7 @@ from sqlalchemy import func
 
 from portal import db
 from portal.helpers import (
+    error_recorder,
     adapters, audit, fee_calculator, ledger_engine, risk_engine, settings,
 )
 from portal.helpers.encryption import decrypt
@@ -101,8 +102,30 @@ def _short_id(transfer: Transfers) -> str:
 
 
 def order_request_id(transfer: Transfers) -> str:
-    """The PG order id CashU sends for the inbound card charge."""
-    return f'{_ORDER_PREFIX}{_short_id(transfer)}'
+    """
+    The PG order id CashU sends for the inbound card charge.
+
+    When the funding card is a predefined test card, its scenario is appended
+    as a sandbox directive. That keeps simulation out of the payment logic
+    entirely: `create_payment_order` and `confirm_charge` are unchanged and
+    unaware, and the sandbox adapter - which already reads directives out of
+    reference ids for failure injection - does the work.
+
+    The directive is inert on any live rail, because a real gateway has no
+    opinion about the contents of an order id. It cannot be reached anyway:
+    a test card cannot be linked unless the sandbox adapters are active.
+    """
+    reference = f'{_ORDER_PREFIX}{_short_id(transfer)}'
+
+    card = transfer.card
+    scenario = getattr(card, 'test_scenario', None) if card else None
+    if scenario:
+        from portal.helpers import test_cards
+        token = test_cards.simulation_token(scenario)
+        if token:
+            return f'{reference}{token}'
+
+    return reference
 
 
 def payout_request_id(transfer: Transfers) -> str:
@@ -182,7 +205,8 @@ def quote(*, user, amount) -> dict:
 
 
 def initiate(*, user, card, bank_account, amount, idempotency_key: str,
-             device_uuid: str = None, ip: str = None) -> Transfers:
+             device_uuid: str = None, ip: str = None,
+             payment_method: str = None) -> Transfers:
     """
     Open a transfer: risk check, price it, and create the gateway order.
 
@@ -295,8 +319,30 @@ def initiate(*, user, card, bank_account, amount, idempotency_key: str,
         tags={'transfer_id': transfer.transfer_id, 'type': 'CARD_TO_BANK'},
     )
 
+    # A test card must never reach a payment gateway. Without this it would:
+    # the Razorpay branch keys off configuration alone, so linking a dummy card
+    # and transferring would open a real order against the merchant account and
+    # then sit unpaid forever, because nobody can complete a checkout for a card
+    # that does not exist.
+    #
+    # Forcing the sandbox is also what makes the scenarios work at all - the
+    # directive in the order reference is only meaningful to the simulator.
+    is_test_card = bool(getattr(card, 'test_scenario', None))
+
+    # UPI is offered before the account can serve it, so that the flow is
+    # exercisable today. When the gateway has UPI switched off the collection
+    # is simulated rather than sent - otherwise Checkout falls back to a card
+    # and fails with an error about international cards, which describes
+    # neither what the user chose nor what went wrong.
+    simulate_upi = (
+        (payment_method or '').upper() == 'UPI'
+        and adapters.upi_needs_simulation()
+    )
+
     use_razorpay = (
-        adapters.razorpay_available()
+        not is_test_card
+        and not simulate_upi
+        and adapters.razorpay_available()
         and current_app.config.get('RAZORPAY_TRANSFERS_ENABLED', True)
     )
 
@@ -315,6 +361,19 @@ def initiate(*, user, card, bank_account, amount, idempotency_key: str,
         transfer.failure_reason = order.get('error')
         db.session.commit()
 
+        error_recorder.record(
+            user_id=transfer.user_id,
+            code=transfer.failure_code,
+            reason=transfer.failure_reason,
+            reference_type='Transfers',
+            reference_id=transfer.transfer_id,
+            payment_method='CREDIT_CARD',
+            gateway=order.get('provider'),
+            amount=breakdown['total_charged_to_card'],
+            transaction_status=transfer.status,
+            gateway_response=order,
+        )
+
         if order.get('timeout'):
             raise TransferError(
                 'Payment status is pending confirmation from your bank. '
@@ -328,7 +387,23 @@ def initiate(*, user, card, bank_account, amount, idempotency_key: str,
         )
 
     transfer.gateway_provider = order['provider']
-    transfer.gateway_order_id = order.get('gateway_order_id') or order.get('order_id')
+    if simulate_upi:
+        transfer.source_instrument = 'upi'
+        transfer.source_vpa = adapters.test_upi_vpa() or None
+
+    # Which id to keep depends on the rail, and getting this wrong is silent.
+    #
+    # Razorpay's own order id lives in `gateway_order_id` and is what every
+    # later API call must quote. The sandbox returns a decorative one there but
+    # expects to be handed back the *reference we gave it* - that string
+    # carries the failure-injection directive, so preferring `gateway_order_id`
+    # for the sandbox throws the directive away and every simulated decline
+    # silently succeeds.
+    transfer.gateway_order_id = (
+        order.get('gateway_order_id')
+        if order['provider'] == 'RAZORPAY'
+        else order.get('order_id') or order.get('gateway_order_id')
+    )
     transfer.three_ds_url = order.get('checkout_url')
     _transition(transfer, TransferStatus.AUTH_PENDING)
 
@@ -449,7 +524,11 @@ def confirm_charge(
         transfer.source_vpa = status.get('vpa')
     else:
         status = adapters.get_payment_status(transfer.gateway_order_id)
-        transfer.source_instrument = 'card'
+        # A simulated UPI collection is still a UPI collection as far as the
+        # ledger and the credit line are concerned: the money did not come off
+        # the card, so its limit must not be drawn down.
+        if transfer.source_instrument != 'upi':
+            transfer.source_instrument = 'card'
 
     if not status.get('ok'):
         current_app.logger.warning(
@@ -467,6 +546,22 @@ def confirm_charge(
             'No funds were debited.',
         )
         db.session.commit()
+
+        # Recorded after the commit: the failure is the important write, and
+        # the diagnostic must never be able to roll it back.
+        error_recorder.record(
+            user_id=transfer.user_id,
+            code=transfer.failure_code,
+            reason=transfer.failure_reason,
+            reference_type='Transfers',
+            reference_id=transfer.transfer_id,
+            transaction_id=transfer.transaction_id,
+            payment_method=(transfer.source_instrument or 'CREDIT_CARD').upper(),
+            gateway=transfer.gateway_provider,
+            amount=transfer.total_charged_to_card,
+            transaction_status=transfer.status,
+            gateway_response=status.get('raw') or status,
+        )
 
         audit.record(
             action='TRANSFER_CHARGE_FAILED',
@@ -647,28 +742,20 @@ def _settle(transfer: Transfers) -> Transfers:
             from portal.models.master_transactions import MasterTransactions
             txn = MasterTransactions.query.get(transfer.transaction_id)
 
-        try:
-            ledger_engine.post(
-                user_id=transfer.user_id,
-                transaction_type=TransactionType.CARD_TO_BANK_TRANSFER,
-                gross_amount=transfer.net_payout_amount,
-                net_amount=transfer.net_payout_amount,
-                source_type=SourceType.CREDIT_CARD_TOKEN,
-                source_masked_ref=transfer.card.masked_pan,
-                dest_type=DestType.BANK_ACCOUNT_IMPS,
-                dest_masked_ref=transfer.bank_account.masked_account(),
-                gateway_provider=transfer.payout_provider or 'SANDBOX',
-                bank_rrn_utr=transfer.bank_rrn_utr,
-                idempotency_key=f'pay_{transfer.idempotency_key}',
-                entries=ledger_engine.entries_for_transfer_payout(
+        # The payout is the second leg of one transfer, not a second payment.
+        # It used to be posted as its own MasterTransactions row, which put
+        # every transfer in the user's history twice - once at the principal,
+        # once at the total charged - and made the summary add them together.
+        # The entries now attach to the transaction the charge created.
+        if txn:
+            ledger_engine.post_entries(
+                txn,
+                ledger_engine.entries_for_transfer_payout(
                     principal=transfer.net_payout_amount,
                     bank_ref=transfer.bank_account.masked_account(),
                 ),
-                status=TransactionStatus.SUCCEEDED,
                 commit=False,
             )
-        except DuplicateTransaction:
-            pass
 
         if txn:
             txn.status = TransactionStatus.SUCCEEDED
@@ -692,20 +779,6 @@ def _settle(transfer: Transfers) -> Transfers:
 
         db.session.commit()
 
-        audit.record(
-            action='TRANSFER_SUCCEEDED',
-            entity_type='Transfers',
-            entity_id=transfer.transfer_id,
-            actor_user_id=str(transfer.user_id),
-            after={
-                'amount': float(transfer.net_payout_amount),
-                'utr': transfer.bank_rrn_utr,
-                'card_balance_after': float(source_closing),
-                'bank_balance_after': float(dest_closing),
-            },
-        )
-        return transfer
-
     except TransferError:
         db.session.rollback()
         raise
@@ -713,6 +786,31 @@ def _settle(transfer: Transfers) -> Transfers:
         db.session.rollback()
         current_app.logger.exception(f'[transfer] settlement failed for {transfer.transfer_id}: {exc}')
         raise TransferError('Transfer failed. No balance was changed.', ErrorCode.INTERNAL_ERROR)
+
+    # Past the commit the money has moved and the transfer has settled. Nothing
+    # below this line may turn that into a reported failure: the rollback in the
+    # handler above would be a no-op against an already-committed transaction,
+    # so the caller would be told "no balance was changed" about a transfer that
+    # changed two balances. Bookkeeping that fails here is logged, not raised.
+    audit.record(
+        action='TRANSFER_SUCCEEDED',
+        entity_type='Transfers',
+        entity_id=transfer.transfer_id,
+        actor_user_id=str(transfer.user_id),
+        after={
+            'amount': float(transfer.net_payout_amount),
+            'utr': transfer.bank_rrn_utr,
+            # None on a UPI-funded transfer: no credit line was drawn down, so
+            # there is no card closing balance to record.
+            'card_balance_after': (
+                float(source_closing) if source_closing is not None else None
+            ),
+            'bank_balance_after': (
+                float(dest_closing) if dest_closing is not None else None
+            ),
+        },
+    )
+    return transfer
 
 
 def _handle_payout_failure(transfer: Transfers, reason: str) -> Transfers:

@@ -12,6 +12,9 @@
 
   html {
     -webkit-tap-highlight-color: transparent;
+    /* Anchor jumps and programmatic scrollTo glide rather than teleport. The
+       reduced-motion block below forces this back to `auto`. */
+    scroll-behavior: smooth;
   }
 
   body {
@@ -192,7 +195,11 @@
       transparent
     );
   }
-  .group:hover .shine::after {
+  /* Two selectors, the same pair .edge-glow uses: the descendant form for a
+     surface that shines when an ancestor is hovered, and the self form for an
+     element that is itself the hover target (a card tile is its own button). */
+  .group:hover .shine::after,
+  .shine:hover::after {
     @apply animate-shine-sweep;
   }
 

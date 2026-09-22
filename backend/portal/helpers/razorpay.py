@@ -25,6 +25,7 @@ Three things about Razorpay drive the design here:
 
 import hashlib
 import hmac
+import time
 from decimal import Decimal, ROUND_HALF_UP
 
 import requests
@@ -158,6 +159,76 @@ def _request(method: str, path: str, payload: dict = None, params: dict = None) 
         'error_code': None if ok else error_body.get('code'),
         'timeout': False,
     }
+
+
+# -- Account capabilities ---------------------------------------------------
+
+#: What the merchant account can actually accept, cached briefly. Which methods
+#: are live is an account setting that changes in a dashboard, not per request,
+#: so re-asking on every page load would be pure latency.
+_METHODS_CACHE = {'at': 0.0, 'value': None}
+_METHODS_TTL = 300
+
+
+def available_methods(refresh: bool = False) -> dict:
+    """
+    The payment methods this merchant account has enabled.
+
+    Worth asking rather than assuming. A Razorpay account does not have UPI
+    switched on by default, and offering a method the gateway cannot serve
+    sends the user to a checkout that falls back to cards and then fails with
+    an error about international cards - which describes neither what they
+    chose nor what went wrong.
+
+    Unauthenticated by design: this endpoint takes the public key id, which is
+    the same value Checkout runs with.
+
+    Returns {} when it cannot be determined. Callers treat that as "no opinion"
+    and fall back to their own configuration rather than hiding every method.
+    """
+    if not is_configured():
+        return {}
+
+    now = time.time()
+    if not refresh and _METHODS_CACHE['value'] is not None:
+        if now - _METHODS_CACHE['at'] < _METHODS_TTL:
+            return _METHODS_CACHE['value']
+
+    try:
+        response = requests.get(
+            f'{_BASE_URL}/methods',
+            params={'key_id': public_key()},
+            timeout=_TIMEOUT,
+        )
+        data = response.json() if response.ok else {}
+    except (requests.RequestException, ValueError) as exc:
+        current_app.logger.warning(f'[razorpay] could not read methods: {exc}')
+        return _METHODS_CACHE['value'] or {}
+
+    if not isinstance(data, dict):
+        data = {}
+
+    _METHODS_CACHE['at'] = now
+    _METHODS_CACHE['value'] = data
+    return data
+
+
+def supports(method: str) -> bool:
+    """
+    Whether one method is live on the account.
+
+    Unknown means True: if the capability check itself failed we would rather
+    offer a method that turns out to be unavailable than silently remove one
+    that works.
+    """
+    methods = available_methods()
+    if not methods:
+        return True
+
+    value = methods.get(method)
+    if isinstance(value, bool):
+        return value
+    return bool(value)
 
 
 # -- Orders -----------------------------------------------------------------

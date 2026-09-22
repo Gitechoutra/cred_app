@@ -23,7 +23,8 @@ from flask import current_app
 
 from portal import db
 from portal.helpers import (
-    adapters, audit, emi_provider_adapter, ledger_engine, settings,
+    adapters, audit, emi_provider_adapter, error_recorder, ledger_engine,
+    settings,
 )
 from portal.helpers.encryption import decrypt
 from portal.helpers.helpers import ErrorCode
@@ -169,6 +170,19 @@ def initiate_payment(
         payment.failure_code = order.get('error_code')
         payment.failure_reason = order.get('error')
         db.session.commit()
+
+        error_recorder.record(
+            user_id=payment.user_id,
+            code=payment.failure_code,
+            reason=payment.failure_reason,
+            reference_type='EMIPayments',
+            reference_id=payment.payment_id,
+            payment_method=payment_mode,
+            gateway=order.get('provider'),
+            amount=amount,
+            transaction_status=payment.status,
+            gateway_response=order,
+        )
         raise EMIPaymentError(
             order.get('error') or 'Could not reach the payment gateway.',
             ErrorCode.PROVIDER_ERROR,
@@ -303,6 +317,20 @@ def confirm_payment(
             else EMIPaymentStatus.DUE
         )
         db.session.commit()
+
+        error_recorder.record(
+            user_id=payment.user_id,
+            code=payment.failure_code,
+            reason=payment.failure_reason,
+            reference_type='EMIPayments',
+            reference_id=payment.payment_id,
+            transaction_id=payment.transaction_id,
+            payment_method=payment.payment_mode,
+            gateway=payment.gateway_provider,
+            amount=payment.amount,
+            transaction_status=payment.status,
+            gateway_response=status.get('raw') or status,
+        )
         return payment
 
     obligation = payment.obligation

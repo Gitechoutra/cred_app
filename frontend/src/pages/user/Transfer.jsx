@@ -118,6 +118,10 @@ export default function Transfer() {
         card_id: card.card_id,
         bank_account_id: bank.bank_account_id,
         amount: numeric,
+        // The server needs the choice: UPI is simulated while the gateway
+        // account has it switched off, and it cannot know that from the
+        // card id alone.
+        payment_method: mode,
       });
 
       const transfer = response.data;
@@ -127,7 +131,7 @@ export default function Transfer() {
       // backend, which is what keeps CashU inside PCI DSS SAQ-A. The handler
       // payload comes back here and goes straight to the server to be verified
       // - it is never treated as proof the card was charged.
-      if (checkout.provider === 'RAZORPAY' && checkout.key) {
+      if (mode !== 'UPI' && checkout.provider === 'RAZORPAY' && checkout.key) {
         setStage('awaiting');
 
         let result;
@@ -239,6 +243,9 @@ export default function Transfer() {
               methods={methods?.permitted || []}
               prohibited={methods?.prohibited || []}
               upiApps={methods?.upi?.apps || []}
+              // A test key is the honest signal: it is the same value the
+              // gateway checkout will open with.
+              testMode={String(methods?.checkout?.key || '').startsWith('rzp_test_')}
               mode={mode}
               onMode={setMode}
               upiApp={upiApp}

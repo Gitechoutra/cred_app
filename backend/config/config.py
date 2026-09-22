@@ -111,6 +111,22 @@ class BaseConfig:
     # so sandbox mode is the default until real credentials are present.
     USE_SANDBOX_ADAPTERS = os.getenv('USE_SANDBOX_ADAPTERS', 'True') == 'True'
 
+    # -- Test cards --------------------------------------------------------
+    # Predefined dummy cards for exercising the credit-card flow without a real
+    # card. Empty means "follow the environment": on in a debug build with the
+    # sandbox adapters active, off everywhere else. 'False' forces it off;
+    # 'True' is the only way to enable it outside a debug build, and even that
+    # still requires the sandbox adapters.
+    #
+    # The real guard is not this string - it is that the backend never receives
+    # a PAN, and that the scenarios are played by the sandbox. See
+    # portal/helpers/test_cards.py.
+    CARD_TEST_MODE = os.getenv('CARD_TEST_MODE', '')
+
+    # Which config was loaded, so code can refuse to do development-only things
+    # in production without inferring it from DEBUG alone.
+    ENV_NAME = os.getenv('ENVIRONMENT', 'development').lower()
+
     # -- Encryption --------------------------------------------------------
     # AES-256-GCM field-level key for PII (PRD 17.1). 32 raw bytes, base64'd.
     FIELD_ENCRYPTION_KEY = os.getenv('FIELD_ENCRYPTION_KEY', '')

@@ -6,10 +6,14 @@ export default defineConfig({
   server: {
     port: 3000,
     strictPort: true,
-    // Bind all interfaces rather than IPv6 localhost only. CashU is mobile-first
-    // and the layout genuinely needs checking on a real handset, which means the
-    // dev server has to be reachable from the phone on the same network.
-    host: true,
+    // Loopback only, so the dev server is not reachable from anything else on
+    // the network and Vite prints just the Local URL.
+    //
+    // This was `host: true` to allow checking the mobile-first layout on a real
+    // handset. If you need that again, set it back temporarily - but be aware it
+    // exposes the dev server, and its /v1 proxy into the Flask API, to every
+    // device on the LAN.
+    host: 'localhost',
     // Proxy /v1 to the Flask API in development so the browser sees one origin.
     // This keeps cookies and CORS out of the way locally; in production nginx
     // serves the bundle and the API is reached by its own URL.

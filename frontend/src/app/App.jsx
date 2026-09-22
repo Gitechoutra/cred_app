@@ -18,6 +18,7 @@ import AdminLogin from '../pages/auth/AdminLogin';
 /* Member */
 import Home from '../pages/user/Home';
 import Hub from '../pages/user/Hub';
+import ScanPay from '../pages/user/ScanPay';
 import Cards from '../pages/user/Cards';
 import CardDetail from '../pages/user/CardDetail';
 import AddCard from '../pages/user/AddCard';
@@ -156,6 +157,7 @@ export default function App() {
       <Route path="/banks" element={<RequireAuth><Shell><BankAccounts /></Shell></RequireAuth>} />
       <Route path="/banks/add" element={<RequireAuth><Shell><AddBankAccount /></Shell></RequireAuth>} />
 
+      <Route path="/scan" element={<RequireAuth><Shell><ScanPay /></Shell></RequireAuth>} />
       <Route path="/transfer" element={<RequireAuth><Shell><Transfer /></Shell></RequireAuth>} />
       <Route path="/transfer/status/:transferId" element={<RequireAuth><Shell><TransferStatus /></Shell></RequireAuth>} />
 

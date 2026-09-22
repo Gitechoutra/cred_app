@@ -155,6 +155,13 @@ export default {
           '0%, 100%': { backgroundPosition: '0% 50%' },
           '50%': { backgroundPosition: '100% 50%' },
         },
+        // The scanner sweep. Travels the height of the frame and returns,
+        // transform only so it never repaints over the camera feed.
+        'scan-line': {
+          '0%': { transform: 'translateY(0)', opacity: '0.2' },
+          '50%': { opacity: '1' },
+          '100%': { transform: 'translateY(13.5rem)', opacity: '0.2' },
+        },
         'shine-sweep': {
           '0%': { transform: 'translateX(-120%) skewX(-16deg)', opacity: '0' },
           '35%': { opacity: '1' },
@@ -184,6 +191,7 @@ export default {
         'drift-slow': 'drift 34s ease-in-out infinite',
         'gradient-pan': 'gradient-pan 14s ease-in-out infinite',
         'shine-sweep': 'shine-sweep 900ms cubic-bezier(0.16,1,0.3,1)',
+        'scan-line': 'scan-line 2.2s ease-in-out infinite alternate',
       },
     },
   },

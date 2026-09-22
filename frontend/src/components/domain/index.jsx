@@ -28,7 +28,11 @@ export function CardTile({ card, onClick, compact = false }) {
       onClick={onClick}
       className={cx(
         'group relative w-full overflow-hidden rounded-2xl p-4 text-left',
-        'transition-transform active:scale-[0.985]',
+        // Lift and shadow on hover, settling back on press. The shine sweep is
+        // the shared .shine treatment used on the landing page, so a card
+        // behaves the same wherever it appears.
+        'shine transition-all duration-base ease-glide',
+        'hover:-translate-y-0.5 hover:shadow-lift active:translate-y-0 active:scale-[0.985]',
         compact ? 'min-h-[124px]' : 'min-h-[156px]',
       )}
       style={{ backgroundColor: colour }}
@@ -55,11 +59,22 @@ export function CardTile({ card, onClick, compact = false }) {
             </p>
           </div>
 
-          {card.status !== 'ACTIVE' && (
-            <span className="shrink-0 rounded-full bg-white/15 px-2 py-0.5 text-2xs font-semibold text-white">
-              {statusLabel(card.status)}
-            </span>
-          )}
+          <div className="flex shrink-0 items-center gap-1.5">
+            {/* Amber, on the card face itself. A simulated card should be
+                identifiable at a glance from anywhere it appears, not only on
+                the screen where it was added. */}
+            {card.is_test_card && (
+              <span className="rounded-full bg-amber-400 px-2 py-0.5 text-2xs font-bold uppercase tracking-wide text-amber-950">
+                Test
+              </span>
+            )}
+
+            {card.status !== 'ACTIVE' && (
+              <span className="rounded-full bg-white/15 px-2 py-0.5 text-2xs font-semibold text-white">
+                {statusLabel(card.status)}
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="space-y-2.5">
