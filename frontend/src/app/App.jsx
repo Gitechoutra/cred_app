@@ -110,9 +110,16 @@ function RedirectIfAuthed({ children }) {
 
 /** Member routes render inside the shell with its bottom navigation. */
 function Shell({ children }) {
+  // Keyed on the path so React remounts this node on every navigation, which
+  // restarts the entrance animation. Doing it here means every member page
+  // gets the transition without any of them knowing about it.
+  const { pathname } = useLocation();
+
   return (
     <AppShell>
-      <ErrorBoundary>{children}</ErrorBoundary>
+      <div key={pathname} className="page-enter">
+        <ErrorBoundary>{children}</ErrorBoundary>
+      </div>
     </AppShell>
   );
 }

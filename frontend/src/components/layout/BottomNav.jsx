@@ -49,7 +49,8 @@ function BottomNavItem({ to, label, icon: Icon, end }) {
       className={({ isActive }) =>
         cx(
           'flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-1.5',
-          'transition-colors sm:w-[4.5rem] sm:flex-none sm:px-2 sm:py-2',
+          'transition-all duration-base ease-glide active:scale-95',
+          'sm:w-[4.5rem] sm:flex-none sm:px-2 sm:py-2',
           isActive ? 'bg-mint-50 text-ink' : 'text-slate hover:bg-mist hover:text-ink',
         )
       }
@@ -57,9 +58,10 @@ function BottomNavItem({ to, label, icon: Icon, end }) {
       {({ isActive }) => (
         <>
           <Icon
+            key={isActive ? 'on' : 'off'}
             className={cx(
               'h-[22px] w-[22px] shrink-0 transition-colors',
-              isActive && 'text-mint-700',
+              isActive && 'animate-pop text-mint-700',
             )}
           />
           <span
@@ -120,7 +122,7 @@ export function ProfileMenu({ name, detail, avatar, items }) {
         aria-label="Account menu"
         className={cx(
           'flex w-full flex-col items-center justify-center gap-1 rounded-xl px-1 py-1.5',
-          'transition-colors sm:w-[4.5rem] sm:px-2 sm:py-2',
+          'transition-all duration-base ease-glide active:scale-95 sm:w-[4.5rem] sm:px-2 sm:py-2',
           open ? 'bg-mint-50 text-ink' : 'text-slate hover:bg-mist hover:text-ink',
         )}
       >

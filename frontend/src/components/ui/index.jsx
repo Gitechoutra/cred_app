@@ -112,9 +112,11 @@ export function Input({
 
       <div
         className={cx(
-          'flex items-center gap-2 rounded-xl border bg-canvas px-3.5 transition-colors',
-          'h-12',
-          error ? 'border-alert' : 'border-line focus-within:border-ink/40',
+          'flex items-center gap-2 rounded-xl border bg-canvas px-3.5',
+          'transition-all duration-base ease-glide h-12',
+          error
+            ? 'border-alert ring-2 ring-alert/15'
+            : 'border-line focus-within:border-ink/40 focus-within:ring-2 focus-within:ring-mint/20',
         )}
       >
         {prefix && <span className="shrink-0 text-sm text-slate">{prefix}</span>}
@@ -132,7 +134,12 @@ export function Input({
       </div>
 
       {(error || hint) && (
-        <p className={cx('mt-1.5 text-xs', error ? 'text-alert' : 'text-slate')}>
+        <p
+          className={cx(
+            'mt-1.5 text-xs',
+            error ? 'animate-slide-down text-alert' : 'text-slate',
+          )}
+        >
           {error || hint}
         </p>
       )}
@@ -149,7 +156,10 @@ export function Card({ className, children, onClick, ...props }) {
     <div
       className={cx(
         'card-surface p-4',
-        interactive && 'cursor-pointer transition-shadow hover:shadow-lift active:scale-[0.995]',
+        // Transform and shadow only - both composited, so a list of these
+        // stays smooth on a mid-range phone.
+        interactive && 'cursor-pointer transition-all duration-base ease-glide '
+          + 'hover:-translate-y-0.5 hover:shadow-lift active:translate-y-0 active:scale-[0.995]',
         className,
       )}
       onClick={onClick}

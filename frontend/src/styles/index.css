@@ -63,6 +63,16 @@
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+
+    .reveal,
+    .stagger > *,
+    .stagger-group > :first-child {
+      opacity: 1 !important;
+      transform: none !important;
+      transition: none !important;
+      animation: none !important;
     }
   }
 }
@@ -92,4 +102,145 @@
       rgba(255, 255, 255, 0) 100%
     );
   }
+}
+
+@layer components {
+  /* ── Scroll reveal ───────────────────────────────────────────────────
+     Driven by useReveal(), which adds `is-visible` once and then stops
+     observing. Only opacity and transform animate, so it stays on the
+     compositor and never triggers layout. */
+  .reveal {
+    opacity: 0;
+    transform: translateY(14px);
+    transition:
+      opacity 520ms cubic-bezier(0.16, 1, 0.3, 1),
+      transform 520ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .reveal.is-visible {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* ── Staggered entrance ──────────────────────────────────────────────
+     A 70ms step: wide enough that the sequence reads as a sequence. At 40ms
+     it blurs into one event and the choreography is wasted. Capped at eight
+     so the last child never feels like a loading bug. */
+  .stagger > * {
+    @apply animate-tile-in;
+  }
+  .stagger > *:nth-child(1) { animation-delay: 40ms; }
+  .stagger > *:nth-child(2) { animation-delay: 110ms; }
+  .stagger > *:nth-child(3) { animation-delay: 180ms; }
+  .stagger > *:nth-child(4) { animation-delay: 250ms; }
+  .stagger > *:nth-child(5) { animation-delay: 320ms; }
+  .stagger > *:nth-child(6) { animation-delay: 390ms; }
+  .stagger > *:nth-child(7) { animation-delay: 460ms; }
+  .stagger > *:nth-child(n + 8) { animation-delay: 530ms; }
+
+  /* A section whose heading leads its own contents, so the eye is told where
+     to look before anything arrives there. */
+  .stagger-group > :first-child {
+    @apply animate-label-in;
+  }
+
+  /* ── Route transition ────────────────────────────────────────────────
+     Keyed on pathname in the shell. Deliberately brief - it fires on every
+     navigation, and a page transition the user notices is too slow. */
+  .page-enter {
+    @apply animate-page-in;
+  }
+
+  /* Hint the compositor only while something is moving. Leaving will-change
+     on permanently costs memory on every card in a long list. */
+  .reveal,
+  .page-enter,
+  .stagger > * {
+    will-change: opacity, transform;
+  }
+
+  .reveal.is-visible {
+    will-change: auto;
+  }
+
+  /* ── Landing atmosphere ──────────────────────────────────────────────
+     Soft colour behind the hero and the closing CTA. Blur is expensive, so
+     there are only ever a few of these, they are large, and they animate
+     transform rather than anything that would force a repaint. */
+  .orb {
+    @apply pointer-events-none absolute rounded-full;
+    filter: blur(72px);
+    opacity: 0.55;
+  }
+
+  /* A gradient that slowly pans. `background-size` above 100% is what gives
+     the position animation somewhere to travel. */
+  .mesh {
+    background-size: 200% 200%;
+    @apply animate-gradient-pan;
+  }
+
+  /* One pass of light across a surface on hover. The element is masked by the
+     parent's overflow-hidden and never intercepts a click. */
+  .shine::after {
+    content: '';
+    @apply pointer-events-none absolute inset-y-0 -left-1/3 w-1/3 opacity-0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.55),
+      transparent
+    );
+  }
+  .group:hover .shine::after {
+    @apply animate-shine-sweep;
+  }
+
+  /* A mint edge that lights up on hover, drawn as a gradient ring so it can
+     glow without shifting layout the way a border-width change would. */
+  .edge-glow {
+    position: relative;
+  }
+  .edge-glow::before {
+    content: '';
+    @apply pointer-events-none absolute inset-0 rounded-[inherit] opacity-0;
+    padding: 1px;
+    background: linear-gradient(140deg, theme('colors.mint.DEFAULT'), transparent 55%);
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    transition: opacity 260ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .group:hover .edge-glow::before,
+  .edge-glow:hover::before {
+    opacity: 1;
+  }
+
+  /* Text that wipes up into place. The span is the moving part; the parent
+     clips it, so there is no fade - the line arrives from behind its own
+     baseline, which reads as typeset rather than animated. */
+  .line-clip {
+    @apply block overflow-hidden;
+  }
+  .line-clip > * {
+    @apply block;
+    animation: reveal 720ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb,
+  .mesh,
+  .shine::after,
+  .line-clip > * {
+    animation: none !important;
+    transform: none !important;
+  }
+  .line-clip > * {
+    opacity: 1 !important;
+  }
+  /* Parallax is applied as an inline transform, so it needs neutralising by
+     the hook rather than here - useParallax returns a zero offset instead. */
 }
