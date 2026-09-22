@@ -8,6 +8,7 @@ import { Button, Card, EmptyState, Input, Row, Sheet, Skeleton } from '../../com
 import { useToast } from '../../context/ToastContext';
 import { useFetch } from '../../hooks/useProfile';
 import { date, money, statusLabel } from '../../utils/format';
+import { PayBillModal } from './PayBillModal';
 
 export default function CardDetail() {
   const { cardId } = useParams();
@@ -23,6 +24,7 @@ export default function CardDetail() {
   const [confirmUnlink, setConfirmUnlink] = useState(false);
   const [working, setWorking] = useState(false);
   const [form, setForm] = useState({});
+  const [isPayModalOpen, setIsPayModalOpen] = useState(false);
 
   function openEditor() {
     setForm({
@@ -112,6 +114,35 @@ export default function CardDetail() {
 
         <div className="space-y-4 px-4 pt-4">
           <CardTile card={card} onClick={openEditor} />
+
+          {card.current_due_amount > 0 && (
+            <Card className="bg-canvas shadow-[0_4px_24px_rgba(0,0,0,0.06)] border-mint-200">
+              <div className="p-1">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <p className="text-2xs font-semibold uppercase tracking-wider text-slate">Total Due</p>
+                    <p className="text-2xl font-bold text-ink tracking-tight">{money(card.current_due_amount)}</p>
+                  </div>
+                  {card.next_due_date && (
+                    <div className="text-right">
+                      <p className="text-2xs font-semibold uppercase tracking-wider text-slate">Due Date</p>
+                      <p className="text-sm font-medium text-ink">{date(card.next_due_date)}</p>
+                    </div>
+                  )}
+                </div>
+                
+                {card.minimum_due_amount > 0 && (
+                  <p className="text-xs text-slate mb-4">
+                    Minimum due: <span className="font-medium text-ink">{money(card.minimum_due_amount)}</span>
+                  </p>
+                )}
+                
+                <Button variant="mint" full onClick={() => setIsPayModalOpen(true)}>
+                  Pay Bill
+                </Button>
+              </div>
+            </Card>
+          )}
 
           {card.card_limit ? (
             <Card>
@@ -296,6 +327,15 @@ export default function CardDetail() {
           be charged through CashU. Your transaction history stays intact.
         </p>
       </Sheet>
+      <PayBillModal 
+        card={card} 
+        isOpen={isPayModalOpen} 
+        onClose={() => setIsPayModalOpen(false)} 
+        onSuccess={() => {
+          setIsPayModalOpen(false);
+          refetch();
+        }}
+      />
     </div>
   );
 }

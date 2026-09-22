@@ -295,6 +295,7 @@ export const endpoints = {
     link: (data) => api.post('/cards', data),
     update: (id, data) => api.patch(`/cards/${id}`, data),
     unlink: (id) => api.del(`/cards/${id}`),
+    payBill: (id, data) => api.post(`/cards/${id}/pay-bill`, data),
   },
   qrPayments: {
     // The scanned string is validated server-side; the client never parses it.

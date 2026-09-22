@@ -25,6 +25,7 @@ from portal.models.base import utcnow
 from portal.models.card_networks import CardNetworks
 from portal.models.cards import Cards, CardStatus
 from portal.models.notifications import NotificationEvent
+from portal.models.master_transactions import MasterTransactions, TransactionStatus, SourceType, DestType
 
 from . import logger, ns
 
@@ -51,7 +52,12 @@ update_parser.add_argument('outstanding_amount', type=float, required=False, loc
 update_parser.add_argument('current_due_amount', type=float, required=False, location='json')
 update_parser.add_argument('minimum_due_amount', type=float, required=False, location='json')
 update_parser.add_argument('statement_day', type=int, required=False, location='json')
+update_parser.add_argument('statement_day', type=int, required=False, location='json')
 update_parser.add_argument('due_day', type=int, required=False, location='json')
+
+pay_bill_parser = reqparse.RequestParser()
+pay_bill_parser.add_argument('amount', type=float, required=True, location='json')
+pay_bill_parser.add_argument('payment_method', type=str, required=True, location='json')
 
 
 def card_dict(card: Cards, detailed: bool = False) -> dict:
@@ -568,3 +574,58 @@ class BINLookup(Resource):
             'brand_color': row.brand_color,
             'is_supported': row.is_supported and row.card_type == 'CREDIT',
         })
+
+@ns.route('/<string:card_id>/pay-bill')
+class PayBill(Resource):
+    @ns.doc('pay_card_bill', security='Bearer')
+    @jwt_required()
+    @active_user_required
+    def post(self, card_id):
+        """
+        Simulate a credit card bill payment.
+        """
+        args = pay_bill_parser.parse_args()
+        user = current_user()
+        
+        card = Cards.query.filter_by(card_id=card_id, user_id=user.user_id, status=CardStatus.ACTIVE).first()
+        if not card:
+            return failure(ErrorCode.NOT_FOUND, 'Card not found.', 404)
+            
+        amount = args['amount']
+        if amount <= 0:
+            return failure(ErrorCode.VALIDATION_ERROR, 'Amount must be greater than 0.', 400)
+            
+        # Update card balances
+        if card.current_due_amount:
+            card.current_due_amount = max(0, float(card.current_due_amount) - amount)
+        if card.outstanding_amount:
+            card.outstanding_amount = max(0, float(card.outstanding_amount) - amount)
+            
+        # If total bill is cleared, zero minimum due
+        if card.current_due_amount == 0:
+            card.minimum_due_amount = 0
+            
+        if card.available_limit and card.card_limit:
+            card.available_limit = min(float(card.card_limit), float(card.available_limit) + amount)
+            
+        # Record transaction
+        method_map = {
+            'upi': SourceType.UPI_VPA,
+            'bank': SourceType.NETBANKING,
+            'debit': SourceType.DEBIT_CARD,
+            'auto_pay': SourceType.BANK_ACCOUNT_MANDATE
+        }
+        src_type = method_map.get(args['payment_method'], SourceType.UPI_VPA)
+        
+        txn = MasterTransactions(
+            user_id=user.user_id,
+            amount=amount,
+            status=TransactionStatus.SUCCEEDED,
+            source_type=src_type,
+            dest_type=DestType.CARD_REFUND,
+            description=f"Bill payment for {card.issuer_bank} Card",
+        )
+        db.session.add(txn)
+        db.session.commit()
+        
+        return success({'message': 'Payment successful', 'card': card_dict(card)})
