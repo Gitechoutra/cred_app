@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { endpoints } from '../../api/client';
-import { Spinner, cx } from '../../components/ui';
+import { Loader3D, cx } from '../../components/ui';
 
 /**
  * Renders an uploaded KYC document for review.
@@ -112,7 +112,7 @@ export default function KycDocumentViewer({ kycId, slot, label, available }) {
         </div>
 
         <div className="grid min-h-[190px] place-items-center p-3">
-          {loading && <Spinner className="h-5 w-5 text-slate" />}
+          {loading && <Loader3D size="medium" />}
 
           {error && (
             <div className="px-4 text-center">

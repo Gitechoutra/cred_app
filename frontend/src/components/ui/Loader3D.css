@@ -1,0 +1,188 @@
+:root {
+  --coin-primary: #00F5B8;
+  --coin-dark: #004D3A;
+  --coin-shadow: #051a13;
+}
+
+.loader-3d-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  perspective: 1200px;
+}
+
+.loader-3d-full {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background-color: rgba(5, 10, 8, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: fade-in 0.4s ease-out forwards;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.loader-3d-inline {
+  display: inline-flex;
+}
+
+.loader-coin-wrapper {
+  position: relative;
+  width: var(--loader-size, 80px);
+  height: var(--loader-size, 80px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.loader-coin {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  transform-style: preserve-3d;
+  /* Smooth 2s continuous rotation */
+  animation: rotate-coin 2.2s cubic-bezier(0.4, 0.0, 0.6, 1) infinite;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Shiny metallic green gradient */
+  background: linear-gradient(135deg, var(--coin-dark) 0%, var(--coin-primary) 45%, var(--coin-dark) 55%, var(--coin-primary) 100%);
+  border: calc(var(--loader-size, 80px) * 0.025) solid var(--coin-primary);
+  box-shadow: inset 0 0 0 calc(var(--loader-size, 80px) * 0.05) var(--coin-shadow), 0 0 calc(var(--loader-size, 80px) * 0.3) rgba(0, 245, 184, 0.3);
+}
+
+.loader-coin::before {
+  content: 'U';
+  position: absolute;
+  inset: calc(var(--loader-size, 80px) * -0.025);
+  border-radius: 50%;
+  transform: translateZ(calc(var(--loader-size, 80px) * -0.1)) rotateY(180deg);
+  background: linear-gradient(135deg, var(--coin-primary) 0%, var(--coin-dark) 45%, var(--coin-primary) 55%, var(--coin-dark) 100%);
+  border: calc(var(--loader-size, 80px) * 0.025) solid var(--coin-primary);
+  box-shadow: inset 0 0 0 calc(var(--loader-size, 80px) * 0.05) var(--coin-shadow);
+  
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(var(--loader-size, 80px) * 0.5);
+  font-weight: 800;
+  color: var(--coin-primary);
+  text-shadow: 0 calc(var(--loader-size, 80px) * 0.025) calc(var(--loader-size, 80px) * 0.05) rgba(0, 0, 0, 0.6);
+  font-family: 'Inter', sans-serif;
+  line-height: 1;
+}
+
+/* Middle core of the coin to give it solid thickness */
+.loader-coin::after {
+  content: '';
+  position: absolute;
+  inset: calc(var(--loader-size, 80px) * -0.025);
+  border-radius: 50%;
+  background: #022b21;
+  border: calc(var(--loader-size, 80px) * 0.025) solid #01382b;
+  transform: translateZ(calc(var(--loader-size, 80px) * -0.05));
+  box-shadow: 0 0 calc(var(--loader-size, 80px) * 0.1) var(--coin-primary);
+}
+
+/* The 'U' symbol (front) */
+.loader-u {
+  font-size: calc(var(--loader-size, 80px) * 0.5);
+  font-weight: 800;
+  color: var(--coin-primary);
+  transform: translateZ(calc(var(--loader-size, 80px) * 0.05));
+  text-shadow: 0 calc(var(--loader-size, 80px) * 0.025) calc(var(--loader-size, 80px) * 0.05) rgba(0, 0, 0, 0.6);
+  font-family: 'Inter', sans-serif;
+  line-height: 1;
+}
+
+/* Orbit Ring */
+.loader-orbit {
+  position: absolute;
+  width: calc(var(--loader-size, 80px) * 1.75);
+  height: calc(var(--loader-size, 80px) * 1.75);
+  border-radius: 50%;
+  border: 1px solid rgba(0, 245, 184, 0.4);
+  transform-style: preserve-3d;
+  animation: rotate-orbit 3.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  box-shadow: 0 0 calc(var(--loader-size, 80px) * 0.2) rgba(0, 245, 184, 0.15);
+}
+
+.loader-orbit::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(var(--loader-size, 80px) * 0.1);
+  height: calc(var(--loader-size, 80px) * 0.1);
+  background-color: var(--coin-primary);
+  border-radius: 50%;
+  box-shadow: 0 0 calc(var(--loader-size, 80px) * 0.15) 2px var(--coin-primary), 0 0 calc(var(--loader-size, 80px) * 0.25) 4px #fff;
+}
+
+/* Full screen text */
+.loader-text-wrapper {
+  margin-top: 3rem;
+  text-align: center;
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+}
+
+.loader-text-main {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.02em;
+}
+
+.loader-text-sub {
+  font-size: 0.95rem;
+  color: #a0aab2;
+  margin-bottom: 1.5rem;
+}
+
+/* Animated Dots */
+.loader-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.loader-dot {
+  width: 8px;
+  height: 8px;
+  background-color: var(--coin-primary);
+  border-radius: 50%;
+  opacity: 0.3;
+  animation: pulse-dot 1.4s infinite;
+}
+
+.loader-dot:nth-child(2) { animation-delay: 0.2s; }
+.loader-dot:nth-child(3) { animation-delay: 0.4s; }
+.loader-dot:nth-child(4) { animation-delay: 0.6s; }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.3; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.2); box-shadow: 0 0 8px var(--coin-primary); }
+}
+
+@keyframes rotate-coin {
+  0% { transform: rotateY(0deg) rotateX(15deg); }
+  100% { transform: rotateY(360deg) rotateX(15deg); }
+}
+
+@keyframes rotate-orbit {
+  0% { transform: rotateX(70deg) rotateZ(0deg); }
+  100% { transform: rotateX(70deg) rotateZ(360deg); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

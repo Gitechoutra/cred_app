@@ -4,7 +4,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { endpoints } from '../../api/client';
 import { Timeline } from '../../components/domain';
 import { PageHeader } from '../../components/layout/AppShell';
-import { Button, Card, Row, Skeleton, Spinner, cx } from '../../components/ui';
+import { Button, Card, Row, Skeleton, Loader3D, cx } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
 import { dateTime, money, statusLabel } from '../../utils/format';
 
@@ -99,7 +99,7 @@ export default function TransferStatus() {
     return (
       <div className="grid min-h-screen place-items-center bg-canvas px-6">
         <div className="flex flex-col items-center text-center">
-          <Spinner className="h-8 w-8 text-mint-600" />
+          <Loader3D size="large" />
           <p className="mt-4 text-sm font-medium text-ink">Completing your transfer</p>
           <p className="mt-1 text-xs text-slate">Please do not close this screen.</p>
         </div>
@@ -296,7 +296,7 @@ function StatusMark({ succeeded, reversed, failed, inFlight }) {
             <path d="M4 8v4.5h4.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         )}
-        {inFlight && <Spinner className="h-7 w-7" />}
+        {inFlight && <Loader3D size="medium" />}
       </span>
     </div>
   );

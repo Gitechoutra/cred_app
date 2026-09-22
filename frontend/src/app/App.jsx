@@ -2,9 +2,10 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
 import AppShell from '../components/layout/AppShell';
 import ErrorBoundary from '../components/ErrorBoundary';
-import { Spinner } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useProfile } from '../hooks/useProfile';
+import { LoadingProvider, useGlobalLoading } from '../context/LoadingContext';
+import { Loader3D } from '../components/ui/Loader3D';
 
 /* Auth */
 import Splash from '../pages/auth/Splash';
@@ -49,11 +50,7 @@ import AdminReconciliation from '../pages/admin/AdminReconciliation';
 import AdminSettings from '../pages/admin/AdminSettings';
 
 function FullPageLoader() {
-  return (
-    <div className="grid min-h-screen place-items-center bg-canvas">
-      <Spinner className="h-6 w-6 text-mint-600" />
-    </div>
-  );
+  return <Loader3D fullScreen />;
 }
 
 /**
@@ -127,9 +124,10 @@ function Shell({ children }) {
 
 export default function App() {
   return (
-    <Routes>
-      {/* Public */}
-      <Route path="/" element={<RedirectIfAuthed><Splash /></RedirectIfAuthed>} />
+    <LoadingProvider>
+      <Routes>
+        {/* Public */}
+        <Route path="/" element={<RedirectIfAuthed><Splash /></RedirectIfAuthed>} />
       <Route path="/signin" element={<RedirectIfAuthed><PhoneEntry /></RedirectIfAuthed>} />
       <Route path="/signin/otp" element={<RedirectIfAuthed><OtpVerify /></RedirectIfAuthed>} />
       <Route path="/signin/mpin" element={<RedirectIfAuthed><MpinLogin /></RedirectIfAuthed>} />
@@ -187,6 +185,7 @@ export default function App() {
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+      </Routes>
+    </LoadingProvider>
   );
 }

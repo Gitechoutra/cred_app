@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
 import { PageHeader } from '../../components/layout/AppShell';
-import { Button, Card, Input, Row, Spinner, cx } from '../../components/ui';
+import { Button, Card, Input, Row, Loader3D, cx } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
 import { useQrScanner } from '../../hooks/useQrScanner';
 import { useRazorpay } from '../../hooks/useRazorpay';
@@ -202,7 +202,7 @@ export default function ScanPay() {
               {(scanner.state === 'starting' || busy) && (
                 <div className="absolute inset-0 grid place-items-center bg-ink/60">
                   <div className="flex flex-col items-center">
-                    <Spinner className="h-7 w-7 text-mint" />
+                    <Loader3D size="medium" />
                     <p className="mt-3 text-xs text-white/70">
                       {busy ? 'Reading the code' : 'Starting the camera'}
                     </p>

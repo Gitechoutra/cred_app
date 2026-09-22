@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
 import { PageHeader } from '../../components/layout/AppShell';
-import { Button, Card, Input, Row, Skeleton, Spinner, cx } from '../../components/ui';
+import { Button, Card, Input, Row, Skeleton, cx } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
 import { useFetch } from '../../hooks/useProfile';
 import { date, money } from '../../utils/format';

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
 import { PageHeader } from '../../components/layout/AppShell';
-import { Button, Input, Spinner } from '../../components/ui';
+import { Button, Input, Loader3D } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
 import { useProfile } from '../../hooks/useProfile';
 import { money } from '../../utils/format';
@@ -177,7 +177,7 @@ export default function AddBankAccount() {
             value={form.ifsc_code}
             maxLength={11}
             error={errors.ifsc_code}
-            suffix={lookingUp ? <Spinner className="h-4 w-4 text-slate" /> : null}
+            suffix={lookingUp ? <Loader3D size="small" /> : null}
             hint={
               bank
                 ? `${bank.bank_name}${bank.branch ? ` · ${bank.branch}` : ''}`

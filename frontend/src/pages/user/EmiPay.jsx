@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
 import { PageHeader } from '../../components/layout/AppShell';
-import { Button, Card, Input, Row, Skeleton, Spinner, cx } from '../../components/ui';
+import { Button, Card, Input, Row, Skeleton, Loader3D, cx } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
 import { PaymentMethodPicker, PaymentProgress } from '../../components/payments/PaymentMethods';
 import { useFetch } from '../../hooks/useProfile';
@@ -385,7 +385,7 @@ export default function EmiPay() {
 
             {pending && polling && (
               <p className="mt-4 inline-flex items-center gap-2 text-2xs text-slate">
-                <Spinner className="h-3 w-3" />
+                <Loader3D size="small" />
                 Checking automatically…
               </p>
             )}

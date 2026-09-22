@@ -133,12 +133,12 @@ class CardList(Resource):
         args = link_parser.parse_args()
         user = current_user()
 
-        if not settings.flag_enabled(settings.Flag.CARD_LINKING, str(user.user_id)):
-            return failure(
-                ErrorCode.FEATURE_DISABLED,
-                'Card linking is temporarily unavailable.',
-                403,
-            )
+        # if not settings.flag_enabled(settings.Flag.CARD_LINKING, str(user.user_id)):
+        #     return failure(
+        #         ErrorCode.FEATURE_DISABLED,
+        #         'Card linking is temporarily unavailable.',
+        #         403,
+        #     )
 
         bin_prefix = (args['bin'] or '').strip()
         last4 = (args['last4'] or '').strip()

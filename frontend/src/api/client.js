@@ -22,6 +22,8 @@ const ACCESS_KEY = 'cashu.access';
 const REFRESH_KEY = 'cashu.refresh';
 const DEVICE_KEY = 'cashu.device';
 
+export const apiEmitter = new EventTarget();
+
 /* ── Token storage ──────────────────────────────────────────────────────── */
 
 export const tokens = {
@@ -132,12 +134,14 @@ async function refreshTokens() {
 
 /* ── Core request ───────────────────────────────────────────────────────── */
 
-async function request(path, { method = 'GET', body, form, idempotent, retry = true } = {}) {
+async function request(path, { method = 'GET', body, form, idempotent, retry = true, background = false } = {}) {
   const headers = { 'X-Device-UUID': deviceId() };
 
   const access = tokens.access;
   if (access) headers.Authorization = `Bearer ${access}`;
   if (idempotent) headers['X-Idempotency-Key'] = idempotent;
+
+  if (!background) apiEmitter.dispatchEvent(new Event('start'));
 
   let payload;
   if (form) {
@@ -153,6 +157,7 @@ async function request(path, { method = 'GET', body, form, idempotent, retry = t
   try {
     response = await fetch(`${BASE}${path}`, { method, headers, body: payload });
   } catch {
+    if (!background) apiEmitter.dispatchEvent(new Event('error'));
     throw new ApiError({
       code: 'NETWORK_ERROR',
       message: 'We could not reach CashU. Check your connection and try again.',
@@ -177,6 +182,7 @@ async function request(path, { method = 'GET', body, form, idempotent, retry = t
 
   if (!response.ok || (parsed && parsed.success === false)) {
     const error = (parsed && parsed.error) || {};
+    if (!background) apiEmitter.dispatchEvent(new Event('error'));
     throw new ApiError({
       code: error.code || `HTTP_${response.status}`,
       message: error.message || 'Something went wrong. Please try again.',
@@ -186,6 +192,7 @@ async function request(path, { method = 'GET', body, form, idempotent, retry = t
     });
   }
 
+  if (!background) apiEmitter.dispatchEvent(new Event('end'));
   return parsed;
 }
 

@@ -10,6 +10,8 @@
     --cashu-ink: #0a0f0d;
   }
 
+
+
   html {
     -webkit-tap-highlight-color: transparent;
     /* Anchor jumps and programmatic scrollTo glide rather than teleport. The
