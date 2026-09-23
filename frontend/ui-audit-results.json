@@ -93,7 +93,7 @@
     "section": 23,
     "label": "it sits below the modal layer so dialogs are not covered",
     "ok": true,
-    "detail": ""
+    "detail": "'pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4',"
   },
   {
     "section": 23,
