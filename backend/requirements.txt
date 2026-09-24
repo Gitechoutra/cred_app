@@ -36,7 +36,7 @@ APScheduler==3.11.0
 requests==2.32.3
 
 # Penny-drop name matching (PRD FR-005: Jaro-Winkler / Levenshtein)
-rapidfuzz==3.10.1
+rapidfuzz==3.14.6
 
 # PDF receipts (PRD FR-008 digitally signed receipt, US-014 tax receipts)
 reportlab==4.2.5

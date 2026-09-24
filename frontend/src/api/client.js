@@ -169,6 +169,7 @@ async function request(path, { method = 'GET', body, form, idempotent, retry = t
   if (response.status === 401 && retry && tokens.refresh) {
     const refreshed = await refreshTokens();
     if (refreshed) {
+      if (!background) apiEmitter.dispatchEvent(new Event('end'));
       return request(path, { method, body, form, idempotent, retry: false });
     }
   }
@@ -242,7 +243,7 @@ export async function fetchBlobUrl(path) {
 /* ── Verbs ──────────────────────────────────────────────────────────────── */
 
 export const api = {
-  get: (path) => request(path),
+  get: (path, options = {}) => request(path, options),
   post: (path, body, options = {}) => request(path, { method: 'POST', body, ...options }),
   patch: (path, body) => request(path, { method: 'PATCH', body }),
   del: (path) => request(path, { method: 'DELETE' }),
@@ -288,7 +289,7 @@ export const endpoints = {
   cards: {
     list: () => api.get('/cards'),
     get: (id) => api.get(`/cards/${id}`),
-    lookupBin: (bin) => api.get(`/cards/networks/lookup/${bin}`),
+    lookupBin: (bin) => api.get(`/cards/networks/lookup/${bin}`, { background: true }),
     // Predefined dummy cards. 404s when test mode is off, which is how the UI
     // knows not to show the picker at all.
     testCards: () => api.get('/cards/test-cards'),
