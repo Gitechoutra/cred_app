@@ -72,6 +72,9 @@ class Account:
     GATEWAY_CHARGES = 'GATEWAY_CHARGES'         # expense: MDR paid to the PA
     REVERSAL_CLEARING = 'REVERSAL_CLEARING'     # asset: refund in flight
     SUSPENSE = 'SUSPENSE'                       # asset: unmatched, needs a human
+    CREDIT_RECEIVABLE = 'CREDIT_RECEIVABLE'     # asset: drawn on a credit line
+    MERCHANT_PAYABLE = 'MERCHANT_PAYABLE'       # liability: owed to a merchant
+    INTEREST_INCOME = 'INTEREST_INCOME'         # income: late fees and interest
 
 
 def money(value) -> Decimal:
@@ -470,6 +473,94 @@ def entries_for_qr_payment(amount, payer_ref, payee_ref):
             'account': Account.BILLER_PAYABLE,
             'credit': amount,
             'narration': f'Payable to {payee_ref}',
+        },
+    ]
+
+
+def entries_for_credit_purchase(amount, card_ref, merchant_ref):
+    """
+    A purchase drawn on an issued credit line.
+
+    The platform now holds a receivable against the cardholder and owes the
+    merchant the same amount. No fee and no GST: the user is charged the ticket
+    price, and any interest on a revolving balance is a separate posting when it
+    is actually charged, not baked into the purchase.
+    """
+    return [
+        {
+            'account': Account.CREDIT_RECEIVABLE,
+            'debit': amount,
+            'narration': f'Purchase on credit line {card_ref}',
+        },
+        {
+            'account': Account.MERCHANT_PAYABLE,
+            'credit': amount,
+            'narration': f'Payable to {merchant_ref}',
+        },
+    ]
+
+
+def entries_for_credit_bill_payment(amount, source_ref, card_ref):
+    """
+    A bill payment against a credit line.
+
+    Money arrives from the cardholder's own instrument, so it lands in gateway
+    receivable, and the receivable against them is reduced by the same amount.
+    This is the posting that restores their available credit.
+    """
+    return [
+        {
+            'account': Account.GATEWAY_RECEIVABLE,
+            'debit': amount,
+            'narration': f'Bill payment collected from {source_ref}',
+        },
+        {
+            'account': Account.CREDIT_RECEIVABLE,
+            'credit': amount,
+            'narration': f'Settles credit line {card_ref}',
+        },
+    ]
+
+
+def entries_for_credit_refund(amount, merchant_ref, card_ref):
+    """
+    A merchant refund on a purchase.
+
+    The mirror of a purchase: the platform no longer owes the merchant, and the
+    cardholder no longer owes the platform.
+    """
+    return [
+        {
+            'account': Account.MERCHANT_PAYABLE,
+            'debit': amount,
+            'narration': f'Refund from {merchant_ref}',
+        },
+        {
+            'account': Account.CREDIT_RECEIVABLE,
+            'credit': amount,
+            'narration': f'Credited back to {card_ref}',
+        },
+    ]
+
+
+def entries_for_late_fee(amount, card_ref):
+    """
+    A late payment fee.
+
+    Increases what the cardholder owes and books the income. Charged once per
+    cycle, which is enforced by the statement's late_fee_charged_at rather than
+    here - a posting template must not be the place a business rule lives.
+    """
+    return [
+        {
+            'account': Account.CREDIT_RECEIVABLE,
+            'debit': amount,
+            'narration': f'Late payment fee on {card_ref}',
+        },
+        {
+            'account': Account.INTEREST_INCOME,
+            'credit': amount,
+            'narration': 'Late payment fee',
         },
     ]
 

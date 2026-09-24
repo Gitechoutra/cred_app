@@ -249,9 +249,16 @@ def confirm_payment(
     """
     # Re-read under a row lock. See the docstring: without this, two concurrent
     # confirmations both observe PROCESSING and both post to the ledger.
+    # populate_existing() is load-bearing. The caller has already loaded this
+    # row through an ordinary query, so it is in the session's identity map;
+    # without it SQLAlchemy takes the lock and then discards the row it just
+    # read in favour of the stale attributes already loaded. The lock would be
+    # held while the status check below reads a value from before it - which is
+    # exactly the double-post this lock exists to prevent.
     locked = (
         EMIPayments.query
         .filter_by(payment_id=payment.payment_id)
+        .populate_existing()
         .with_for_update()
         .first()
     )
@@ -399,9 +406,16 @@ def cancel_payment(payment: EMIPayments) -> EMIPayments:
     Cancelling is what releases the in-flight guard in `initiate_payment`, so
     this is the supported way to retry rather than accumulating dead orders.
     """
+    # populate_existing() is load-bearing. The caller has already loaded this
+    # row through an ordinary query, so it is in the session's identity map;
+    # without it SQLAlchemy takes the lock and then discards the row it just
+    # read in favour of the stale attributes already loaded. The lock would be
+    # held while the status check below reads a value from before it - which is
+    # exactly the double-post this lock exists to prevent.
     locked = (
         EMIPayments.query
         .filter_by(payment_id=payment.payment_id)
+        .populate_existing()
         .with_for_update()
         .first()
     )

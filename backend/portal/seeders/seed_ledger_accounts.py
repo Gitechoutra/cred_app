@@ -35,6 +35,16 @@ ACCOUNTS = [
      'Refunds dispatched to a source card and not yet confirmed.'),
     (Account.SUSPENSE, 'Suspense', AccountClass.ASSET, 'DEBIT',
      'Unmatched amounts held pending manual reconciliation.'),
+
+    # -- Credit line ------------------------------------------------------
+    (Account.CREDIT_RECEIVABLE, 'Credit Receivable', AccountClass.ASSET, 'DEBIT',
+     'Principal drawn on an issued credit line and owed by the cardholder. '
+     'Debited by a purchase, credited by a bill payment or a refund.'),
+    (Account.MERCHANT_PAYABLE, 'Merchant Payable', AccountClass.LIABILITY, 'CREDIT',
+     'Amount owed onward to a merchant for a settled card purchase.'),
+    (Account.INTEREST_INCOME, 'Interest and Late Fee Income', AccountClass.INCOME,
+     'CREDIT',
+     'Late payment fees and interest earned on revolving credit balances.'),
 ]
 
 

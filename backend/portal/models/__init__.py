@@ -45,6 +45,21 @@ def init_app(app):
         # -- Throttling ----------------------------------------------------
         from .rate_limit_counters import RateLimitCounters  # noqa: F401
 
+        # -- Credit line ---------------------------------------------------
+        # Statements before transactions: a transaction carries a ForeignKey to
+        # the statement it was billed on.
+        from .credit_applications import (
+            CreditApplications, ApplicationStatus, EmploymentType,
+        )
+        from .credit_accounts import (
+            CreditAccounts, CreditAccountStatus, CreditPurpose,
+        )
+        from .credit_statements import CreditStatements, StatementStatus
+        from .credit_transactions import (
+            CreditTransactions, CreditTransactionType, CreditTransactionStatus,
+            MerchantCategory,
+        )
+
         # -- EMI -----------------------------------------------------------
         from .emi_providers import EMIProviders, ProviderIntegrationMode
         from .emi_obligations import (

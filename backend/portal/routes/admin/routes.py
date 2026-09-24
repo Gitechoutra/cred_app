@@ -19,14 +19,17 @@ from flask_restx import Resource, reqparse
 from sqlalchemy import func
 
 from portal import db
-from portal.helpers import audit, error_recorder, ledger_engine, settings
+from portal.helpers import (
+    audit, credit_engine, error_recorder, ledger_engine, settings,
+)
 from portal.helpers.helpers import (
     ErrorCode, failure, iso, paginated, success, to_float,
 )
 from portal.helpers.jwt import admin_required, current_claims, current_user, roles_required
 from portal.helpers.settings import Key
 from portal.helpers.validators import (
-    sanitize_text, validate_date, validate_pagination,
+    ValidationError, sanitize_text, validate_amount, validate_date,
+    validate_pagination,
 )
 from portal.models.audit_logs import AdminActivityLogs, AuditLogs
 from portal.models.transaction_errors import TransactionErrors
@@ -34,6 +37,9 @@ from portal.models.auto_pay_mandates import AutoPayMandates, MandateStatus
 from portal.models.bank_accounts import BankAccounts
 from portal.models.base import utcnow
 from portal.models.cards import Cards, CardStatus
+from portal.models.credit_accounts import CreditAccounts
+from portal.models.credit_applications import ApplicationStatus, CreditApplications
+from portal.models.credit_transactions import CreditTransactions
 from portal.models.emi_obligations import EMIObligations
 from portal.models.emi_payments import EMIPayments
 from portal.models.kyc_verifications import KYCStatus, KYCVerifications
@@ -65,6 +71,13 @@ kyc_review_parser.add_argument('reason', type=str, required=False, location='jso
 
 action_parser = reqparse.RequestParser()
 action_parser.add_argument('reason', type=str, required=True, location='json')
+
+credit_review_parser = reqparse.RequestParser()
+credit_review_parser.add_argument('decision', type=str, required=True, location='json')
+# Not type=float: the raw text has to reach validate_amount, which rejects
+# scientific notation that a float coercion would silently accept.
+credit_review_parser.add_argument('limit', required=False, location='json')
+credit_review_parser.add_argument('note', type=str, required=False, location='json')
 
 setting_parser = reqparse.RequestParser()
 setting_parser.add_argument('value', type=str, required=True, location='json')
@@ -679,6 +692,27 @@ class ReviewKYC(Resource):
 
         db.session.commit()
 
+        # An applicant parked on KYC moves the moment they are verified, rather
+        # than on their next visit. Deliberately after the commit: the tier has
+        # to be durable before the credit engine reads it to compute a cap.
+        #
+        # A failure here must not undo an approved KYC, so it is logged and the
+        # application stays in KYC_PENDING for the next attempt to pick up.
+        if kyc.kyc_status == KYCStatus.APPROVED:
+            try:
+                advanced = credit_engine.kyc_completed(user)
+                if advanced:
+                    logger.info(
+                        f'[admin] KYC approval advanced credit application '
+                        f'{advanced.application_id} to {advanced.status}'
+                    )
+            except Exception as exc:
+                db.session.rollback()
+                logger.error(
+                    f'[admin] could not advance the credit application for '
+                    f'{user.user_id} after KYC approval: {exc}'
+                )
+
         audit.record_admin(
             admin_user_id=str(actor.user_id),
             admin_role=role,
@@ -691,6 +725,338 @@ class ReviewKYC(Resource):
         )
 
         return success({'kyc_status': kyc.kyc_status, 'tier': user.kyc_tier}, message)
+
+
+@ns.route('/credit/applications')
+class AdminCreditApplicationQueue(Resource):
+    @ns.doc('admin_credit_application_queue', security='Bearer')
+    @jwt_required()
+    @roles_required(L1, L2, L3)
+    def get(self):
+        """
+        Credit applications awaiting a decision, oldest first.
+
+        Oldest first because this is a queue someone works through, and the
+        application that has waited longest is the one a person is waiting on.
+        """
+        args = list_parser.parse_args()
+        page, per_page = validate_pagination(args['page'], args['per_page'])
+        _, role = _actor()
+
+        query = CreditApplications.query
+        if args.get('status'):
+            requested = args['status'].upper()
+            if requested not in ApplicationStatus.CHOICES:
+                return failure(
+                    ErrorCode.VALIDATION_ERROR,
+                    f'Unknown application status: {requested}.', 400,
+                )
+            query = query.filter(CreditApplications.status == requested)
+        else:
+            query = query.filter(
+                CreditApplications.status == ApplicationStatus.UNDER_REVIEW
+            )
+
+        pagination = query.order_by(
+            CreditApplications.submitted_at.asc()
+        ).paginate(page=page, per_page=per_page, error_out=False)
+
+        can_see_pii = role in (L2, L3)
+        rows = []
+        for application in pagination.items:
+            applicant = application.user
+            rows.append({
+                'application_id': application.application_id,
+                'user_id': application.user_id,
+                'full_name': applicant.full_name if applicant else None,
+                'phone': (
+                    applicant.phone if can_see_pii and applicant
+                    else (applicant.masked_phone() if applicant else None)
+                ),
+                'kyc_tier': applicant.kyc_tier if applicant else None,
+                'status': application.status,
+                'employment_type': application.employment_type,
+                'monthly_income': to_float(application.monthly_income),
+                'existing_emi_outflow': to_float(application.existing_emi_outflow),
+                'requested_limit': to_float(application.requested_limit),
+                # What the engine would grant, shown next to the request so a
+                # reviewer can see the difference at a glance rather than having
+                # to work it out.
+                'offered_limit': to_float(application.offered_limit),
+                'eligibility_score': to_float(application.eligibility_score),
+                'submitted_at': iso(application.submitted_at),
+                'waiting_hours': (
+                    round(
+                        (utcnow() - application.submitted_at).total_seconds() / 3600, 1
+                    ) if application.submitted_at else None
+                ),
+            })
+
+        return paginated(rows, page, per_page, pagination.total)
+
+
+@ns.route('/credit/applications/<string:application_id>/review')
+class AdminReviewCreditApplication(Resource):
+    @ns.doc('admin_review_credit_application', security='Bearer')
+    @jwt_required()
+    @roles_required(L2, L3)
+    def post(self, application_id):
+        """
+        Approve or reject a credit application.
+
+        L2 and above: granting a credit line is a risk decision, not a support
+        action, so L1 can read the queue and cannot decide on it.
+
+        An approval issues the account in PENDING_PURPOSE. It does not activate
+        anything - the applicant still has to declare a purpose and activate,
+        and an administrator cannot do either on their behalf.
+
+        `limit` overrides what the engine offered. It is still bounded by the
+        applicant's KYC tier cap in the engine, so this is a discretion to grant
+        less, or to grant a different amount within the rules, rather than a way
+        around them.
+        """
+        args = credit_review_parser.parse_args()
+        actor, role = _actor()
+
+        application = CreditApplications.query.filter_by(
+            application_id=application_id
+        ).first()
+        if not application:
+            return failure(ErrorCode.NOT_FOUND, 'Application not found.', 404)
+
+        decision = (args['decision'] or '').upper()
+        if decision not in ('APPROVE', 'REJECT'):
+            return failure(
+                ErrorCode.VALIDATION_ERROR,
+                'Decision must be APPROVE or REJECT.', 400,
+            )
+
+        note = sanitize_text(args.get('note') or '', 500)
+        if decision == 'REJECT' and not note:
+            return failure(
+                ErrorCode.VALIDATION_ERROR,
+                'A reason is required when rejecting an application.', 400,
+            )
+
+        limit = None
+        if decision == 'APPROVE' and args.get('limit') not in (None, ''):
+            try:
+                limit = validate_amount(args['limit'], 'limit', minimum=1)
+            except ValidationError as exc:
+                return failure(ErrorCode.VALIDATION_ERROR, exc.message, 400)
+
+        applicant = application.user
+        if not applicant:
+            return failure(ErrorCode.NOT_FOUND, 'Applicant not found.', 404)
+
+        previous = application.status
+
+        try:
+            application, account = credit_engine.decide(
+                application,
+                user=applicant,
+                approve=(decision == 'APPROVE'),
+                limit=limit,
+                note=note or None,
+                actor_id=str(actor.user_id),
+            )
+        except credit_engine.CreditError as exc:
+            status = {
+                ErrorCode.NOT_FOUND: 404,
+                ErrorCode.CONFLICT: 409,
+                ErrorCode.FORBIDDEN: 403,
+            }.get(exc.code, 400)
+            return failure(exc.code, exc.message, status, recovery=exc.recovery)
+
+        audit.record_admin(
+            admin_user_id=str(actor.user_id),
+            admin_role=role,
+            module='CREDIT',
+            action=f'CREDIT_APPLICATION_{decision}',
+            target_type='CreditApplications',
+            target_id=application_id,
+            justification=note or None,
+            payload={
+                'previous_status': previous,
+                'approved_limit': to_float(application.approved_limit),
+                'offered_limit': to_float(application.offered_limit),
+                # Recorded explicitly so an override is searchable rather than
+                # something a reader has to infer by comparing two numbers.
+                'overrode_engine_offer': (
+                    limit is not None
+                    and to_float(limit) != to_float(application.offered_limit)
+                ),
+            },
+        )
+
+        return success(
+            {
+                'application_id': application.application_id,
+                'status': application.status,
+                'approved_limit': to_float(application.approved_limit),
+                'decision_reason': application.decision_reason,
+                'credit_account_id': (
+                    account.credit_account_id if account else None
+                ),
+            },
+            'Credit line approved.' if account else 'Application rejected.',
+        )
+
+
+@ns.route('/credit/accounts/<string:credit_account_id>')
+class AdminCreditAccount(Resource):
+    @ns.doc('admin_credit_account', security='Bearer')
+    @jwt_required()
+    @roles_required(L1, L2, L3)
+    def get(self, credit_account_id):
+        """
+        One credit line, as support sees it.
+
+        No card number beyond the last four, because there is none stored to
+        show. A support agent who needs to confirm which card someone is holding
+        can do it from four digits and does not need more.
+        """
+        account = CreditAccounts.query.filter_by(
+            credit_account_id=credit_account_id
+        ).first()
+        if not account:
+            return failure(ErrorCode.NOT_FOUND, 'Credit line not found.', 404)
+
+        recent = CreditTransactions.query.filter_by(
+            credit_account_id=credit_account_id
+        ).order_by(CreditTransactions.created_on.desc()).limit(20).all()
+
+        return success({
+            'credit_account_id': account.credit_account_id,
+            'user_id': account.user_id,
+            'status': account.status,
+            'card_last4': account.card_last4,
+            'card_network': account.card_network,
+            'credit_limit': to_float(account.credit_limit),
+            'available_credit': to_float(account.available_credit),
+            'current_outstanding': to_float(account.current_outstanding),
+            'utilization_percent': account.utilization_percent,
+            'purpose': account.purpose,
+            'purpose_note': account.purpose_note,
+            'statement_day': account.statement_day,
+            'grace_days': account.grace_days,
+            'activated_at': iso(account.activated_at),
+            'blocked_at': iso(account.blocked_at),
+            'block_reason': account.block_reason,
+            # The invariant the engine asserts on every write, surfaced so an
+            # operator can see it holds rather than trusting that it does.
+            'balances_reconcile': (
+                to_float(account.available_credit)
+                + to_float(account.current_outstanding)
+                == to_float(account.credit_limit)
+            ),
+            'recent_transactions': [{
+                'credit_transaction_id': t.credit_transaction_id,
+                'type': t.transaction_type,
+                'status': t.status,
+                'amount': to_float(t.amount),
+                'balance_after': to_float(t.balance_after),
+                'merchant_name': t.merchant_name,
+                'is_test': t.is_test,
+                'created_on': iso(t.created_on),
+            } for t in recent],
+        })
+
+
+@ns.route('/credit/accounts/<string:credit_account_id>/block')
+class AdminBlockCreditAccount(Resource):
+    @ns.doc('admin_block_credit_account', security='Bearer')
+    @jwt_required()
+    @roles_required(L2, L3)
+    def post(self, credit_account_id):
+        """
+        Block a credit line on a risk signal.
+
+        A reason is mandatory here, unlike the cardholder's own block: an
+        administrator freezing somebody else's credit has to say why, and that
+        justification goes into the admin activity log.
+        """
+        args = action_parser.parse_args()
+        actor, role = _actor()
+
+        account = CreditAccounts.query.filter_by(
+            credit_account_id=credit_account_id
+        ).first()
+        if not account:
+            return failure(ErrorCode.NOT_FOUND, 'Credit line not found.', 404)
+
+        reason = sanitize_text(args['reason'], 200)
+        if not reason:
+            return failure(
+                ErrorCode.VALIDATION_ERROR,
+                'A reason is required to block a credit line.', 400,
+            )
+
+        try:
+            credit_engine.block(account, reason=reason, actor_id=str(actor.user_id))
+        except credit_engine.CreditError as exc:
+            return failure(exc.code, exc.message, 409, recovery=exc.recovery)
+
+        audit.record_admin(
+            admin_user_id=str(actor.user_id),
+            admin_role=role,
+            module='CREDIT',
+            action='CREDIT_ACCOUNT_BLOCKED',
+            target_type='CreditAccounts',
+            target_id=credit_account_id,
+            justification=reason,
+            payload={'status': account.status},
+        )
+
+        return success({'status': account.status}, 'Credit line blocked.')
+
+
+@ns.route('/credit/accounts/<string:credit_account_id>/statement')
+class AdminCutStatement(Resource):
+    @ns.doc('admin_cut_credit_statement', security='Bearer')
+    @jwt_required()
+    @roles_required(L3)
+    def post(self, credit_account_id):
+        """
+        Cut a statement now, out of cycle.
+
+        L3 only, and audited. Statements are normally cut by the scheduler; doing
+        it by hand changes what somebody owes and when, so it is the narrowest
+        permission and the loudest log entry.
+        """
+        actor, role = _actor()
+
+        account = CreditAccounts.query.filter_by(
+            credit_account_id=credit_account_id
+        ).first()
+        if not account:
+            return failure(ErrorCode.NOT_FOUND, 'Credit line not found.', 404)
+
+        statement = credit_engine.cut_statement(account)
+
+        audit.record_admin(
+            admin_user_id=str(actor.user_id),
+            admin_role=role,
+            module='CREDIT',
+            action='CREDIT_STATEMENT_CUT_MANUALLY',
+            target_type='CreditStatements',
+            target_id=statement.statement_id,
+            justification='Out-of-cycle statement cut by an administrator.',
+            payload={
+                'statement_number': statement.statement_number,
+                'closing_balance': to_float(statement.closing_balance),
+                'due_date': statement.due_date.isoformat(),
+            },
+        )
+
+        return success({
+            'statement_id': statement.statement_id,
+            'statement_number': statement.statement_number,
+            'closing_balance': to_float(statement.closing_balance),
+            'minimum_due': to_float(statement.minimum_due),
+            'due_date': statement.due_date.isoformat(),
+        }, 'Statement issued.')
 
 
 @ns.route('/reconciliation')

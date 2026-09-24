@@ -16,6 +16,7 @@ def init_app():
     from .kyc import routes                     # noqa: F401
     from .dashboard import routes               # noqa: F401
     from .cards import routes                   # noqa: F401
+    from .credit import routes                   # noqa: F401
     from .bank_accounts import routes           # noqa: F401
     from .emi import routes                     # noqa: F401
     from .emi_payments import routes            # noqa: F401

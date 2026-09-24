@@ -244,9 +244,9 @@ def kyc_required(minimum_tier: str = 'MINIMUM'):
     """
     Gate a route behind a KYC tier (PRD section 18).
 
-    FULL is required before a credit-to-bank transfer above 10,000 INR; the
-    amount-sensitive part of that rule lives in transfer_engine, because it
-    depends on the request body rather than the route.
+    FULL is required for a credit limit above the configured threshold; the
+    amount-sensitive part of that rule lives in credit_engine.assess, because it
+    depends on the limit being offered rather than on the route.
     """
     from portal.models.users import KYCTier
 

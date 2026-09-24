@@ -3,7 +3,6 @@ from portal.models.base import TimestampMixin, AppendOnlyMixin, uuid_pk, uuid_fk
 
 
 class TransactionType:
-    CARD_TO_BANK_TRANSFER = "CARD_TO_BANK_TRANSFER"
     EMI_MANUAL_PAY = "EMI_MANUAL_PAY"
     EMI_AUTO_PAY = "EMI_AUTO_PAY"
     FEE_DEBIT = "FEE_DEBIT"
@@ -14,9 +13,25 @@ class TransactionType:
     #: the destination is a third party rather than their own account.
     QR_UPI_PAYMENT = "QR_UPI_PAYMENT"
 
+    # -- Issued credit line --------------------------------------------------
+    #: A spend drawn on a CashU credit line.
+    CREDIT_PURCHASE = "CREDIT_PURCHASE"
+    #: A payment made against a credit line statement.
+    CREDIT_BILL_PAYMENT = "CREDIT_BILL_PAYMENT"
+    #: A merchant refund reversing a purchase.
+    CREDIT_REFUND = "CREDIT_REFUND"
+    #: A late payment fee charged on an overdue statement.
+    CREDIT_LATE_FEE = "CREDIT_LATE_FEE"
+
+    #: Retired with the credit-to-bank transfer product. The ledger is
+    #: append-only, so rows of this type still exist and must still validate.
+    CARD_TO_BANK_TRANSFER = "CARD_TO_BANK_TRANSFER"
+
     CHOICES = [
-        CARD_TO_BANK_TRANSFER, EMI_MANUAL_PAY, EMI_AUTO_PAY,
-        FEE_DEBIT, REVERSAL_REFUND, PENNY_DROP, QR_UPI_PAYMENT,
+        EMI_MANUAL_PAY, EMI_AUTO_PAY, FEE_DEBIT, REVERSAL_REFUND, PENNY_DROP,
+        QR_UPI_PAYMENT,
+        CREDIT_PURCHASE, CREDIT_BILL_PAYMENT, CREDIT_REFUND, CREDIT_LATE_FEE,
+        CARD_TO_BANK_TRANSFER,
     ]
 
 
@@ -38,10 +53,12 @@ class SourceType:
     UPI_VPA = "UPI_VPA"
     NETBANKING = "NETBANKING"
     DEBIT_CARD = "DEBIT_CARD"
+    #: An issued CashU credit line - the source of a purchase.
+    CREDIT_LINE = "CREDIT_LINE"
 
     CHOICES = [
         CREDIT_CARD_TOKEN, BANK_ACCOUNT_MANDATE,
-        UPI_VPA, NETBANKING, DEBIT_CARD,
+        UPI_VPA, NETBANKING, DEBIT_CARD, CREDIT_LINE,
     ]
 
 
@@ -51,17 +68,28 @@ class DestType:
     CARD_REFUND = "CARD_REFUND"
     #: A merchant's UPI address, from a scanned QR.
     MERCHANT_VPA = "MERCHANT_VPA"
+    #: A merchant accepting a card purchase.
+    MERCHANT = "MERCHANT"
+    #: An issued CashU credit line - the destination of a bill payment.
+    CREDIT_LINE = "CREDIT_LINE"
 
     CHOICES = [
         BANK_ACCOUNT_IMPS, BBPS_BILLER_COLLECTION, CARD_REFUND, MERCHANT_VPA,
+        MERCHANT, CREDIT_LINE,
     ]
 
 
 class GatewayProvider:
     CASHFREE = "CASHFREE"
+    RAZORPAY = "RAZORPAY"
     SANDBOX = "SANDBOX"
+    #: No external gateway was involved. A purchase on an issued credit line and
+    #: a late fee are both movements between this platform's own accounts, and
+    #: naming a gateway that took no part would make reconciliation against that
+    #: gateway's settlement file look permanently short.
+    INTERNAL = "INTERNAL"
 
-    CHOICES = [CASHFREE, SANDBOX]
+    CHOICES = [CASHFREE, RAZORPAY, SANDBOX, INTERNAL]
 
 
 class ReconStatus:

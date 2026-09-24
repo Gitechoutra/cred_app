@@ -111,6 +111,35 @@ def main():
             plain.append(f'{os.path.basename(path)}:{name} ({kind})')
     check(17, 'no plaintext password/mpin column', not plain, ', '.join(plain))
 
+    # The issued credit line, specifically. The platform generates the card
+    # identity itself, so a full PAN, a CVV or a PIN column here would be
+    # something this codebase chose to store rather than something a vendor
+    # handed it - and the whole design is that those digits are never composed.
+    credit_models = read(os.path.join(models_dir, 'credit_accounts.py'))
+    forbidden = []
+    for match in re.finditer(r'(\w+)\s*=\s*db\.Column', credit_models):
+        name = match.group(1).lower()
+        if name in ('card_bin', 'card_last4'):
+            continue
+        if any(token in name for token in
+               ('cvv', 'cvc', 'pin', 'card_number', 'pan', 'full_number',
+                'otp', 'password', 'secret', 'track_data', 'magstripe')):
+            forbidden.append(match.group(1))
+    check(17, 'the credit account stores no PAN, CVV or PIN',
+          not forbidden, ', '.join(forbidden))
+
+    # Test transactions must be distinguishable from real ones, and the
+    # distinction has to be in the row rather than inferred from an environment
+    # that a report will not know about.
+    credit_txn_model = read(os.path.join(models_dir, 'credit_transactions.py'))
+    check(17, 'a credit transaction records whether it was a test',
+          'is_test' in credit_txn_model)
+
+    engine_src = read(os.path.join(BACKEND, 'portal', 'helpers',
+                                   'credit_engine.py'))
+    check(17, 'test spending is gated by the hardened test-card switch',
+          'test_cards.enabled()' in engine_src)
+
     # ================= 17/20. Authorization coverage =================
     print('\n[17/20] Endpoint authorization')
 
@@ -215,6 +244,24 @@ def main():
             # Every money table this platform writes. Named explicitly and
             # asserted present, because `if table in tables` quietly turns a
             # dropped or renamed table into a pass rather than a failure.
+            # The live schema, not only the model file: a column added by a
+            # migration and never modelled would be invisible to a source scan.
+            for table in ('credit_accounts', 'credit_transactions'):
+                if table not in tables:
+                    check(17, f'{table} exists to be audited', False)
+                    continue
+                offenders = []
+                for column in inspector.get_columns(table):
+                    name = column['name'].lower()
+                    if name in ('card_bin', 'card_last4'):
+                        continue
+                    if any(token in name for token in
+                           ('cvv', 'cvc', 'pin', 'card_number', 'pan',
+                            'full_number', 'otp', 'password', 'secret')):
+                        offenders.append(column['name'])
+                check(17, f'{table} has no sensitive-credential column',
+                      not offenders, ', '.join(offenders))
+
             MONEY_TABLES = ('qr_payments', 'emi_payments', 'master_transactions')
 
             for table in MONEY_TABLES:

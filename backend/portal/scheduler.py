@@ -70,6 +70,54 @@ def _poll_pending_payments():
     return emi_engine.poll_pending_payments()
 
 
+# -- Credit line billing ---------------------------------------------------
+
+def _cut_credit_statements():
+    """
+    Cut a statement for every account whose cycle ends today.
+
+    Idempotent through the UNIQUE (credit_account_id, period_end) constraint, so
+    a retry after a partial failure finishes the job rather than double-billing
+    the accounts it already reached. Each account is cut in its own try block for
+    the same reason: one account whose data is somehow bad must not stop every
+    other cardholder's statement from being issued.
+    """
+    from datetime import date
+
+    from portal import db
+    from portal.helpers import credit_engine
+    from portal.models.credit_accounts import CreditAccounts, CreditAccountStatus
+
+    today = date.today()
+    accounts = CreditAccounts.query.filter(
+        CreditAccounts.status.in_([
+            CreditAccountStatus.ACTIVE, CreditAccountStatus.BLOCKED,
+        ]),
+        CreditAccounts.statement_day == today.day,
+    ).all()
+
+    issued = 0
+    for account in accounts:
+        try:
+            credit_engine.cut_statement(account, as_of=today)
+            issued += 1
+        except Exception as exc:
+            db.session.rollback()
+            logger.error(
+                f'[scheduler] statement failed for '
+                f'{account.credit_account_id}: {exc}'
+            )
+
+    # A blocked account is still billed. The balance is owed whether or not the
+    # card can spend, and skipping it would quietly forgive it.
+    return {'accounts': len(accounts), 'statements_issued': issued} if accounts         else None
+
+
+def _credit_overdue_and_fees():
+    from portal.helpers import credit_engine
+    return credit_engine.mark_overdue_and_charge_fees()
+
+
 # -- Ledger integrity ------------------------------------------------------
 
 def _ledger_self_audit():
@@ -203,6 +251,16 @@ def init_scheduler(app):
         # -- Outbox ------------------------------------------------------
         ('domain_event_drain', _drain_domain_events,
          IntervalTrigger(minutes=1)),
+
+        # -- Credit line billing (IST) -----------------------------------
+        # Just after midnight, so a statement dated today includes everything
+        # that happened yesterday and nothing that happens today.
+        ('credit_statement_cut', _cut_credit_statements,
+         CronTrigger(hour=0, minute=20, timezone=TIMEZONE)),
+        # After the cut, so a statement issued this morning is not immediately
+        # examined for being overdue.
+        ('credit_overdue_sweep', _credit_overdue_and_fees,
+         CronTrigger(hour=1, minute=0, timezone=TIMEZONE)),
 
         # -- Mandates (regulatory timing; IST) ---------------------------
         ('mandate_predebit_notice', _mandate_predebit_notices,

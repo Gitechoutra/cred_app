@@ -144,9 +144,16 @@ def confirm(payment: QRPayments, *, gateway_payment_id=None, signature=None):
     Safe to call repeatedly and concurrently: the row is re-read under a lock
     before the status is examined, so two callers cannot both post.
     """
+    # populate_existing() is load-bearing. The caller has already loaded this
+    # row through an ordinary query, so it is in the session's identity map;
+    # without it SQLAlchemy takes the lock and then discards the row it just
+    # read in favour of the stale attributes already loaded. The lock would be
+    # held while the status check below reads a value from before it - which is
+    # exactly the double-post this lock exists to prevent.
     locked = (
         QRPayments.query
         .filter_by(qr_payment_id=payment.qr_payment_id)
+        .populate_existing()
         .with_for_update()
         .first()
     )
@@ -264,9 +271,16 @@ def cancel(payment: QRPayments) -> QRPayments:
     Asks the gateway first, exactly as the EMI path does: closing a UPI sheet
     after approving is common, and the debit still lands.
     """
+    # populate_existing() is load-bearing. The caller has already loaded this
+    # row through an ordinary query, so it is in the session's identity map;
+    # without it SQLAlchemy takes the lock and then discards the row it just
+    # read in favour of the stale attributes already loaded. The lock would be
+    # held while the status check below reads a value from before it - which is
+    # exactly the double-post this lock exists to prevent.
     locked = (
         QRPayments.query
         .filter_by(qr_payment_id=payment.qr_payment_id)
+        .populate_existing()
         .with_for_update()
         .first()
     )
