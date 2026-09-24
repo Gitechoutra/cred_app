@@ -3,6 +3,7 @@ import { Outlet, useNavigate } from 'react-router-dom';
 import {
   IconHome,
   IconLock,
+  IconHelp,
   IconLogout,
   IconReceipt,
   IconShield,
@@ -43,6 +44,27 @@ export default function AdminLayout() {
 
   const items = NAV.filter((item) => item.roles.includes(role));
 
+  // The same menu a member gets, in the same place. An operator is also a user
+  // of this product - they have a profile, an MPIN and devices - and the
+  // console offering a different shape was just an inconsistency.
+  const profileMenuItems = [
+    { label: 'Profile', icon: IconUser, to: '/profile' },
+    { label: 'Security', icon: IconLock, to: '/security' },
+    { label: 'Help & support', icon: IconHelp, to: '/support' },
+    { divider: true },
+    { label: 'Switch to member app', icon: IconHome, to: '/home' },
+    { divider: true },
+    {
+      label: 'Logout',
+      icon: IconLogout,
+      tone: 'danger',
+      onClick: async () => {
+        await signOut();
+        navigate('/', { replace: true });
+      },
+    },
+  ];
+
   return (
     <div className="min-h-screen bg-canvas pb-24 sm:pb-28">
       <header className="sticky top-0 z-40 border-b border-line bg-canvas/95 backdrop-blur">
@@ -56,6 +78,18 @@ export default function AdminLayout() {
           <span className="ml-auto hidden truncate rounded-full border border-line bg-canvas px-2.5 py-1 text-2xs font-semibold text-slate sm:inline-block">
             {role?.replace(/_/g, ' ')}
           </span>
+
+          {/* Top right, as on the member side. `placement="bottom"` because
+              this one hangs off a bar at the top of the page, not the bottom. */}
+          <div className="ml-auto flex items-center gap-2 sm:ml-3">
+            <ProfileMenu
+              name={profile?.full_name}
+              detail={role?.replace(/_/g, ' ')}
+              avatar={initials(profile?.full_name)}
+              items={profileMenuItems}
+              placement="bottom"
+            />
+          </div>
         </div>
       </header>
 
@@ -65,26 +99,7 @@ export default function AdminLayout() {
         <Outlet />
       </main>
 
-      <BottomNav items={items}>
-        <ProfileMenu
-          name={profile?.full_name}
-          detail={role?.replace(/_/g, ' ')}
-          avatar={initials(profile?.full_name)}
-          items={[
-            { label: 'Switch to member app', icon: IconHome, to: '/home' },
-            { divider: true },
-            {
-              label: 'Logout',
-              icon: IconLogout,
-              tone: 'danger',
-              onClick: async () => {
-                await signOut();
-                navigate('/', { replace: true });
-              },
-            },
-          ]}
-        />
-      </BottomNav>
+      <BottomNav items={items} />
     </div>
   );
 }

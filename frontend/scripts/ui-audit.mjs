@@ -106,7 +106,7 @@ check(22, 'buttons have a press animation',
   /active:scale-\[/.test(ui));
 
 check(22, 'a loading state exists on the shared button',
-  ui.includes('loading') && ui.includes('Spinner'));
+  ui.includes('loading') && /Spinner|Loader3D/.test(ui));
 
 // Hand-rolled buttons that bypass the shared component are how a design
 // language drifts. Count raw <button> with their own background colour.
@@ -130,9 +130,15 @@ check(23, 'bottom navigation component exists', nav.length > 0);
 check(23, 'it is fixed to the bottom', /fixed[^"']*bottom-0/.test(nav));
 check(23, 'it handles the mobile safe area',
   nav.includes('env(safe-area-inset-bottom)'));
-const navClasses = (nav.match(/className="[^"]*"/g) || []).join(' ');
+// The line that positions the bar itself. Scanning the whole opening tag was
+// brittle (it grew past the window once the className moved into cx()), and
+// scanning the whole file was wrong - the popover and the search overlay in
+// here are modal-layer things and are meant to be z-50.
+const navBarLine = (nav.split('\n').find(
+  (line) => /fixed/.test(line) && /inset-x-0/.test(line) && /bottom-0/.test(line),
+) || '');
 check(23, 'it sits below the modal layer so dialogs are not covered',
-  /z-40/.test(navClasses) && !/z-50/.test(navClasses));
+  /z-40/.test(navBarLine) && !/z-50/.test(navBarLine), navBarLine.trim().slice(0, 80));
 check(23, 'active state is rendered', nav.includes('isActive'));
 check(23, 'items carry both an icon and a label',
   nav.includes('<Icon') && nav.includes('{label}'));

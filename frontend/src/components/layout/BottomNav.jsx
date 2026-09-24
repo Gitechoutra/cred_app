@@ -24,7 +24,13 @@ export function BottomNav({ items, children }) {
     <>
       <nav
         aria-label="Primary"
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-2.5 sm:pb-6"
+        className={cx(
+          'pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4',
+          // max() keeps the existing 2.5 spacing on an ordinary screen and
+          // grows it on a notched phone, where a flat padding leaves the bar
+          // sitting under the home indicator.
+          'pb-[max(0.625rem,env(safe-area-inset-bottom))] sm:pb-6',
+        )}
       >
         <div
           className={cx(
@@ -135,7 +141,12 @@ function SearchNavItem({ label, icon: Icon, onClick }) {
 /**
  * Account slot menu for header / shell.
  */
-export function ProfileMenu({ name, detail, avatar, items, placement = 'bottom' }) {
+export function ProfileMenu({ name, detail, avatar, items, placement = 'top' }) {
+  // Upward by default. This menu hangs off a bar pinned to the bottom of the
+  // viewport, so opening downward puts it off-screen - which is exactly what
+  // happened: the admin menu rendered below the fold and the sign-out item was
+  // unreachable. `placement="bottom"` remains available for a top-anchored bar.
+
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const wrapper = useRef(null);
