@@ -47,7 +47,7 @@ export default function PhoneEntry() {
   return (
     <div className="min-h-screen bg-canvas">
       <div className="mx-auto w-full max-w-md">
-        <PageHeader title="" back="/" sticky={false} />
+        <PageHeader title="" back={true} sticky={false} />
 
         <form onSubmit={submit} className="px-6 pt-4">
           <h1 className="text-2xl font-bold tracking-tight text-ink">
