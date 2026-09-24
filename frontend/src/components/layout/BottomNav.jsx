@@ -278,10 +278,9 @@ function SearchModal({ onClose }) {
 
   const SEARCH_ITEMS = [
     { title: 'Credit Cards', hint: 'Manage linked cards & limits', to: '/cards' },
-    { title: 'Card to Bank Transfer', hint: 'Instant payout transfer', to: '/transfer' },
     { title: 'Scan & Pay QR', hint: 'Scan UPI QR code', to: '/scan' },
     { title: 'EMIs & Installments', hint: 'View loan schedules', to: '/emi' },
-    { title: 'Bank Accounts', hint: 'Verified payout bank accounts', to: '/banks' },
+    { title: 'Bank Accounts', hint: 'Verified bank accounts', to: '/banks' },
     { title: 'Transaction History', hint: 'Statements and receipts', to: '/transactions' },
     { title: 'Member Profile', hint: 'KYC & personal information', to: '/profile' },
     { title: 'Security & MPIN', hint: 'Manage devices & PIN', to: '/security' },

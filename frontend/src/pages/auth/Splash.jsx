@@ -425,7 +425,7 @@ function Doors({ navigate }) {
             points={[
               'Sign in with your mobile number and an OTP',
               'Link cards, track limits and due dates',
-              'Pay EMIs and transfer credit to your bank',
+              'Spend on your credit line and pay EMIs',
             ]}
             cta="Continue as user"
             onClick={() => navigate('/signin')}
@@ -440,7 +440,7 @@ function Doors({ navigate }) {
             description="You work at CashU and need the operations console."
             points={[
               'Review and approve KYC submissions',
-              'Resolve stuck transfers and reversals',
+              'Resolve stuck payments and reversals',
               'Monitor reconciliation and ledger integrity',
             ]}
             cta="Continue as admin"
@@ -609,7 +609,7 @@ const GUARANTEES = [
   },
   {
     title: 'Money only moves to your own account',
-    body: 'Every payout destination is verified by depositing ₹1 and matching the name your bank holds against your KYC record. Third-party transfers are refused outright.',
+    body: 'Every bank account you add is verified by depositing ₹1 and matching the name your bank holds against your KYC record. Third-party accounts are refused outright.',
   },
   {
     title: 'Nothing is debited without warning',

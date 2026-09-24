@@ -199,44 +199,7 @@ export default function CardDetail() {
             <Row label="Linked on" value={date(card.linked_at)} />
           </Card>
 
-          {card.recent_transfers?.length > 0 && (
-            <Card className="py-1">
-              <p className="px-1 py-2 text-2xs font-semibold uppercase tracking-wider text-slate">
-                Recent transfers
-              </p>
-              <div className="divide-y divide-line">
-                {card.recent_transfers.map((transfer) => (
-                  <button
-                    key={transfer.transfer_id}
-                    type="button"
-                    onClick={() => navigate(`/transfer/status/${transfer.transfer_id}`)}
-                    className="flex w-full items-center justify-between gap-3 py-3 text-left"
-                  >
-                    <div className="min-w-0">
-                      <p className="money text-sm font-medium text-ink">
-                        {money(transfer.amount)}
-                      </p>
-                      <p className="text-2xs text-slate">{date(transfer.created_on)}</p>
-                    </div>
-                    <span className="shrink-0 text-2xs font-medium text-slate">
-                      {statusLabel(transfer.status)}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </Card>
-          )}
-
           <div className="space-y-2 pt-2">
-            <Button
-              variant="mint"
-              size="lg"
-              full
-              disabled={card.status !== 'ACTIVE'}
-              onClick={() => navigate('/transfer')}
-            >
-              Transfer from this card
-            </Button>
             <Button variant="ghost" size="lg" full onClick={() => setConfirmUnlink(true)}>
               Remove card
             </Button>

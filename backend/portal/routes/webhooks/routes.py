@@ -33,10 +33,13 @@ from datetime import datetime, timezone
 from flask import request
 from flask_restx import Resource
 
-from portal.helpers import audit, cashfree, emi_engine, razorpay, transfer_engine
+from portal.helpers import (
+    audit, cashfree, emi_engine, qr_payment_engine, razorpay,
+)
+from portal import db
 from portal.helpers.helpers import ErrorCode, failure, success
 from portal.models.emi_payments import EMIPaymentState, EMIPayments
-from portal.models.transfers import TransferStatus, Transfers
+from portal.models.qr_payments import QRPayments, QRPaymentState
 
 from . import logger, ns
 
@@ -127,181 +130,9 @@ def _acknowledged(message: str, **extra):
 
     Used for verified deliveries that concern nothing this platform owns - an
     order placed by another product on the same merchant account, or a callback
-    for a transfer that already reached a terminal state.
+    for a payment that already reached a terminal state.
     """
     return success({'handled': True, **extra}, message)
-
-
-# -- Payment Gateway: inbound card charge ----------------------------------
-
-@ns.route('/cashfree/payments')
-class CashfreePaymentWebhook(Resource):
-    @ns.doc('cashfree_payment_webhook')
-    def post(self):
-        """
-        PG order callback - the inbound leg of a transfer (PRD FR-006 step 7).
-
-        Delegates to transfer_engine.confirm_charge, which re-reads the order
-        from Cashfree, posts the double entry and dispatches the payout. That
-        function short-circuits unless the transfer is AUTH_PENDING, so a
-        duplicated delivery, or a race with the client's own return-URL confirm,
-        resolves once and no more.
-        """
-        payload, error = _authenticate()
-        if error:
-            return error
-
-        data = payload.get('data') or {}
-        order = data.get('order') or {}
-        payment = data.get('payment') or {}
-
-        order_id = order.get('order_id') or data.get('order_id')
-        event_type = payload.get('type') or 'UNKNOWN'
-
-        if not order_id:
-            logger.warning(
-                f'[webhook] payment delivery carried no order id: {event_type}'
-            )
-            return _acknowledged('No order id in payload; nothing to do.')
-
-        transfer = Transfers.query.filter_by(gateway_order_id=order_id).first()
-
-        if not transfer:
-            # Not ours to act on. EMI payments and card-linking orders ride the
-            # same merchant account, so this is expected traffic, not an error.
-            logger.info(f'[webhook] no transfer for order {order_id} ({event_type})')
-            return _acknowledged('No matching transfer.', order_id=order_id)
-
-        logger.info(
-            f'[webhook] {event_type} for transfer {transfer.transfer_id} '
-            f'(status {transfer.status})'
-        )
-
-        cf_payment_id = payment.get('cf_payment_id') or payment.get('payment_id')
-
-        try:
-            transfer = transfer_engine.confirm_charge(
-                transfer,
-                gateway_payment_id=str(cf_payment_id) if cf_payment_id else None,
-            )
-        except Exception as exc:
-            # Answer 200 anyway. A retry would replay the same fault, and the
-            # payout retry ladder plus the reconciliation job already own the
-            # recovery path for a charge stuck mid-flight.
-            logger.exception(
-                f'[webhook] confirm_charge failed for {transfer.transfer_id}: {exc}'
-            )
-            return _acknowledged(
-                'Received; the transfer could not be advanced and has been logged.',
-                transfer_id=transfer.transfer_id,
-            )
-
-        audit.record(
-            action='WEBHOOK_PAYMENT_RECEIVED',
-            entity_type='Transfers',
-            entity_id=transfer.transfer_id,
-            after={'event': event_type, 'status': transfer.status},
-            notes=f'Cashfree PG callback for order {order_id}',
-        )
-
-        return _acknowledged(
-            'Payment callback processed.',
-            transfer_id=transfer.transfer_id,
-            status=transfer.status,
-        )
-
-
-# -- Payouts: outbound IMPS ------------------------------------------------
-
-@ns.route('/cashfree/payouts')
-class CashfreePayoutWebhook(Resource):
-    @ns.doc('cashfree_payout_webhook')
-    def post(self):
-        """
-        Payout callback - the outbound leg (PRD FR-006 step 8).
-
-        Resolves the transfer to SUCCEEDED, or hands it to the circuit breaker,
-        which retries three times and then refunds the card. The engine re-reads
-        the payout from Cashfree first, so a spoofed or reordered delivery
-        cannot settle a transfer the rail never actually paid.
-        """
-        payload, error = _authenticate()
-        if error:
-            return error
-
-        data = payload.get('data') or {}
-        event_type = payload.get('type') or 'UNKNOWN'
-
-        request_id = data.get('transfer_id') or data.get('transferId')
-        reported_status = (
-            data.get('status') or data.get('transfer_status') or ''
-        ).upper()
-        utr = data.get('transfer_utr') or data.get('utr')
-        reason = (
-            data.get('status_description')
-            or data.get('reason')
-            or data.get('status_message')
-        )
-
-        if not request_id:
-            logger.warning(
-                f'[webhook] payout delivery carried no transfer id: {event_type}'
-            )
-            return _acknowledged('No transfer id in payload; nothing to do.')
-
-        transfer = transfer_engine.transfer_from_payout_request_id(request_id)
-
-        if not transfer:
-            # Either not ours, or already terminal - the resolver deliberately
-            # only matches transfers a payout callback can still legitimately
-            # change, which makes a late duplicate a harmless no-op.
-            logger.info(
-                f'[webhook] no in-flight transfer for payout {request_id} '
-                f'({event_type})'
-            )
-            return _acknowledged(
-                'No matching in-flight transfer.', payout_id=request_id
-            )
-
-        logger.info(
-            f'[webhook] {event_type} ({reported_status}) for transfer '
-            f'{transfer.transfer_id} (status {transfer.status})'
-        )
-
-        try:
-            transfer = transfer_engine.apply_payout_callback(
-                transfer,
-                reported_status=reported_status,
-                utr=utr,
-                reason=reason,
-            )
-        except Exception as exc:
-            logger.exception(
-                f'[webhook] payout callback failed for {transfer.transfer_id}: {exc}'
-            )
-            return _acknowledged(
-                'Received; the payout could not be resolved and has been logged.',
-                transfer_id=transfer.transfer_id,
-            )
-
-        audit.record(
-            action='WEBHOOK_PAYOUT_RECEIVED',
-            entity_type='Transfers',
-            entity_id=transfer.transfer_id,
-            after={
-                'event': event_type,
-                'reported_status': reported_status,
-                'status': transfer.status,
-                'utr': transfer.bank_rrn_utr,
-            },
-            notes=f'Cashfree payout callback for {request_id}',
-        )
-
-        return _acknowledged(
-            'Payout callback processed.',
-            transfer_id=transfer.transfer_id,
-            status=transfer.status,
-        )
 
 
 # -- Verification Suite: penny drop ----------------------------------------
@@ -441,62 +272,59 @@ def _authenticate_razorpay():
     return payload, None
 
 
-def _handle_razorpay_transfer(event: str, order_id: str, rzp_payment_id: str):
+def _handle_razorpay_qr(event: str, order_id: str, rzp_payment_id: str):
     """
-    Resolve a Razorpay delivery that belongs to a transfer rather than an EMI.
+    Resolve a Razorpay delivery that belongs to a scanned QR payment.
 
-    Same contract as the EMI branch: the body is a hint, and `confirm_charge`
-    re-reads the charge from Razorpay before the ledger is posted or the payout
-    dispatched. No signature is passed - the handler signature belongs to the
-    browser flow, and this delivery was already authenticated by its own HMAC.
+    The webhook is the authoritative confirmation: the browser callback is a
+    hint, and a payment is only settled here or by the engine re-reading the
+    order from Razorpay. Never by what the client reports.
     """
-    transfer = Transfers.query.filter_by(gateway_order_id=order_id).first()
+    payment = QRPayments.query.filter_by(gateway_order_id=order_id).first()
 
-    if not transfer:
-        # Neither an EMI nor a transfer. The merchant account may serve more
-        # than this product, so this is expected traffic, not an error.
-        logger.info(f'[webhook] no EMI or transfer for order {order_id} ({event})')
+    if not payment:
+        # Neither an EMI nor a QR payment. The merchant account may serve more
+        # than this platform, so acknowledge rather than error.
+        logger.info(f'[webhook] no EMI or QR payment for order {order_id} ({event})')
         return _acknowledged('No matching payment.', order_id=order_id)
 
     logger.info(
-        f'[webhook] {event} for transfer {transfer.transfer_id} '
-        f'(status {transfer.status})'
+        f'[webhook] {event} for QR payment {payment.qr_payment_id} '
+        f'(status {payment.status})'
     )
 
-    if transfer.status in TransferStatus.TERMINAL:
+    if payment.status in QRPaymentState.TERMINAL:
         return _acknowledged(
-            'Transfer already in a terminal state.',
-            transfer_id=transfer.transfer_id,
-            status=transfer.status,
+            'QR payment already in a terminal state.',
+            qr_payment_id=payment.qr_payment_id,
+            status=payment.status,
         )
 
     try:
-        transfer = transfer_engine.confirm_charge(
-            transfer, gateway_payment_id=rzp_payment_id
+        payment = qr_payment_engine.confirm(
+            payment, gateway_payment_id=rzp_payment_id
         )
     except Exception as exc:
-        # 200 regardless: a retry replays the same fault, and the payout retry
-        # ladder plus the reconciliation job own the recovery path.
-        logger.exception(
-            f'[webhook] confirm_charge failed for {transfer.transfer_id}: {exc}'
+        db.session.rollback()
+        logger.error(
+            f'[webhook] QR confirm failed for {payment.qr_payment_id}: {exc}'
         )
         return _acknowledged(
-            'Received; the transfer could not be advanced and has been logged.',
-            transfer_id=transfer.transfer_id,
+            'Received; the payment could not be advanced and has been logged.',
+            qr_payment_id=payment.qr_payment_id,
         )
 
     audit.record(
-        action='WEBHOOK_TRANSFER_CHARGE_RECEIVED',
-        entity_type='Transfers',
-        entity_id=transfer.transfer_id,
-        after={'event': event, 'status': transfer.status},
-        notes=f'Razorpay callback for order {order_id}',
+        action='QR_PAYMENT_WEBHOOK',
+        entity_type='QRPayments',
+        entity_id=payment.qr_payment_id,
+        after={'event': event, 'status': payment.status},
     )
 
     return _acknowledged(
-        'Transfer callback processed.',
-        transfer_id=transfer.transfer_id,
-        status=transfer.status,
+        'QR payment callback processed.',
+        qr_payment_id=payment.qr_payment_id,
+        status=payment.status,
     )
 
 
@@ -540,11 +368,9 @@ class RazorpayWebhook(Resource):
         payment = EMIPayments.query.filter_by(gateway_order_id=order_id).first()
 
         if not payment:
-            # Both products now collect through Razorpay, so an order that is
-            # not an EMI payment may still be a transfer's card charge.
-            return _handle_razorpay_transfer(
-                event, order_id, rzp_payment_id
-            )
+            # Several products collect through the same Razorpay account, so an
+            # order that is not an EMI payment may still be a scanned QR one.
+            return _handle_razorpay_qr(event, order_id, rzp_payment_id)
 
         logger.info(
             f'[webhook] {event} for EMI payment {payment.payment_id} '

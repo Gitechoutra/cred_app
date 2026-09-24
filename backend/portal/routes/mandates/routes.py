@@ -11,7 +11,7 @@ from flask_jwt_extended import jwt_required
 from flask_restx import Resource, reqparse
 
 from portal.helpers import mandate_engine, settings
-from portal.helpers.fee_calculator import mandate_cap
+from portal.helpers.emi_fees import mandate_cap
 from portal.helpers.helpers import ErrorCode, failure, iso, success, to_float
 from portal.helpers.jwt import active_user_required, current_user
 from portal.helpers.settings import Key

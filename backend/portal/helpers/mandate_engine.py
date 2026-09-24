@@ -25,7 +25,7 @@ from decimal import Decimal
 from flask import current_app
 
 from portal import db
-from portal.helpers import audit, emi_provider_adapter, fee_calculator, settings
+from portal.helpers import audit, emi_fees, emi_provider_adapter, settings
 from portal.helpers.helpers import ErrorCode
 from portal.helpers.settings import Key
 from portal.models.auto_pay_mandates import (
@@ -94,7 +94,7 @@ def register(
             'Auto-pay is temporarily unavailable.', ErrorCode.FEATURE_DISABLED
         )
 
-    minimum_cap = fee_calculator.mandate_cap(obligation.emi_amount)
+    minimum_cap = emi_fees.mandate_cap(obligation.emi_amount)
     cap = Decimal(str(max_amount)) if max_amount else minimum_cap
 
     if cap < minimum_cap:

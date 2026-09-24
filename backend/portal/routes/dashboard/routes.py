@@ -21,7 +21,6 @@ from portal.models.cards import Cards, CardStatus
 from portal.models.emi_obligations import EMIObligations, EMIPaymentStatus
 from portal.models.master_transactions import MasterTransactions
 from portal.models.notifications import Notifications
-from portal.models.transfers import Transfers
 
 from . import ns
 
@@ -206,7 +205,6 @@ class Dashboard(Resource):
             } for t in recent],
 
             'quick_actions': {
-                'can_transfer': bool(cards) and verified_accounts > 0,
                 'can_pay_emi': bool(obligations),
                 'can_add_card': True,
                 'can_add_emi': True,

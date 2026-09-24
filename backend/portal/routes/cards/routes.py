@@ -56,7 +56,11 @@ update_parser.add_argument('statement_day', type=int, required=False, location='
 update_parser.add_argument('due_day', type=int, required=False, location='json')
 
 pay_bill_parser = reqparse.RequestParser()
-pay_bill_parser.add_argument('amount', type=float, required=True, location='json')
+# Deliberately not type=float. flask-restx would coerce the value before
+# validate_amount ever saw it, so '1e9' arrived as 1000000000.0 and passed
+# the plain-decimal check that exists to reject exactly that. The raw text
+# has to reach the validator intact.
+pay_bill_parser.add_argument('amount', required=True, location='json')
 pay_bill_parser.add_argument('payment_method', type=str, required=True, location='json')
 
 
@@ -85,7 +89,6 @@ def card_dict(card: Cards, detailed: bool = False) -> dict:
         # MODE without having to know the catalogue.
         'test_scenario': card.test_scenario,
         'is_test_card': bool(card.test_scenario),
-        'is_transfer_eligible': card.is_transfer_eligible,
         'linked_at': iso(card.linked_at),
     }
 
@@ -346,7 +349,7 @@ class CardDetail(Resource):
     @jwt_required()
     @active_user_required
     def get(self, card_id):
-        """Card detail with limit progress and recent transfers (PRD FR-004)."""
+        """Card detail with limit progress (PRD FR-004)."""
         user = current_user()
 
         card = Cards.query.filter_by(
@@ -356,22 +359,7 @@ class CardDetail(Resource):
         if not card or card.status == CardStatus.DELETED:
             return failure(ErrorCode.NOT_FOUND, 'Card not found.', 404)
 
-        from portal.models.transfers import Transfers
-
-        transfers = Transfers.query.filter_by(
-            card_id=card.card_id
-        ).order_by(Transfers.created_on.desc()).limit(10).all()
-
-        data = card_dict(card, detailed=True)
-        data['recent_transfers'] = [{
-            'transfer_id': t.transfer_id,
-            'amount': to_float(t.principal_amount),
-            'status': t.status,
-            'created_on': iso(t.created_on),
-            'utr': t.bank_rrn_utr,
-        } for t in transfers]
-
-        return success(data)
+        return success(card_dict(card, detailed=True))
 
     @ns.doc('update_card', security='Bearer')
     @jwt_required()
@@ -457,21 +445,6 @@ class CardDetail(Resource):
         if not card or card.status == CardStatus.DELETED:
             return failure(ErrorCode.NOT_FOUND, 'Card not found.', 404)
 
-        from portal.models.transfers import TransferStatus, Transfers
-
-        in_flight = Transfers.query.filter(
-            Transfers.card_id == card.card_id,
-            Transfers.status.notin_(TransferStatus.TERMINAL),
-        ).count()
-
-        if in_flight:
-            return failure(
-                ErrorCode.CONFLICT,
-                'This card has a transfer in progress. Please wait for it to '
-                'complete before unlinking.',
-                409,
-            )
-
         revocation = adapters.revoke_card_token(card.token_reference_id)
 
         if not revocation.get('ok'):
@@ -491,7 +464,6 @@ class CardDetail(Resource):
         card.status = CardStatus.DELETED
         card.deleted_at = utcnow()
         card.token_revoked_at = utcnow()
-        card.is_transfer_eligible = False
         db.session.commit()
 
         audit.record(

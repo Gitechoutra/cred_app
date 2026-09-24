@@ -15,6 +15,9 @@ import sys
 
 import requests
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from throttle import throttled  # noqa: E402
+
 BASE = os.getenv('CASHU_API', 'http://127.0.0.1:5050/v1')
 TIMEOUT = 45
 
@@ -36,17 +39,19 @@ def post(path, body=None, token=None, idem=None, form=None, files=None):
     if idem:
         h['X-Idempotency-Key'] = idem
     if files or form:
-        return requests.post(f'{BASE}{path}', data=form, files=files,
-                             headers=h, timeout=TIMEOUT)
-    return requests.post(f'{BASE}{path}', json=body or {}, headers=h,
-                         timeout=TIMEOUT)
+        return throttled(lambda: requests.post(
+            f'{BASE}{path}', data=form, files=files,
+            headers=h, timeout=TIMEOUT))
+    return throttled(lambda: requests.post(
+        f'{BASE}{path}', json=body or {}, headers=h, timeout=TIMEOUT))
 
 
 def get(path, token=None):
     h = {'X-Device-UUID': 'err-flow'}
     if token:
         h['Authorization'] = f'Bearer {token}'
-    return requests.get(f'{BASE}{path}', headers=h, timeout=TIMEOUT)
+    return throttled(lambda: requests.get(
+        f'{BASE}{path}', headers=h, timeout=TIMEOUT))
 
 
 def data_of(r):
@@ -125,7 +130,22 @@ def main():
         return finish()
 
     # -- Produce a real failure -------------------------------------------
+    #
+    # This suite needs a payment that genuinely fails, so it can then assert
+    # what was recorded about it and what the support bot says. It used to get
+    # that from a credit-to-bank transfer charged against the DECLINE test
+    # card. That product has been removed, and its replacement - a purchase on
+    # an issued credit line - is not built yet.
+    #
+    # Deliberately left failing rather than skipped. Everything below is real
+    # coverage of error capture, sanitisation and the chatbot, and a green run
+    # here would claim it while proving nothing.
     print('\nFailure capture')
+    check('a failing payment path exists to capture errors from', False,
+          'BLOCKED: needs the card purchase flow. Retarget onto it once the '
+          'credit-line lifecycle lands, then the 40+ checks below run again.')
+    return finish()
+
     opened = data_of(post('/transfers', {
         'card_id': linked['card_id'], 'bank_account_id': bank, 'amount': 2000,
     }, token=token, idem=f'err-{phone}'))

@@ -110,11 +110,10 @@ export default function Kyc() {
             </p>
 
             <p className={cx('mt-1 text-xs', approved ? 'text-white/60' : 'text-slate')}>
-              Transfer limit{' '}
+              Credit limit up to{' '}
               <span className="money font-medium">
-                {money(kyc.capabilities.transfer_limit)}
-              </span>{' '}
-              per transaction
+                {money(kyc.capabilities.max_credit_limit)}
+              </span>
             </p>
 
             {kyc.rejection_reason && (
@@ -145,7 +144,7 @@ export default function Kyc() {
                 </div>
 
                 <p className="money mt-1 text-xs text-slate">
-                  Up to {money(option.transfer_limit)} per transfer
+                  Credit limit up to {money(option.max_credit_limit)}
                 </p>
 
                 <p className="mt-2 text-2xs text-slate">
@@ -195,7 +194,7 @@ export default function Kyc() {
                         </p>
                         <p className="money mt-0.5 text-2xs text-slate">
                           {money(
-                            kyc.tiers.find((t) => t.tier === option)?.transfer_limit || 0,
+                            kyc.tiers.find((t) => t.tier === option)?.max_credit_limit || 0,
                           )}{' '}
                           limit
                         </p>

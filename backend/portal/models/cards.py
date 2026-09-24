@@ -70,7 +70,6 @@ class Cards(db.Model, TimestampMixin, CRUDMixin):
     test_scenario = db.Column(db.String(30), nullable=True)
 
     status = db.Column(db.String(20), default=CardStatus.ACTIVE, nullable=False)
-    is_transfer_eligible = db.Column(db.Boolean, default=True)
 
     linked_at = db.Column(db.DateTime, nullable=True)
     deleted_at = db.Column(db.DateTime, nullable=True)
@@ -78,7 +77,6 @@ class Cards(db.Model, TimestampMixin, CRUDMixin):
     last_synced_at = db.Column(db.DateTime, nullable=True)
 
     user = db.relationship('Users', back_populates='cards')
-    transfers = db.relationship('Transfers', back_populates='card', lazy='dynamic')
 
     def __repr__(self):
         return f"<Card {self.masked_pan} {self.card_issuer_bank}>"

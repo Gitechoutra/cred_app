@@ -332,16 +332,18 @@ class DataErasure(Resource):
         """
         user = current_user()
 
-        from portal.models.transfers import TransferStatus, Transfers
+        from portal.models.master_transactions import (
+            MasterTransactions, TransactionStatus,
+        )
 
-        in_flight = Transfers.query.filter(
-            Transfers.user_id == user.user_id,
-            Transfers.status.notin_(TransferStatus.TERMINAL),
+        in_flight = MasterTransactions.query.filter(
+            MasterTransactions.user_id == user.user_id,
+            MasterTransactions.status.notin_(TransactionStatus.TERMINAL),
         ).count()
         if in_flight:
             return failure(
                 ErrorCode.CONFLICT,
-                'You have a transfer in progress. Please wait for it to complete '
+                'You have a payment in progress. Please wait for it to complete '
                 'before requesting erasure.',
                 409,
             )

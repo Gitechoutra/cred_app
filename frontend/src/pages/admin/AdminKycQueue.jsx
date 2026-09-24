@@ -11,7 +11,7 @@ import KycDocumentViewer, { AuthenticityGate } from './KycDocumentViewer';
 /**
  * KYC review queue (PRD 16.1).
  *
- * Approval is the single gate on a user's transfer limits, so the decision is
+ * Approval is the single gate on a user's credit line, so the decision is
  * deliberate: a rejection cannot be submitted without a reason, and that reason
  * is shown to the user verbatim.
  */
@@ -257,7 +257,7 @@ export default function AdminKycQueue() {
 
             <p className="rounded-lg bg-mist px-3 py-2 text-2xs leading-relaxed text-slate">
               This decision is written to the audit trail with your user id, and
-              approval immediately changes what this member can transfer.
+              approval immediately changes the credit this member can be granted.
             </p>
           </div>
         )}

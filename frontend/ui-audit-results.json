@@ -193,15 +193,9 @@
   },
   {
     "section": 26,
-    "label": "Transfer.jsx uses a numeric keypad hint",
+    "label": "EmiPay.jsx exists to be audited",
     "ok": true,
-    "detail": ""
-  },
-  {
-    "section": 26,
-    "label": "Transfer.jsx sanitises the amount through the shared helper",
-    "ok": true,
-    "detail": ""
+    "detail": "src/pages/user/EmiPay.jsx"
   },
   {
     "section": 26,
@@ -212,6 +206,24 @@
   {
     "section": 26,
     "label": "EmiPay.jsx sanitises the amount through the shared helper",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 26,
+    "label": "ScanPay.jsx exists to be audited",
+    "ok": true,
+    "detail": "src/pages/user/ScanPay.jsx"
+  },
+  {
+    "section": 26,
+    "label": "ScanPay.jsx uses a numeric keypad hint",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "section": 26,
+    "label": "ScanPay.jsx sanitises the amount through the shared helper",
     "ok": true,
     "detail": ""
   },

@@ -67,7 +67,7 @@ export default function Profile() {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-ink">Complete your KYC</p>
               <p className="truncate text-xs text-mint-800/70">
-                Unlock higher transfer limits
+                Unlock a higher credit limit
               </p>
             </div>
             <span className="shrink-0 text-xs font-semibold text-mint-800">Verify</span>
@@ -106,7 +106,7 @@ export default function Profile() {
             <ListLink
               icon={<IconBank className="h-4 w-4" />}
               label="Bank accounts"
-              description="Where your transfers land"
+              description="How you pay your bills"
               onClick={() => navigate('/banks')}
             />
             <ListLink

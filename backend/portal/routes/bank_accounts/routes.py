@@ -201,8 +201,8 @@ class BankAccountList(Resource):
             return success(
                 payload,
                 'The bank account name does not match your registered legal name. '
-                'This account needs manual verification before it can receive '
-                'transfers.',
+                'This account needs manual verification before it can be used '
+                'for payments.',
                 201,
             )
 
@@ -347,7 +347,7 @@ class BankAccountDetail(Resource):
     @jwt_required()
     @active_user_required
     def delete(self, bank_account_id):
-        """Soft-delete an account, refusing while a payout depends on it."""
+        """Soft-delete an account, refusing while a mandate depends on it."""
         user = current_user()
         account = BankAccounts.query.filter_by(
             bank_account_id=bank_account_id, user_id=user.user_id, deleted_at=None
@@ -355,20 +355,6 @@ class BankAccountDetail(Resource):
 
         if not account:
             return failure(ErrorCode.NOT_FOUND, 'Bank account not found.', 404)
-
-        from portal.models.transfers import TransferStatus, Transfers
-
-        in_flight = Transfers.query.filter(
-            Transfers.bank_account_id == account.bank_account_id,
-            Transfers.status.notin_(TransferStatus.TERMINAL),
-        ).count()
-        if in_flight:
-            return failure(
-                ErrorCode.CONFLICT,
-                'A transfer to this account is in progress. Please wait for it '
-                'to complete.',
-                409,
-            )
 
         from portal.models.auto_pay_mandates import AutoPayMandates, MandateStatus
 

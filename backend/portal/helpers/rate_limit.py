@@ -23,7 +23,7 @@ from sqlalchemy.exc import IntegrityError
 
 from portal import db
 from portal.models.base import utcnow
-from portal.models.transfer_limits import RateLimitCounters
+from portal.models.rate_limit_counters import RateLimitCounters
 
 
 class RateLimitExceeded(Exception):

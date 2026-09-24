@@ -21,16 +21,20 @@ class TicketStatus:
 
 
 class TicketCategory:
-    TRANSFER_ISSUE = "TRANSFER_ISSUE"
+    PAYMENT_ISSUE = "PAYMENT_ISSUE"
     EMI_ISSUE = "EMI_ISSUE"
     CARD_ISSUE = "CARD_ISSUE"
     KYC_ISSUE = "KYC_ISSUE"
     REFUND_STATUS = "REFUND_STATUS"
     OTHER = "OTHER"
 
+    #: Retired with the credit-to-bank transfer feature. Kept in CHOICES so
+    #: tickets raised before the pivot still read back as valid rows.
+    TRANSFER_ISSUE = "TRANSFER_ISSUE"
+
     CHOICES = [
-        TRANSFER_ISSUE, EMI_ISSUE, CARD_ISSUE,
-        KYC_ISSUE, REFUND_STATUS, OTHER,
+        PAYMENT_ISSUE, EMI_ISSUE, CARD_ISSUE,
+        KYC_ISSUE, REFUND_STATUS, OTHER, TRANSFER_ISSUE,
     ]
 
 

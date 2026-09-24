@@ -453,7 +453,7 @@ class EMIDetail(Resource):
         # against the old figure, so the mandate must be re-registered.
         mandate = obligation.mandate
         if mandate and args.get('emi_amount') is not None:
-            from portal.helpers.fee_calculator import mandate_cap
+            from portal.helpers.emi_fees import mandate_cap
             if mandate.max_amount < mandate_cap(obligation.emi_amount):
                 from portal.helpers import mandate_engine
                 mandate_engine.revoke(

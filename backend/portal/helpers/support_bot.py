@@ -16,8 +16,8 @@ first message is a question, not a form.
 
 from portal.helpers import error_catalog, error_recorder
 from portal.models.emi_payments import EMIPayments
+from portal.models.qr_payments import QRPayments
 from portal.models.transaction_errors import ErrorType
-from portal.models.transfers import Transfers
 
 
 class Intent:
@@ -70,14 +70,14 @@ def load_context(user, reference_type: str, reference_id: str) -> dict:
     """
     record, amount, status, method, created = None, None, None, None, None
 
-    if reference_type == 'Transfers':
-        record = Transfers.query.filter_by(
-            transfer_id=reference_id, user_id=user.user_id
+    if reference_type == 'QRPayments':
+        record = QRPayments.query.filter_by(
+            qr_payment_id=reference_id, user_id=user.user_id
         ).first()
         if record:
-            amount = record.total_charged_to_card
+            amount = record.amount
             status = record.status
-            method = (record.source_instrument or 'CREDIT_CARD').upper()
+            method = 'UPI_QR'
             created = record.created_on
 
     elif reference_type == 'EMIPayments':

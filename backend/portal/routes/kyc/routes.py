@@ -96,14 +96,16 @@ class KYCStatusResource(Resource):
         kyc = user.kyc_verification
 
         full_kyc_above = settings.get_decimal(Key.FULL_KYC_REQUIRED_ABOVE)
-        standard_max = settings.get_decimal(Key.TRANSFER_MAX_SINGLE_STANDARD_KYC)
-        full_max = settings.get_decimal(Key.TRANSFER_MAX_SINGLE_FULL_KYC)
+        standard_max = settings.get_decimal(Key.CREDIT_LIMIT_MAX_STANDARD_KYC)
+        full_max = settings.get_decimal(Key.CREDIT_LIMIT_MAX_FULL_KYC)
 
         data = kyc_dict(kyc, user)
         data['capabilities'] = {
             'can_link_cards': user.kyc_tier != KYCTier.NONE,
-            'can_transfer': user.kyc_tier != KYCTier.NONE,
-            'transfer_limit': float(
+            'can_apply_for_credit': user.kyc_tier != KYCTier.NONE,
+            # The ceiling this tier could be approved up to, not a promise: the
+            # limit itself is decided at approval.
+            'max_credit_limit': float(
                 full_max if user.kyc_tier == KYCTier.FULL else standard_max
             ),
             'full_kyc_required_above': float(full_kyc_above),
@@ -114,14 +116,14 @@ class KYCStatusResource(Resource):
                 'tier': KYCTier.MINIMUM,
                 'label': 'Basic KYC',
                 'requirements': ['Mobile number', 'PAN card'],
-                'transfer_limit': float(standard_max),
+                'max_credit_limit': float(standard_max),
                 'active': user.kyc_tier == KYCTier.MINIMUM,
             },
             {
                 'tier': KYCTier.FULL,
                 'label': 'Full KYC',
                 'requirements': ['Mobile number', 'PAN card', 'Aadhaar'],
-                'transfer_limit': float(full_max),
+                'max_credit_limit': float(full_max),
                 'active': user.kyc_tier == KYCTier.FULL,
             },
         ]

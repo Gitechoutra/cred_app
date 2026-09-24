@@ -198,12 +198,12 @@ export default function AdminUsers() {
 
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-xl border border-line p-3">
-                <p className="text-2xs uppercase tracking-wider text-slate">Transferred</p>
+                <p className="text-2xs uppercase tracking-wider text-slate">Paid</p>
                 <p className="money mt-1 text-lg font-bold text-ink">
-                  {money(detail.stats.total_transferred)}
+                  {money(detail.stats.total_paid)}
                 </p>
                 <p className="text-2xs text-slate">
-                  {detail.stats.successful_transfers} transfers
+                  {detail.stats.successful_payments} payments
                 </p>
               </div>
               <div className="rounded-xl border border-line p-3">

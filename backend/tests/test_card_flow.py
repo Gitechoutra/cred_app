@@ -19,6 +19,9 @@ import sys
 
 import requests
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from throttle import throttled  # noqa: E402
+
 BASE = os.getenv('CASHU_API', 'http://127.0.0.1:5050/v1')
 TIMEOUT = 45
 
@@ -41,17 +44,19 @@ def post(path, body=None, token=None, idem=None, form=None, files=None):
     if idem:
         headers['X-Idempotency-Key'] = idem
     if files or form:
-        return requests.post(f'{BASE}{path}', data=form, files=files,
-                             headers=headers, timeout=TIMEOUT)
-    return requests.post(f'{BASE}{path}', json=body or {}, headers=headers,
-                         timeout=TIMEOUT)
+        return throttled(lambda: requests.post(
+            f'{BASE}{path}', data=form, files=files,
+            headers=headers, timeout=TIMEOUT))
+    return throttled(lambda: requests.post(
+        f'{BASE}{path}', json=body or {}, headers=headers, timeout=TIMEOUT))
 
 
 def get(path, token=None):
     headers = {'X-Device-UUID': 'test-card-flow'}
     if token:
         headers['Authorization'] = f'Bearer {token}'
-    return requests.get(f'{BASE}{path}', headers=headers, timeout=TIMEOUT)
+    return throttled(lambda: requests.get(
+        f'{BASE}{path}', headers=headers, timeout=TIMEOUT))
 
 
 def data_of(response):
@@ -201,110 +206,18 @@ def main():
     if not check('payout account added', bool(bank)):
         return finish()
 
-    # Insufficient limit: refused by the ordinary balance check, before any
-    # charge is attempted.
-    response = post('/transfers', {
-        'card_id': low_card['card_id'], 'bank_account_id': bank, 'amount': 5000,
-    }, token=token, idem=f'low-{phone}')
-    check('short-limit card is refused', response.status_code == 400,
-          f'got {response.status_code}')
-    check('refusal names the balance, not a gateway error',
-          'balance' in response.text.lower() or 'limit' in response.text.lower(),
-          response.text[:160])
-
-    # Decline: the order opens, the charge is refused.
-    response = post('/transfers', {
-        'card_id': decline_card['card_id'], 'bank_account_id': bank,
-        'amount': 2000,
-    }, token=token, idem=f'dec-{phone}')
-    declined = data_of(response)
-    # The order must open: a decline belongs at authorisation, after the user
-    # has walked the journey, not as an error on the amount screen.
-    if check('decline card opens a transfer', response.status_code == 201,
-             response.text[:200]):
-        confirmed = data_of(post(f"/transfers/{declined['transfer_id']}/confirm",
-                                 token=token))
-        check('declined charge fails the transfer',
-              confirmed.get('status') == 'FAILED',
-              str(confirmed.get('status')))
-        check('nothing was charged', not confirmed.get('charged_at'))
-        check('no UTR issued', not confirmed.get('utr'))
-
-    # Success: charge clears and the transfer advances.
-    response = post('/transfers', {
-        'card_id': success_card['card_id'], 'bank_account_id': bank,
-        'amount': 2000,
-    }, token=token, idem=f'ok-{phone}')
-    ok = data_of(response)
-    if check('success card opens a transfer', response.status_code == 201,
-             response.text[:200]):
-        # The guarantee, asserted rather than assumed: a dummy card must not
-        # open an order against the real merchant account. Razorpay order ids
-        # start with "order_"; the simulator's do not.
-        checkout = ok.get('checkout') or {}
-        check('test card never reaches the gateway',
-              checkout.get('provider') != 'RAZORPAY'
-              and not str(checkout.get('order_id') or '').startswith('order_'),
-              f"provider={checkout.get('provider')} order={checkout.get('order_id')}")
-        confirmed = data_of(post(f"/transfers/{ok['transfer_id']}/confirm",
-                                 token=token))
-        status = confirmed.get('status')
-        check('successful charge advances the transfer',
-              status in ('SUCCEEDED', 'PAYOUT_PROCESSING', 'INBOUND_CHARGED'),
-              str(status))
-        check('the charge is recorded', bool(confirmed.get('charged_at')),
-              str(confirmed.get('charged_at')))
-
-        # -- History and limits -------------------------------------------
-        print('\nHistory and limits')
-        txns = get('/transactions', token).json().get('data') or []
-        check('transaction recorded in history', len(txns) >= 1, str(len(txns)))
-
-        detail = data_of(get(f"/cards/{success_card['card_id']}", token))
-        check('limit moved after a successful charge',
-              float(detail.get('available_limit') or 0) < 200000.0,
-              str(detail.get('available_limit')))
-
-        receipt = get(f"/transfers/{ok['transfer_id']}/receipt", token)
-        check('receipt available for a settled transfer',
-              receipt.status_code in (200, 409),
-              f'got {receipt.status_code}')
-
-    # -- Simulated UPI transfer -------------------------------------------
-    print('\nSimulated UPI transfer')
-    response = post('/transfers', {
-        'card_id': success_card['card_id'], 'bank_account_id': bank,
-        'amount': 1200, 'payment_method': 'UPI',
-    }, token=token, idem=f'upi-{phone}')
-    upi = data_of(response)
-
-    if check('UPI transfer opens', response.status_code == 201,
-             response.text[:200]):
-        checkout = upi.get('checkout') or {}
-        check('simulated UPI never reaches the gateway',
-              checkout.get('provider') != 'RAZORPAY',
-              str(checkout.get('provider')))
-
-        confirmed = data_of(post(f"/transfers/{upi['transfer_id']}/confirm",
-                                 token=token))
-        check('UPI transfer completes',
-              confirmed.get('status') in ('SUCCEEDED', 'PAYOUT_PROCESSING',
-                                          'INBOUND_CHARGED'),
-              str(confirmed.get('status')))
-        check('recorded as UPI, not as a card',
-              confirmed.get('source_instrument') == 'upi',
-              str(confirmed.get('source_instrument')))
-
-        # The money came out of a bank, not the credit line, so the card's
-        # limit must be untouched by this one.
-        card_now = data_of(get(f"/cards/{success_card['card_id']}", token))
-        check('credit line not drawn down by a UPI payment',
-              float(card_now.get('outstanding_amount') or 0)
-              == float(detail.get('outstanding_amount') or 0),
-              f"{detail.get('outstanding_amount')} -> {card_now.get('outstanding_amount')}")
-
-        txns = get('/transactions', token).json().get('data') or []
-        check('UPI transfer appears in history', len(txns) >= 2, str(len(txns)))
+    # The scenarios below - short limit refused, decline card fails the
+    # charge, success card clears, UPI settles without drawing the credit
+    # line - were all exercised through the credit-to-bank transfer
+    # endpoint. That product has been removed, and its replacement (a
+    # purchase against an issued credit line) is not built yet.
+    #
+    # Deliberately left failing rather than skipped: the value of this file
+    # is proving that a test card behaves as its scenario claims, and a
+    # green run without these would assert the opposite of the truth.
+    check('a charge path exists to exercise the test-card scenarios', False,
+          'BLOCKED: needs the card purchase flow. Retarget onto it once the '
+          'credit-line lifecycle lands.')
 
     return finish()
 

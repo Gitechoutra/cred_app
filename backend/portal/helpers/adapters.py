@@ -39,7 +39,7 @@ class Simulate:
 
     DECLINE = 'SIMDECLINE'         # issuer declines the charge (ERR-003)
     TIMEOUT = 'SIMTIMEOUT'         # gateway times out (ERR-005)
-    PAYOUT_FAIL = 'SIMPAYOUTFAIL'  # charge succeeds, payout fails (ERR-006)
+    PAYOUT_FAIL = 'SIMPAYOUTFAIL'  # charge succeeds, settlement fails (ERR-006)
     NAME_MISMATCH = 'SIMNAMEMM'    # penny-drop name mismatch (ERR-004)
     TOKEN_EXPIRED = 'SIMTOKENEXP'  # expired card token (ERR-009)
     BILLER_DOWN = 'SIMBILLERDOWN'  # BBPS biller offline (ERR-010)
@@ -281,88 +281,6 @@ def refund_payment(*, order_id: str, refund_id: str, amount, note: str = None) -
             'refund_id': result['refund_id'],
             'provider_reference': result['cf_refund_id'],
             'status': result['refund_status'],
-        }
-    return {'ok': False, 'error': result['error']}
-
-
-# ── Payout: outbound IMPS (PRD FR-006 step 8) ──────────────────────────────
-
-def dispatch_payout(
-    *,
-    transfer_id: str,
-    amount,
-    beneficiary_id: str,
-    beneficiary_name: str,
-    account_number: str,
-    ifsc: str,
-    remarks: str = None,
-) -> dict:
-    """
-    Send funds to a verified account.
-
-    The caller must have confirmed the destination is penny-drop verified and
-    belongs to this user; this function does not re-check, because by the time
-    money is moving that decision is already made and recorded.
-    """
-    if _use_sandbox():
-        if _simulating(transfer_id, Simulate.PAYOUT_FAIL):
-            return {
-                'ok': False,
-                'error_code': 'PAYOUT_FAILED',
-                'error': 'Beneficiary bank did not accept the transfer.',
-                'retryable': True,
-            }
-
-        # A real IMPS hop is not instant; a little latency keeps the sandbox
-        # honest about the states the UI has to render.
-        time.sleep(0.15)
-
-        return {
-            'ok': True,
-            'provider': 'SANDBOX',
-            'payout_reference': _ref('cf_txfr_sbx'),
-            'status': 'SUCCESS',
-            'utr': _fake_utr(),
-        }
-
-    result = cashfree.create_payout(
-        transfer_id=transfer_id,
-        amount=amount,
-        beneficiary_id=beneficiary_id,
-        beneficiary_name=beneficiary_name,
-        account_number=account_number,
-        ifsc=ifsc,
-        remarks=remarks,
-    )
-
-    if result['ok']:
-        status = (result.get('status') or '').upper()
-        return {
-            'ok': True,
-            'provider': 'CASHFREE',
-            'payout_reference': result['cf_transfer_id'],
-            'status': status,
-            'utr': result.get('utr'),
-        }
-
-    return {
-        'ok': False,
-        'error_code': 'PAYOUT_FAILED',
-        'error': result['error'],
-        'retryable': not result.get('timeout', False),
-    }
-
-
-def get_payout_status(transfer_id: str) -> dict:
-    if _use_sandbox():
-        return {'ok': True, 'status': 'SUCCESS', 'utr': _fake_utr()}
-
-    result = cashfree.get_payout_status(transfer_id)
-    if result['ok']:
-        return {
-            'ok': True,
-            'status': (result.get('status') or '').upper(),
-            'utr': result.get('utr'),
         }
     return {'ok': False, 'error': result['error']}
 
@@ -710,30 +628,11 @@ def verify_razorpay_signature(
 
 
 # Back-compatible aliases. The EMI engine speaks in UPI terms because that is
-# what it collects with; the transfer engine charges a card through the same
-# gateway and calls the general names.
+# what it collects with; everything else charges through the same gateway and
+# calls the general names.
 create_upi_order = create_razorpay_order
 get_upi_payment_status = get_razorpay_payment_status
 verify_upi_checkout_signature = verify_razorpay_signature
-
-
-def transfer_upi_funding_allowed() -> bool:
-    """
-    Whether UPI may settle a transfer's charge.
-
-    Unset in config, this follows the key: on for a test key, off for a live
-    one. A UPI-funded transfer takes money from a bank rather than a credit
-    line, so it is a testing affordance by default rather than a product
-    decision made by accident.
-    """
-    explicit = current_app.config.get('TRANSFER_UPI_FUNDING', '')
-    if explicit:
-        return explicit == 'True'
-
-    # Offered whenever the gateway is in test mode, regardless of whether the
-    # account has UPI switched on: if it has not, the payment is simulated
-    # rather than withheld. See upi_needs_simulation().
-    return razorpay_available() and razorpay.is_test_mode()
 
 
 def upi_needs_simulation() -> bool:

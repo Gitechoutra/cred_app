@@ -3,18 +3,14 @@ portal/scheduler.py
 ===================
 APScheduler registrations (version1.md 7.3).
 
-Three of these jobs are the only reason a stuck transfer ever un-sticks, so a
+Two of these jobs are the only reason a stuck payment ever un-sticks, so a
 word on why they exist rather than just what they do:
 
-- **payout_retry** is the Cashfree circuit breaker's clock. dispatch_payout sets
-  next_retry_at when a payout fails; nothing re-reads it unless this job runs.
-  Without it a charged card never gets its payout retried and never gets
-  refunded either - the single worst state the platform can be in.
-
-- **transfer_recon** catches the transfers no callback ever resolved. A webhook
-  can be lost, and a card charged with no matching payout is real money sitting
-  in limbo, so every in-flight transfer is re-read against the gateway on a
-  cycle regardless of what did or did not arrive.
+- **payment_status_poll** catches the collections no callback ever resolved. A
+  webhook can be lost, and a card charged against a payment this platform still
+  reads as pending is real money in limbo, so every in-flight payment is
+  re-read against the gateway on a cycle regardless of what did or did not
+  arrive.
 
 - **ledger_self_audit** is the D1 mitigation. MySQL gives weaker isolation
   guarantees than the PRD's PostgreSQL, so correctness rests on application
@@ -67,55 +63,7 @@ def _job(app, name, fn, *args, **kwargs):
     return runner
 
 
-# -- Money: the Cashfree rails ---------------------------------------------
-
-def _retry_payouts():
-    from portal.helpers import transfer_engine
-    return transfer_engine.retry_pending_payouts()
-
-
-def _reconcile_transfers(max_age_hours: int = 24, limit: int = 200):
-    """
-    Re-read every in-flight transfer against Cashfree (PRD 9.4, T+0/T+1).
-
-    The backstop for a webhook that never arrived. Runs the same engine entry
-    point the callback uses, so a transfer resolved here follows exactly the
-    path it would have followed on delivery - including the refund, if the
-    payout is beyond saving.
-    """
-    from datetime import timedelta
-
-    from portal.helpers import transfer_engine
-    from portal.models.base import utcnow
-    from portal.models.transfers import TransferStatus, Transfers
-
-    cutoff = utcnow() - timedelta(hours=max_age_hours)
-
-    stuck = Transfers.query.filter(
-        Transfers.status.in_([
-            TransferStatus.INBOUND_CHARGED,
-            TransferStatus.PAYOUT_PROCESSING,
-            TransferStatus.PENDING_RECONCILIATION,
-        ]),
-        Transfers.created_on >= cutoff,
-    ).limit(limit).all()
-
-    resolved = 0
-    for transfer in stuck:
-        try:
-            before = transfer.status
-            transfer_engine.apply_payout_callback(transfer)
-            if transfer.status != before:
-                resolved += 1
-        except Exception as exc:
-            from portal import db
-            db.session.rollback()
-            logger.error(
-                f'[scheduler] recon failed for {transfer.transfer_id}: {exc}'
-            )
-
-    return {'examined': len(stuck), 'resolved': resolved} if stuck else None
-
+# -- Money: the collection rails -------------------------------------------
 
 def _poll_pending_payments():
     from portal.helpers import emi_engine
@@ -150,7 +98,7 @@ def _drain_domain_events(limit: int = 100):
     The outbox stands in for Kafka: audit.emit() writes the event in the same
     transaction as the state change, and this job is the consumer. At-least-once
     delivery, so a notification may repeat after a crash - which is the right
-    trade against silently losing a transfer-succeeded message.
+    trade against silently losing a payment-succeeded message.
     """
     from portal import db
     from portal.helpers import audit, notify
@@ -249,10 +197,6 @@ def init_scheduler(app):
 
     jobs = [
         # -- Money: must run, and run often ------------------------------
-        ('payout_retry', _retry_payouts,
-         IntervalTrigger(minutes=2)),
-        ('transfer_recon', _reconcile_transfers,
-         IntervalTrigger(hours=6)),
         ('payment_status_poll', _poll_pending_payments,
          IntervalTrigger(minutes=15)),
 

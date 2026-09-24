@@ -5,7 +5,7 @@
  * assembles a fetch by hand. Three things it handles that a bare fetch does not:
  *
  * 1. **Token refresh.** Access tokens live 15 minutes (PRD FR-001). On a 401 the
- *    client refreshes once and replays the request, so a user mid-transfer is
+ *    client refreshes once and replays the request, so a user mid-payment is
  *    never bounced to the login screen by an expiry they cannot see.
  *
  * 2. **Single-flight refresh.** Several requests hitting 401 together must not
@@ -317,20 +317,6 @@ export const endpoints = {
     lookupIfsc: (ifsc) => api.get(`/bank-accounts/ifsc/${ifsc}`),
     lookupAccount: (data) => api.post('/bank-accounts/lookup-account', data),
   },
-  transfers: {
-    // Which instruments may fund a transfer, and why UPI is not among them.
-    methods: () => api.get('/transfers/methods'),
-    // Hands Razorpay Checkout's signed payload to the server, which verifies
-    // the signature and re-reads the charge before dispatching the payout.
-    verify: (id, data) => api.post(`/transfers/${id}/verify`, data),
-    quote: (amount) => api.post('/transfers/quote', { amount }),
-    limits: () => api.get('/transfers/limits'),
-    list: (page = 1) => api.get(`/transfers?page=${page}`),
-    get: (id) => api.get(`/transfers/${id}`),
-    initiate: (data) => api.pay('/transfers', data),
-    confirm: (id) => api.post(`/transfers/${id}/confirm`),
-    receipt: (id) => api.get(`/transfers/${id}/receipt`),
-  },
   emi: {
     providers: () => api.get('/emi/providers'),
     list: () => api.get('/emi'),
@@ -390,10 +376,6 @@ export const endpoints = {
     kycQueue: () => api.get('/admin/kyc/queue'),
     reviewKyc: (id, data) => api.post(`/admin/kyc/${id}/review`, data),
     kycDocumentUrl: (id, slot) => fetchBlobUrl(`/admin/kyc/${id}/document/${slot}`),
-    transfers: (params = '') => api.get(`/admin/transfers${params}`),
-    stuckTransfers: () => api.get('/admin/transfers/stuck'),
-    retryPayout: (id, reason) => api.post(`/admin/transfers/${id}/retry-payout`, { reason }),
-    reverse: (id, reason) => api.post(`/admin/transfers/${id}/reverse`, { reason }),
     reconciliation: () => api.get('/admin/reconciliation'),
     selfAudit: () => api.post('/admin/reconciliation/self-audit'),
     settings: () => api.get('/admin/settings'),

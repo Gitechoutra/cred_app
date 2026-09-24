@@ -299,9 +299,9 @@ class EscalateToSupport(Resource):
             return failure(ErrorCode.NOT_FOUND, 'Payment not found.', 404)
 
         category = (
-            TicketCategory.TRANSFER_ISSUE
-            if args['reference_type'] == 'Transfers'
-            else TicketCategory.EMI_ISSUE
+            TicketCategory.EMI_ISSUE
+            if args['reference_type'] == 'EMIPayments'
+            else TicketCategory.PAYMENT_ISSUE
         )
 
         ticket = SupportTickets(

@@ -21,21 +21,35 @@ from portal.models.admin_settings import AdminSettings, FeatureFlags
 class Key:
     """Setting keys, so a typo is an import error rather than a silent default."""
 
-    # -- Transfer limits and pricing (PRD 9.2) -------------------------------
-    TRANSFER_MIN_AMOUNT = 'TRANSFER_MIN_AMOUNT'
-    #: Floor for any collected payment - EMI, UPI, gateway. Transfers have
-    #: their own key above; this covers everything that had no minimum at all.
+    # -- Payments ------------------------------------------------------------
+    #: Floor for any collected payment - a card bill, an EMI, a scanned QR.
+    #: Bounded below by the gateway's own 100-paise minimum.
     PAYMENT_MIN_AMOUNT = 'PAYMENT_MIN_AMOUNT'
-    TRANSFER_MAX_SINGLE_STANDARD_KYC = 'TRANSFER_MAX_SINGLE_STANDARD_KYC'
-    TRANSFER_MAX_SINGLE_FULL_KYC = 'TRANSFER_MAX_SINGLE_FULL_KYC'
-    TRANSFER_DAILY_LIMIT = 'TRANSFER_DAILY_LIMIT'
-    TRANSFER_MONTHLY_LIMIT = 'TRANSFER_MONTHLY_LIMIT'
-    TRANSFER_CONVENIENCE_FEE_PERCENT = 'TRANSFER_CONVENIENCE_FEE_PERCENT'
     GST_PERCENT = 'GST_PERCENT'
+
+    # -- Credit line (issuance and spending) ---------------------------------
+    #: Ceiling on the credit limit a KYC tier may be granted. The limit itself
+    #: is decided by the backend at approval; these bound that decision.
+    CREDIT_LIMIT_MAX_STANDARD_KYC = 'CREDIT_LIMIT_MAX_STANDARD_KYC'
+    CREDIT_LIMIT_MAX_FULL_KYC = 'CREDIT_LIMIT_MAX_FULL_KYC'
+    CREDIT_LIMIT_MIN = 'CREDIT_LIMIT_MIN'
+    CREDIT_DAILY_SPEND_LIMIT = 'CREDIT_DAILY_SPEND_LIMIT'
+    CREDIT_MONTHLY_SPEND_LIMIT = 'CREDIT_MONTHLY_SPEND_LIMIT'
+    #: A credit limit above this needs full KYC, not just minimum KYC.
     FULL_KYC_REQUIRED_ABOVE = 'FULL_KYC_REQUIRED_ABOVE'
 
+    # -- Statement and billing ----------------------------------------------
+    #: Day of the month the statement is cut. Due date follows it by the grace
+    #: period below.
+    STATEMENT_CYCLE_DAY = 'STATEMENT_CYCLE_DAY'
+    STATEMENT_GRACE_DAYS = 'STATEMENT_GRACE_DAYS'
+    #: Smallest share of the statement balance a payment may settle, as a
+    #: percentage. RBI-style minimum due.
+    MINIMUM_DUE_PERCENT = 'MINIMUM_DUE_PERCENT'
+    LATE_PAYMENT_FEE = 'LATE_PAYMENT_FEE'
+
     # -- Risk (PRD 16.1, ERR-011) -------------------------------------------
-    VELOCITY_MAX_TRANSFERS_PER_HOUR = 'VELOCITY_MAX_TRANSFERS_PER_HOUR'
+    VELOCITY_MAX_PAYMENTS_PER_HOUR = 'VELOCITY_MAX_PAYMENTS_PER_HOUR'
     VELOCITY_THROTTLE_MINUTES = 'VELOCITY_THROTTLE_MINUTES'
     MAKER_CHECKER_THRESHOLD = 'MAKER_CHECKER_THRESHOLD'
 
@@ -53,10 +67,6 @@ class Key:
     UPI_AUTOPAY_MAX_AMOUNT = 'UPI_AUTOPAY_MAX_AMOUNT'
     ENACH_MAX_AMOUNT = 'ENACH_MAX_AMOUNT'
 
-    # -- Payout retry (PRD 9.4) ---------------------------------------------
-    PAYOUT_MAX_RETRIES = 'PAYOUT_MAX_RETRIES'
-    PAYOUT_RETRY_BACKOFF_MINUTES = 'PAYOUT_RETRY_BACKOFF_MINUTES'
-
     # -- Penny drop (PRD FR-005) --------------------------------------------
     PENNY_DROP_MATCH_THRESHOLD = 'PENNY_DROP_MATCH_THRESHOLD'
     PENNY_DROP_REVIEW_THRESHOLD = 'PENNY_DROP_REVIEW_THRESHOLD'
@@ -67,7 +77,7 @@ class Key:
 class Flag:
     """Feature flag keys."""
 
-    CREDIT_TO_BANK_TRANSFER = 'CREDIT_TO_BANK_TRANSFER'
+    CARD_ISSUANCE = 'CARD_ISSUANCE'
     EMI_AUTO_PAY = 'EMI_AUTO_PAY'
     EMI_MANUAL_PAY = 'EMI_MANUAL_PAY'
     CARD_LINKING = 'CARD_LINKING'
@@ -78,16 +88,19 @@ class Flag:
 #: Fallbacks used when the row is missing. Mirrors the seeder so behaviour is
 #: identical on a fresh database and a seeded one.
 _DEFAULTS = {
-    Key.TRANSFER_MIN_AMOUNT: '1',
     Key.PAYMENT_MIN_AMOUNT: '1',
-    Key.TRANSFER_MAX_SINGLE_STANDARD_KYC: '50000',
-    Key.TRANSFER_MAX_SINGLE_FULL_KYC: '100000',
-    Key.TRANSFER_DAILY_LIMIT: '100000',
-    Key.TRANSFER_MONTHLY_LIMIT: '250000',
-    Key.TRANSFER_CONVENIENCE_FEE_PERCENT: '1.95',
     Key.GST_PERCENT: '18',
-    Key.FULL_KYC_REQUIRED_ABOVE: '10000',
-    Key.VELOCITY_MAX_TRANSFERS_PER_HOUR: '3',
+    Key.CREDIT_LIMIT_MAX_STANDARD_KYC: '50000',
+    Key.CREDIT_LIMIT_MAX_FULL_KYC: '200000',
+    Key.CREDIT_LIMIT_MIN: '5000',
+    Key.CREDIT_DAILY_SPEND_LIMIT: '100000',
+    Key.CREDIT_MONTHLY_SPEND_LIMIT: '250000',
+    Key.FULL_KYC_REQUIRED_ABOVE: '50000',
+    Key.STATEMENT_CYCLE_DAY: '1',
+    Key.STATEMENT_GRACE_DAYS: '18',
+    Key.MINIMUM_DUE_PERCENT: '5',
+    Key.LATE_PAYMENT_FEE: '500',
+    Key.VELOCITY_MAX_PAYMENTS_PER_HOUR: '3',
     Key.VELOCITY_THROTTLE_MINUTES: '30',
     Key.MAKER_CHECKER_THRESHOLD: '25000',
     Key.OTP_LENGTH: '6',
@@ -100,8 +113,6 @@ _DEFAULTS = {
     Key.MANDATE_PREDEBIT_NOTICE_HOURS: '48',
     Key.UPI_AUTOPAY_MAX_AMOUNT: '15000',
     Key.ENACH_MAX_AMOUNT: '1000000',
-    Key.PAYOUT_MAX_RETRIES: '3',
-    Key.PAYOUT_RETRY_BACKOFF_MINUTES: '2,5,15',
     Key.PENNY_DROP_MATCH_THRESHOLD: '80',
     Key.PENNY_DROP_REVIEW_THRESHOLD: '70',
     Key.PLATFORM_DEFAULT_CURRENCY: 'INR',

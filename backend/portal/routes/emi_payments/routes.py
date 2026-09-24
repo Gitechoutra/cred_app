@@ -26,7 +26,11 @@ from . import logger, ns
 
 pay_parser = reqparse.RequestParser()
 pay_parser.add_argument('emi_id', type=str, required=True, location='json')
-pay_parser.add_argument('amount', type=float, required=False, location='json')
+# Deliberately not type=float. flask-restx would coerce the value before
+# validate_amount ever saw it, so '1e9' arrived as 1000000000.0 and passed
+# the plain-decimal check that exists to reject exactly that. The raw text
+# has to reach the validator intact.
+pay_parser.add_argument('amount', required=False, location='json')
 pay_parser.add_argument('payment_mode', type=str, required=True, location='json')
 pay_parser.add_argument('upi_vpa', type=str, required=False, location='json')
 pay_parser.add_argument('upi_app', type=str, required=False, location='json')
@@ -131,6 +135,12 @@ class PaymentMethods(Resource):
                 'reason': 'RBI regulations prohibit settling loan EMIs from a '
                           'credit line.',
             }],
+            # The server's own floor, so the client validates against the
+            # same number the server will enforce rather than a hardcoded copy
+            # that drifts out of step with the setting.
+            'minimum_amount': float(
+                settings.get_decimal(Key.PAYMENT_MIN_AMOUNT)
+            ),
             # Everything the client needs to open UPI checkout. The key id is
             # public by design - Checkout runs in the browser and cannot work
             # without it. The secret is not here and never will be.

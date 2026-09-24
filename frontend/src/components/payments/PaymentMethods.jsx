@@ -3,7 +3,7 @@ import { IconLock } from '../layout/AppShell';
 import { money } from '../../utils/format';
 
 /**
- * The payment-method step, shared by transfers and EMI payments.
+ * The payment-method step, shared by every payment this platform collects.
  *
  * It exists as its own screen rather than a section of the amount form because
  * choosing how to pay is a decision, and decisions deserve their own step. It
@@ -11,7 +11,7 @@ import { money } from '../../utils/format';
  * back, and nothing has been charged yet.
  *
  * The method list always comes from the server. Which instruments are legal
- * differs by product - an EMI may not be paid from a credit line, a transfer
+ * differs by product - an EMI may not be paid from a credit line, a bill
  * must be - and that is a rule the backend owns. This component renders what it
  * is told, including the reason an instrument is missing, because "why can't I
  * see UPI here?" is better answered than left to guesswork.

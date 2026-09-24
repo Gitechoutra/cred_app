@@ -34,7 +34,11 @@ decode_parser.add_argument('payload', type=str, required=True, location='json')
 
 pay_parser = reqparse.RequestParser()
 pay_parser.add_argument('payload', type=str, required=True, location='json')
-pay_parser.add_argument('amount', type=float, required=False, location='json')
+# Deliberately not type=float. flask-restx would coerce the value before
+# validate_amount ever saw it, so '1e9' arrived as 1000000000.0 and passed
+# the plain-decimal check that exists to reject exactly that. The raw text
+# has to reach the validator intact.
+pay_parser.add_argument('amount', required=False, location='json')
 
 verify_parser = reqparse.RequestParser()
 verify_parser.add_argument('razorpay_payment_id', type=str, required=False, location='json')

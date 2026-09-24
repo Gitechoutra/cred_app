@@ -25,8 +25,6 @@ import CardDetail from '../pages/user/CardDetail';
 import AddCard from '../pages/user/AddCard';
 import BankAccounts from '../pages/user/BankAccounts';
 import AddBankAccount from '../pages/user/AddBankAccount';
-import Transfer from '../pages/user/Transfer';
-import TransferStatus from '../pages/user/TransferStatus';
 import EmiList from '../pages/user/EmiList';
 import EmiDetail from '../pages/user/EmiDetail';
 import AddEmi from '../pages/user/AddEmi';
@@ -45,7 +43,6 @@ import AdminLayout from '../pages/admin/AdminLayout';
 import AdminDashboard from '../pages/admin/AdminDashboard';
 import AdminUsers from '../pages/admin/AdminUsers';
 import AdminKycQueue from '../pages/admin/AdminKycQueue';
-import AdminTransfers from '../pages/admin/AdminTransfers';
 import AdminReconciliation from '../pages/admin/AdminReconciliation';
 import AdminSettings from '../pages/admin/AdminSettings';
 
@@ -156,8 +153,6 @@ export default function App() {
       <Route path="/banks/add" element={<RequireAuth><Shell><AddBankAccount /></Shell></RequireAuth>} />
 
       <Route path="/scan" element={<RequireAuth><Shell><ScanPay /></Shell></RequireAuth>} />
-      <Route path="/transfer" element={<RequireAuth><Shell><Transfer /></Shell></RequireAuth>} />
-      <Route path="/transfer/status/:transferId" element={<RequireAuth><Shell><TransferStatus /></Shell></RequireAuth>} />
 
       <Route path="/emi" element={<RequireAuth><Shell><EmiList /></Shell></RequireAuth>} />
       <Route path="/emi/add" element={<RequireAuth><Shell><AddEmi /></Shell></RequireAuth>} />
@@ -179,7 +174,6 @@ export default function App() {
         <Route index element={<AdminDashboard />} />
         <Route path="users" element={<AdminUsers />} />
         <Route path="kyc" element={<AdminKycQueue />} />
-        <Route path="transfers" element={<AdminTransfers />} />
         <Route path="reconciliation" element={<AdminReconciliation />} />
         <Route path="settings" element={<AdminSettings />} />
       </Route>

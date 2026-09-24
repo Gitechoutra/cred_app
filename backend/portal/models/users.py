@@ -76,7 +76,6 @@ class Users(db.Model, TimestampMixin, CRUDMixin):
     login_history = db.relationship('LoginHistory', back_populates='user', lazy='dynamic')
     cards = db.relationship('Cards', back_populates='user', lazy='dynamic')
     bank_accounts = db.relationship('BankAccounts', back_populates='user', lazy='dynamic')
-    transfers = db.relationship('Transfers', back_populates='user', lazy='dynamic')
     emi_obligations = db.relationship('EMIObligations', back_populates='user', lazy='dynamic')
     mandates = db.relationship('AutoPayMandates', back_populates='user', lazy='dynamic')
     transactions = db.relationship('MasterTransactions', back_populates='user', lazy='dynamic')

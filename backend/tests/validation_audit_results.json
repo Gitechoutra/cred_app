@@ -69,7 +69,7 @@
     "section": 18,
     "check": "success envelope has success+data",
     "passed": true,
-    "detail": "{'success': True, 'message': 'Success', 'data': {'user_id': '45e33ce7-e657-4abf-9ce3-9b416ac6e20a', 'phone': '9875382379"
+    "detail": "{'success': True, 'message': 'Success', 'data': {'user_id': 'dcd7c055-c832-458e-b625-f083a35bc443', 'phone': '9254553361"
   },
   {
     "section": 18,
@@ -123,7 +123,7 @@
     "section": 7,
     "check": "valid bank account accepted",
     "passed": true,
-    "detail": "{\n    \"success\": true,\n    \"message\": \"Bank account verified successfully.\",\n    \"data\": {\n        \"bank_account_id\": \"6486c9de-6cc4-4dd8-81f9-e589fbe6ea63\",\n        \"masked_account\": \"**** 7983\",\n   "
+    "detail": "{\n    \"success\": true,\n    \"message\": \"Bank account verified successfully.\",\n    \"data\": {\n        \"bank_account_id\": \"2c63fdaf-3f5f-4589-96f6-b79ca11ab7b2\",\n        \"masked_account\": \"**** 0986\",\n   "
   },
   {
     "section": 7,
@@ -157,81 +157,111 @@
   },
   {
     "section": 9,
-    "check": "quote rejects empty amount",
+    "check": "administrator login available for the KYC gate",
+    "passed": true,
+    "detail": ""
+  },
+  {
+    "section": 9,
+    "check": "audit user reaches a verified KYC tier",
+    "passed": true,
+    "detail": ""
+  },
+  {
+    "section": 9,
+    "check": "payment rejects empty amount",
     "passed": true,
     "detail": "got 400 for ''"
   },
   {
     "section": 9,
-    "check": "quote rejects dot amount",
+    "check": "payment rejects dot amount",
     "passed": true,
     "detail": "got 400 for '.'"
   },
   {
     "section": 9,
-    "check": "quote rejects double dot amount",
+    "check": "payment rejects double dot amount",
     "passed": true,
     "detail": "got 400 for '..'"
   },
   {
     "section": 9,
-    "check": "quote rejects alphabetic amount",
+    "check": "payment rejects alphabetic amount",
     "passed": true,
     "detail": "got 400 for 'abc'"
   },
   {
     "section": 9,
-    "check": "quote rejects special chars amount",
+    "check": "payment rejects special chars amount",
     "passed": true,
     "detail": "got 400 for '@@@'"
   },
   {
     "section": 9,
-    "check": "quote rejects negative amount",
+    "check": "payment rejects negative amount",
     "passed": true,
     "detail": "got 400 for -100"
   },
   {
     "section": 9,
-    "check": "quote rejects zero amount",
+    "check": "payment rejects zero amount",
     "passed": true,
     "detail": "got 400 for 0"
   },
   {
     "section": 9,
-    "check": "quote rejects multiple decimals amount",
+    "check": "payment rejects multiple decimals amount",
     "passed": true,
     "detail": "got 400 for '10.5.5'"
   },
   {
     "section": 9,
-    "check": "quote rejects scientific amount",
+    "check": "payment rejects scientific amount",
     "passed": true,
     "detail": "got 400 for '1e9'"
   },
   {
     "section": 9,
-    "check": "quote rejects three decimals amount",
+    "check": "payment rejects three decimals amount",
     "passed": true,
     "detail": "got 400 for 10.555"
   },
   {
     "section": 9,
-    "check": "quote rejects huge amount",
+    "check": "payment rejects huge amount",
     "passed": true,
     "detail": "got 400 for 1000000000000"
   },
   {
     "section": 9,
-    "check": "quote rejects null amount",
+    "check": "payment rejects null amount",
     "passed": true,
     "detail": "got 400 for None"
   },
   {
     "section": 9,
-    "check": "quote accepts a valid amount",
+    "check": "payment accepts a valid amount",
     "passed": true,
-    "detail": "{\n    \"success\": true,\n    \"message\": \"Success\",\n    \"data\": {\n        \"principal_amount\": 5000.0,\n        \"convenience_fee\": 97.5,\n        \"gst_on_fee\": 17.55,"
+    "detail": "{\n    \"success\": true,\n    \"message\": \"Complete the payment in your UPI app.\",\n    \"data\": {\n        \"qr_payment_id\": \"0278a808-99c2-4a97-b0d4-a381447a1054\",\n  "
+  },
+  {
+    "section": 9,
+    "check": "payment accepts the minimum of Rs. 1",
+    "passed": true,
+    "detail": "{\n    \"success\": true,\n    \"message\": \"Complete the payment in your UPI app.\",\n    \"data\": {\n        \"qr_payment_id\": \"e9addfa6-3d79-49cb-86d2-2c5b5a1a2a2e\",\n        \"transaction_id\": null,\n        \"p"
+  },
+  {
+    "section": 9,
+    "check": "payment rejects just below the minimum",
+    "passed": true,
+    "detail": "got 400"
+  },
+  {
+    "section": 9,
+    "check": "the minimum the client is told matches the server floor",
+    "passed": true,
+    "detail": "1.0"
   },
   {
     "section": 8,
@@ -271,7 +301,7 @@
   },
   {
     "section": 17,
-    "check": "unknown transfer id is a 404, not a leak",
+    "check": "unknown payment id is a 404, not a leak",
     "passed": true,
     "detail": "got 404"
   },
@@ -301,13 +331,13 @@
   },
   {
     "section": 20,
-    "check": "normal user refused /admin/transfers",
+    "check": "normal user refused /admin/reconciliation",
     "passed": true,
     "detail": "got 403"
   },
   {
     "section": 20,
-    "check": "anonymous refused /admin/transfers",
+    "check": "anonymous refused /admin/reconciliation",
     "passed": true,
     "detail": "got 401"
   },
@@ -339,7 +369,7 @@
     "section": 14,
     "check": "transaction list responds",
     "passed": true,
-    "detail": "{\n    \"success\": true,\n    \"data\": [],\n    \"pagination\": {\n        \"page\": 1,\n        \"per_page\": 20,\n        \"total\": 0,\n        \"pages\": 0,\n        \"has_next\""
+    "detail": "{\n    \"success\": true,\n    \"data\": [\n        {\n            \"transaction_id\": \"b8f3eb32-fd25-4b52-bee4-7c63ad0ba73d\",\n            \"type\": \"QR_UPI_PAYMENT\",\n     "
   },
   {
     "section": 14,
@@ -379,9 +409,15 @@
   },
   {
     "section": 28,
-    "check": "idempotency key accepted on a quote",
+    "check": "idempotency key accepted on a payment",
     "passed": true,
-    "detail": "got 200"
+    "detail": "got 201"
+  },
+  {
+    "section": 28,
+    "check": "a replayed idempotency key returns the original payment",
+    "passed": true,
+    "detail": "09e26f95-4828-444f-832f-7e80eeb4bab2 vs 09e26f95-4828-444f-832f-7e80eeb4bab2"
   },
   {
     "section": 28,
@@ -423,6 +459,6 @@
     "section": 27,
     "check": "no stack traces in error bodies",
     "passed": true,
-    "detail": "{\n    \"errors\": {\n        \"amount\": \"Missing required parameter in the JSON body\"\n    },\n    \"message\": \"Input payload v"
+    "detail": "{\n    \"errors\": {\n        \"payload\": \"Missing required parameter in the JSON body\"\n    },\n    \"message\": \"Input payload "
   }
 ]

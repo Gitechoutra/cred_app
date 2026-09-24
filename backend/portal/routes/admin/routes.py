@@ -19,9 +19,7 @@ from flask_restx import Resource, reqparse
 from sqlalchemy import func
 
 from portal import db
-from portal.helpers import (
-    audit, error_recorder, ledger_engine, settings, transfer_engine,
-)
+from portal.helpers import audit, error_recorder, ledger_engine, settings
 from portal.helpers.helpers import (
     ErrorCode, failure, iso, paginated, success, to_float,
 )
@@ -46,7 +44,6 @@ from portal.models.reconciliation import (
     DiscrepancyResolution, ReconciliationDiscrepancies,
 )
 from portal.models.roles import RoleTypes
-from portal.models.transfers import TransferStatus, Transfers
 from portal.models.users import KYCTier, UserStatus, Users
 
 from . import logger, ns
@@ -101,38 +98,39 @@ class AdminDashboard(Resource):
             )
         ).count()
 
-        transfers_today = Transfers.query.filter(
-            func.date(Transfers.created_on) == today
+        # Measured off the ledger rather than off any one product's table, so
+        # the numbers stay correct as products are added or retired.
+        payments_today = MasterTransactions.query.filter(
+            func.date(MasterTransactions.created_on) == today
         ).count()
         volume_month = db.session.query(
-            func.coalesce(func.sum(Transfers.principal_amount), 0)
+            func.coalesce(func.sum(MasterTransactions.gross_amount), 0)
         ).filter(
-            Transfers.status == TransferStatus.SUCCEEDED,
-            Transfers.created_on >= month_start,
+            MasterTransactions.status == TransactionStatus.SUCCEEDED,
+            MasterTransactions.created_on >= month_start,
         ).scalar()
 
         fee_month = db.session.query(
-            func.coalesce(func.sum(Transfers.convenience_fee), 0)
+            func.coalesce(func.sum(MasterTransactions.fee_amount), 0)
         ).filter(
-            Transfers.status == TransferStatus.SUCCEEDED,
-            Transfers.created_on >= month_start,
+            MasterTransactions.status == TransactionStatus.SUCCEEDED,
+            MasterTransactions.created_on >= month_start,
         ).scalar()
 
-        succeeded = Transfers.query.filter(
-            Transfers.status == TransferStatus.SUCCEEDED,
-            Transfers.created_on >= month_start,
+        succeeded = MasterTransactions.query.filter(
+            MasterTransactions.status == TransactionStatus.SUCCEEDED,
+            MasterTransactions.created_on >= month_start,
         ).count()
-        attempted = Transfers.query.filter(
-            Transfers.created_on >= month_start,
-            Transfers.status.notin_([TransferStatus.INITIATED]),
+        attempted = MasterTransactions.query.filter(
+            MasterTransactions.created_on >= month_start,
+            MasterTransactions.status.notin_([TransactionStatus.INITIATED]),
         ).count()
 
-        stuck = Transfers.query.filter(
-            Transfers.status.in_([
-                TransferStatus.PAYOUT_PROCESSING,
-                TransferStatus.PENDING_RECONCILIATION,
-                TransferStatus.REVERSAL_INIT,
-            ])
+        # Stuck means non-terminal for longer than any rail should take. A
+        # payment that is merely in flight right now is not an alert.
+        stuck = MasterTransactions.query.filter(
+            MasterTransactions.status.notin_(TransactionStatus.TERMINAL),
+            MasterTransactions.created_on < utcnow() - timedelta(hours=1),
         ).count()
 
         open_discrepancies = ReconciliationDiscrepancies.query.filter_by(
@@ -148,8 +146,8 @@ class AdminDashboard(Resource):
                 ).count(),
                 'pending_kyc_reviews': pending_kyc,
             },
-            'transfers': {
-                'today': transfers_today,
+            'payments': {
+                'today': payments_today,
                 'month_volume': float(volume_month or 0),
                 'month_fee_revenue': float(fee_month or 0),
                 'success_rate': (
@@ -188,8 +186,8 @@ def _operational_alerts(stuck, discrepancies, pending_kyc) -> list:
     if stuck:
         alerts.append({
             'severity': 'critical',
-            'message': f'{stuck} transfer(s) are stuck mid-flight and need review.',
-            'action': 'transfers',
+            'message': f'{stuck} payment(s) are stuck mid-flight and need review.',
+            'action': 'transactions',
         })
     if discrepancies:
         alerts.append({
@@ -307,12 +305,12 @@ class AdminUserDetail(Resource):
         ).all()
         obligations = EMIObligations.query.filter_by(user_id=user_id).all()
 
-        transfer_stats = db.session.query(
-            func.count(Transfers.transfer_id),
-            func.coalesce(func.sum(Transfers.principal_amount), 0),
+        payment_stats = db.session.query(
+            func.count(MasterTransactions.transaction_id),
+            func.coalesce(func.sum(MasterTransactions.gross_amount), 0),
         ).filter(
-            Transfers.user_id == user_id,
-            Transfers.status == TransferStatus.SUCCEEDED,
+            MasterTransactions.user_id == user_id,
+            MasterTransactions.status == TransactionStatus.SUCCEEDED,
         ).one()
 
         return success({
@@ -362,8 +360,8 @@ class AdminUserDetail(Resource):
             } for e in obligations],
 
             'stats': {
-                'successful_transfers': transfer_stats[0],
-                'total_transferred': float(transfer_stats[1] or 0),
+                'successful_payments': payment_stats[0],
+                'total_paid': float(payment_stats[1] or 0),
                 'cards_linked': len(cards),
                 'verified_accounts': sum(1 for a in accounts if a.is_payout_eligible),
             },
@@ -607,7 +605,7 @@ class ReviewKYC(Resource):
         Approve or reject a KYC submission.
 
         The tier is granted here and nowhere else, which is what makes approval
-        the single gate on higher transfer limits.
+        the single gate on a credit line.
         """
         args = kyc_review_parser.parse_args()
         actor, role = _actor()
@@ -693,208 +691,6 @@ class ReviewKYC(Resource):
         )
 
         return success({'kyc_status': kyc.kyc_status, 'tier': user.kyc_tier}, message)
-
-
-@ns.route('/transfers')
-class AdminTransferList(Resource):
-    @ns.doc('admin_list_transfers', security='Bearer')
-    @jwt_required()
-    @admin_required
-    def get(self):
-        """Transaction monitoring telemetry (PRD 16.1)."""
-        args = list_parser.parse_args()
-        page, per_page = validate_pagination(args['page'], args['per_page'])
-
-        query = Transfers.query
-        if args.get('status'):
-            query = query.filter(Transfers.status == args['status'])
-        if args.get('search'):
-            like = f"%{args['search'].strip()}%"
-            query = query.filter(
-                Transfers.bank_rrn_utr.ilike(like)
-                | Transfers.gateway_order_id.ilike(like)
-                | Transfers.transfer_id.ilike(like)
-            )
-
-        pagination = query.order_by(Transfers.created_on.desc()).paginate(
-            page=page, per_page=per_page, error_out=False
-        )
-
-        return paginated([{
-            'transfer_id': t.transfer_id,
-            'user_id': t.user_id,
-            'principal_amount': to_float(t.principal_amount),
-            'total_charged': to_float(t.total_charged_to_card),
-            'fee': to_float(t.convenience_fee),
-            'status': t.status,
-            'utr': t.bank_rrn_utr,
-            'risk_score': to_float(t.risk_score),
-            'payout_retry_count': t.payout_retry_count,
-            'failure_reason': t.failure_reason,
-            'created_on': iso(t.created_on),
-        } for t in pagination.items], page, per_page, pagination.total)
-
-
-@ns.route('/transfers/stuck')
-class StuckTransfers(Resource):
-    @ns.doc('stuck_transfers', security='Bearer')
-    @jwt_required()
-    @roles_required(L2, L3)
-    def get(self):
-        """
-        The failed-transaction and reversal operations queue (PRD 16.1).
-
-        These are transfers where the card is charged but the money has not
-        reached the user - the highest-priority queue on the platform.
-        """
-        stuck = Transfers.query.filter(
-            Transfers.status.in_([
-                TransferStatus.PAYOUT_PROCESSING,
-                TransferStatus.PENDING_RECONCILIATION,
-                TransferStatus.REVERSAL_INIT,
-            ])
-        ).order_by(Transfers.created_on.asc()).limit(100).all()
-
-        threshold = settings.get_decimal(Key.MAKER_CHECKER_THRESHOLD)
-
-        return success([{
-            'transfer_id': t.transfer_id,
-            'user_id': t.user_id,
-            'principal_amount': to_float(t.principal_amount),
-            'total_charged': to_float(t.total_charged_to_card),
-            'status': t.status,
-            'payout_retry_count': t.payout_retry_count,
-            'next_retry_at': iso(t.next_retry_at),
-            'charged_at': iso(t.charged_at),
-            'stuck_for_hours': (
-                round((utcnow() - t.charged_at).total_seconds() / 3600, 1)
-                if t.charged_at else None
-            ),
-            'failure_reason': t.failure_reason,
-            'requires_maker_checker': (
-                float(t.total_charged_to_card or 0) > float(threshold)
-            ),
-        } for t in stuck])
-
-
-@ns.route('/transfers/<string:transfer_id>/retry-payout')
-class RetryPayout(Resource):
-    @ns.doc('retry_payout', security='Bearer')
-    @jwt_required()
-    @roles_required(L2, L3)
-    def post(self, transfer_id):
-        """Re-queue a failed payout."""
-        args = action_parser.parse_args()
-        actor, role = _actor()
-
-        transfer = Transfers.query.filter_by(transfer_id=transfer_id).first()
-        if not transfer:
-            return failure(ErrorCode.NOT_FOUND, 'Transfer not found.', 404)
-
-        if transfer.status not in (
-            TransferStatus.PAYOUT_PROCESSING,
-            TransferStatus.PENDING_RECONCILIATION,
-        ):
-            return failure(
-                ErrorCode.CONFLICT,
-                f'A transfer in {transfer.status} cannot be re-queued.',
-                409,
-            )
-
-        try:
-            transfer.next_retry_at = None
-            transfer = transfer_engine.dispatch_payout(transfer)
-        except Exception as exc:
-            logger.exception(f'Manual payout retry failed for {transfer_id}: {exc}')
-            return failure(
-                ErrorCode.PROVIDER_ERROR, 'The payout retry could not be sent.', 502
-            )
-
-        audit.record_admin(
-            admin_user_id=str(actor.user_id),
-            admin_role=role,
-            module='TRANSFERS',
-            action='MANUAL_PAYOUT_RETRY',
-            target_type='Transfers',
-            target_id=transfer_id,
-            amount=float(transfer.principal_amount or 0),
-            justification=sanitize_text(args['reason'], 500),
-        )
-
-        return success({'status': transfer.status}, 'Payout re-queued.')
-
-
-@ns.route('/transfers/<string:transfer_id>/reverse')
-class ManualReversal(Resource):
-    @ns.doc('manual_reversal', security='Bearer')
-    @jwt_required()
-    @roles_required(L2, L3)
-    def post(self, transfer_id):
-        """
-        Refund a charged transfer to the source card.
-
-        PRD 16.1 requires maker-checker above 25,000 INR. L2 initiates and the
-        request waits for a second approver; L3 may act alone, because the tier
-        that can approve is also the tier that can act.
-        """
-        args = action_parser.parse_args()
-        actor, role = _actor()
-
-        transfer = Transfers.query.filter_by(transfer_id=transfer_id).first()
-        if not transfer:
-            return failure(ErrorCode.NOT_FOUND, 'Transfer not found.', 404)
-
-        reason = sanitize_text(args['reason'], 500)
-        if not reason:
-            return failure(
-                ErrorCode.VALIDATION_ERROR,
-                'A reason is required to reverse a transfer.',
-                400,
-            )
-
-        threshold = float(settings.get_decimal(Key.MAKER_CHECKER_THRESHOLD))
-        amount = float(transfer.total_charged_to_card or 0)
-
-        if amount > threshold and role != L3:
-            pending = audit.record_admin(
-                admin_user_id=str(actor.user_id),
-                admin_role=role,
-                module='TRANSFERS',
-                action='REVERSAL_REQUESTED',
-                target_type='Transfers',
-                target_id=transfer_id,
-                amount=amount,
-                justification=reason,
-            )
-            return success({
-                'requires_approval': True,
-                'approval_request_id': pending.activity_id if pending else None,
-                'threshold': threshold,
-            }, f'This reversal exceeds Rs. {threshold:,.2f} and needs approval '
-               'from a senior administrator.', 202)
-
-        try:
-            transfer = transfer_engine.reverse_to_card(transfer, reason=reason)
-        except transfer_engine.TransferError as exc:
-            return failure(exc.code, exc.message, 409)
-        except Exception as exc:
-            logger.exception(f'Manual reversal failed for {transfer_id}: {exc}')
-            return failure(
-                ErrorCode.PROVIDER_ERROR, 'The reversal could not be completed.', 502
-            )
-
-        audit.record_admin(
-            admin_user_id=str(actor.user_id),
-            admin_role=role,
-            module='TRANSFERS',
-            action='MANUAL_REVERSAL',
-            target_type='Transfers',
-            target_id=transfer_id,
-            amount=amount,
-            justification=reason,
-        )
-
-        return success({'status': transfer.status}, 'Transfer reversed to card.')
 
 
 @ns.route('/reconciliation')

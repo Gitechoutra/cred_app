@@ -68,36 +68,36 @@ export default function AdminDashboard() {
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
-            label="Transfer volume"
-            value={moneyCompact(data.transfers.month_volume)}
-            hint={`${data.transfers.today} transfers today`}
+            label="Payment volume"
+            value={moneyCompact(data.payments.month_volume)}
+            hint={`${data.payments.today} payments today`}
           />
           <StatCard
             label="Fee revenue"
-            value={moneyCompact(data.transfers.month_fee_revenue)}
+            value={moneyCompact(data.payments.month_fee_revenue)}
             tone="good"
           />
           <StatCard
             label="Success rate"
             value={
-              data.transfers.success_rate !== null
-                ? `${data.transfers.success_rate}%`
+              data.payments.success_rate !== null
+                ? `${data.payments.success_rate}%`
                 : '—'
             }
             hint="Target > 97.5%"
             tone={
-              data.transfers.success_rate === null
+              data.payments.success_rate === null
                 ? 'neutral'
-                : data.transfers.success_rate >= 97.5
+                : data.payments.success_rate >= 97.5
                   ? 'good'
                   : 'alert'
             }
           />
           <StatCard
-            label="Stuck transfers"
-            value={data.transfers.stuck_count}
-            hint="Charged but not settled"
-            tone={data.transfers.stuck_count > 0 ? 'alert' : 'good'}
+            label="Stuck payments"
+            value={data.payments.stuck_count}
+            hint="In flight over an hour"
+            tone={data.payments.stuck_count > 0 ? 'alert' : 'good'}
           />
         </div>
       </section>

@@ -56,18 +56,6 @@ def transaction_dict(txn: MasterTransactions, detailed: bool = False) -> dict:
         data['recon_status'] = txn.recon_status
         data['reverses_transaction_id'] = txn.reverses_transaction_id
 
-        # Attach linked transfer balance audit details if available
-        from portal.models.transfers import Transfers
-        t = Transfers.query.filter_by(transaction_id=txn.transaction_id).first()
-        if t:
-            data['source_opening_balance'] = to_float(t.source_opening_balance)
-            data['source_closing_balance'] = to_float(t.source_closing_balance)
-            data['destination_opening_balance'] = to_float(t.destination_opening_balance)
-            data['destination_closing_balance'] = to_float(t.destination_closing_balance)
-            if t.bank_account:
-                data['destination_bank_name'] = t.bank_account.bank_name
-                data['destination_ifsc'] = t.bank_account.ifsc_code
-
         # The journal entries behind this transaction. Surfaced so a support
         # agent can see exactly how the money was accounted for without
         # database access (PRD 15: zero-DB even for L3).

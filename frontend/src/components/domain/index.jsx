@@ -332,12 +332,12 @@ export function BankRow({ account, onClick, selected = false, selectable = false
 /* ── Fee breakdown ──────────────────────────────────────────────────────── */
 
 /**
- * Transfer fee disclosure.
+ * Fee disclosure.
  *
  * PRD 9.2 makes this a non-skippable disclosure before the 3DS challenge: the
- * user must see exactly what the card is charged and exactly what reaches their
- * bank before they authorise anything. The two emphasised rows are the two
- * numbers that actually matter.
+ * user must see exactly what is charged, and what of it is fee, before they
+ * authorise anything. The two emphasised rows are the two numbers that
+ * actually matter.
  */
 export function FeeBreakdown({ quote, className }) {
   if (!quote?.breakdown) return null;
@@ -373,8 +373,8 @@ export function FeeBreakdown({ quote, className }) {
       })}
 
       <p className="mt-3 border-t border-line pt-3 text-2xs leading-relaxed text-slate">
-        GST is charged on the convenience fee only, never on the amount you
-        transfer. Fees are disclosed before you authorise the payment.
+        GST is charged on fees only, never on the amount you pay. Fees are
+        disclosed before you authorise the payment.
       </p>
     </div>
   );
@@ -383,10 +383,11 @@ export function FeeBreakdown({ quote, className }) {
 /* ── Timeline ───────────────────────────────────────────────────────────── */
 
 /**
- * Transfer progress.
+ * Payment and application progress.
  *
- * A raw status string means nothing to someone whose money is in flight, so the
- * state machine is rendered as a sequence of things that have happened.
+ * A raw status string means nothing to someone whose money or application is in
+ * flight, so the state machine is rendered as a sequence of things that have
+ * happened.
  */
 export function Timeline({ steps }) {
   if (!steps?.length) return null;

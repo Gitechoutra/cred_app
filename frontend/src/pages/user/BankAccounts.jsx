@@ -62,7 +62,7 @@ export default function BankAccounts() {
               <EmptyState
                 icon={<IconBank className="h-6 w-6" />}
                 title="No bank accounts"
-                description="Add an account to receive transfers. We verify it belongs to you by sending ₹1 and checking the name your bank holds."
+                description="Add an account to pay your card bill and EMIs. We verify it belongs to you by sending ₹1 and checking the name your bank holds."
                 action={
                   <Button variant="mint" onClick={() => navigate('/banks/add')}>
                     Add account
@@ -181,7 +181,7 @@ export default function BankAccounts() {
             {!selected.is_payout_eligible && (
               <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3.5">
                 <p className="text-xs leading-relaxed text-amber-900">
-                  This account cannot receive transfers yet. The name your bank
+                  This account cannot be used yet. The name your bank
                   holds must match your KYC name closely enough for us to confirm
                   the account is yours — a rule we are required to enforce.
                 </p>

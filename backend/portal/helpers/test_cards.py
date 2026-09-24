@@ -35,11 +35,12 @@ class Scenario:
     INSUFFICIENT_LIMIT = 'INSUFFICIENT_LIMIT'
     PENDING = 'PENDING'
     TOKEN_EXPIRED = 'TOKEN_EXPIRED'
-    PAYOUT_FAIL = 'PAYOUT_FAIL'
+    #: Charged, then refused downstream, so the reversal and refund path runs.
+    SETTLEMENT_FAIL = 'SETTLEMENT_FAIL'
 
     CHOICES = [
         SUCCESS, DECLINE, INSUFFICIENT_LIMIT, PENDING, TOKEN_EXPIRED,
-        PAYOUT_FAIL,
+        SETTLEMENT_FAIL,
     ]
 
 
@@ -108,9 +109,9 @@ TEST_CARDS = [
     },
     {
         'number': '5105105105105100',
-        'scenario': Scenario.PAYOUT_FAIL,
-        'label': 'Charge succeeds, payout fails',
-        'description': 'The card is charged but the bank transfer fails, so the reversal and refund path runs.',
+        'scenario': Scenario.SETTLEMENT_FAIL,
+        'label': 'Charge succeeds, settlement fails',
+        'description': 'The card is charged but the payment fails to settle, so the reversal and refund path runs.',
         'network': 'MASTERCARD',
         'issuer_bank': 'IndusInd Bank',
         'brand_color': '#7B2D8E',
@@ -242,7 +243,7 @@ _SIMULATION_TOKENS = {
     # SIMDECLINE refuses at order creation and never reaches a payment screen.
     Scenario.DECLINE: 'SIMAUTHDECL',
     Scenario.PENDING: 'SIMTIMEOUT',
-    Scenario.PAYOUT_FAIL: 'SIMPAYOUTFAIL',
+    Scenario.SETTLEMENT_FAIL: 'SIMPAYOUTFAIL',
     Scenario.TOKEN_EXPIRED: 'SIMTOKENEXP',
 }
 

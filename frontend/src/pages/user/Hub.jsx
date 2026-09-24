@@ -18,7 +18,6 @@ import {
   IconQr,
   IconReceipt,
   IconShield,
-  IconTransfer,
   IconUser,
 } from '../../components/layout/AppShell';
 import {
@@ -76,7 +75,6 @@ export default function Hub() {
     active_mandates: 0,
   };
   const quickActions = data?.quick_actions || {
-    can_transfer: true,
     can_pay_emi: true,
     needs_kyc: false,
     needs_bank_account: false,
@@ -119,17 +117,6 @@ export default function Hub() {
           >
             <IconPlus className="h-3.5 w-3.5 text-mint-700" />
             <span>Add card</span>
-          </Button>
-
-          <Button
-            variant="mint"
-            size="sm"
-            disabled={!quickActions.can_transfer}
-            onClick={() => navigate('/transfer')}
-            className="rounded-xl shadow-mint"
-          >
-            <IconTransfer className="h-3.5 w-3.5" />
-            <span>Transfer to bank</span>
           </Button>
         </div>
       </section>
@@ -322,13 +309,6 @@ export default function Hub() {
 
         <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5 sm:gap-3">
           <QuickActionBtn
-            icon={IconTransfer}
-            title="Transfer"
-            hint="Card to bank"
-            onClick={() => navigate('/transfer')}
-            primary
-          />
-          <QuickActionBtn
             icon={IconQr}
             title="Scan &amp; Pay"
             hint="UPI QR Code"
@@ -433,7 +413,7 @@ export default function Hub() {
             <EmptyState
               icon={<IconCard className="h-8 w-8 text-mint-600" />}
               title="No credit cards linked yet"
-              description="Add your cards to track available limits, due dates, and transfer directly to your bank account."
+              description="Add your cards to track available limits, due dates and statements in one place."
               action={
                 <Button variant="mint" size="sm" onClick={() => navigate('/cards/add')}>
                   <IconPlus className="h-4 w-4" />
@@ -528,7 +508,7 @@ export default function Hub() {
               <EmptyState
                 icon={<IconReceipt className="h-6 w-6 text-slate" />}
                 title="No transactions yet"
-                description="Your card transfers, QR scan payments, and EMI records will appear here."
+                description="Your card spends, QR scan payments, and EMI records will appear here."
               />
             </Card>
           )}
@@ -549,13 +529,6 @@ export default function Hub() {
         </div>
 
         <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
-          <FeatureCard
-            icon={IconTransfer}
-            title="Card to Bank"
-            badge="Instant"
-            description="Move funds from credit card to verified bank account"
-            onClick={() => navigate('/transfer')}
-          />
           <QuickServiceCard
             icon={IconChart}
             title="Dashboard Overview"

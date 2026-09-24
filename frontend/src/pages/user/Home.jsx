@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { endpoints } from '../../api/client';
 import { CardTile, DueItem, EmiRow, TransactionRow } from '../../components/domain';
 import {
-  IconBank, IconEmi, IconPlus, IconTransfer, PageHeader,
+  IconBank, IconEmi, IconPlus, PageHeader,
 } from '../../components/layout/AppShell';
 import {
   AnimatedMoney, Button, Card, EmptyState, Section, Skeleton, cx,
@@ -54,15 +54,6 @@ export default function Home() {
               <IconPlus className="h-4 w-4" />
               Add card
             </Button>
-            <Button
-              variant="mint"
-              size="md"
-              disabled={!data.quick_actions.can_transfer}
-              onClick={() => navigate('/transfer')}
-            >
-              <IconTransfer className="h-4 w-4" />
-              Transfer to bank
-            </Button>
           </div>
         }
       />
@@ -71,7 +62,7 @@ export default function Home() {
       {data.quick_actions.needs_kyc && (
         <SetupPrompt
           title="Verify your identity"
-          description="Complete KYC to link cards and move money."
+          description="Complete KYC to link cards and apply for credit."
           cta="Verify now"
           onClick={() => navigate('/kyc')}
         />
@@ -80,7 +71,7 @@ export default function Home() {
       {!data.quick_actions.needs_kyc && data.quick_actions.needs_bank_account && (
         <SetupPrompt
           title="Add your bank account"
-          description="Verify an account so transfers have somewhere to land."
+          description="Verify an account so you can pay your bills from it."
           cta="Add account"
           onClick={() => navigate('/banks/add')}
         />
@@ -351,7 +342,7 @@ export default function Home() {
               <EmptyState
                 icon={<IconBank className="h-6 w-6" />}
                 title="No activity yet"
-                description="Your transfers and EMI payments will appear here."
+                description="Your card spends and EMI payments will appear here."
                 className="py-5"
               />
             </Card>

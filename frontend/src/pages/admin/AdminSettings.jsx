@@ -10,13 +10,14 @@ import { AdminHeader } from './AdminLayout';
 /**
  * Platform settings and feature flags (PRD 16.1).
  *
- * These are live commercial and regulatory levers - the convenience fee, the
- * transfer ceilings, the pre-debit notice window. Every change is bounded by
- * the min/max on the row and written to the admin activity log.
+ * These are live commercial and regulatory levers - the credit-limit bands,
+ * the statement cycle, the minimum due, the pre-debit notice window. Every
+ * change is bounded by the min/max on the row and written to the admin
+ * activity log.
  *
- * The CREDIT_TO_BANK_TRANSFER flag exists because PRD open decision 1 leaves
- * that feature's legal model unresolved: it must be switchable off from here,
- * without a deploy, the moment compliance says so.
+ * The CARD_ISSUANCE flag exists because a credit line is the regulated part of
+ * this platform: it must be switchable off from here, without a deploy, the
+ * moment compliance or the issuing partner says so.
  */
 export default function AdminSettings() {
   const toast = useToast();

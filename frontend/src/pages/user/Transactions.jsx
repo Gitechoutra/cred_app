@@ -10,7 +10,6 @@ import { date, money } from '../../utils/format';
 
 const FILTERS = [
   { value: '', label: 'All' },
-  { value: 'CARD_TO_BANK_TRANSFER', label: 'Transfers' },
   { value: 'EMI_MANUAL_PAY', label: 'EMIs' },
 ];
 
@@ -79,7 +78,7 @@ export default function Transactions() {
               <EmptyState
                 icon={<IconReceipt className="h-6 w-6" />}
                 title="No transactions yet"
-                description="Your transfers and EMI payments will appear here with full receipts."
+                description="Your card spends and EMI payments will appear here with full receipts."
               />
             </div>
           ) : (

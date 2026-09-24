@@ -71,7 +71,6 @@ class BankAccounts(db.Model, TimestampMixin, CRUDMixin):
     deleted_at = db.Column(db.DateTime, nullable=True)
 
     user = db.relationship('Users', back_populates='bank_accounts')
-    transfers = db.relationship('Transfers', back_populates='bank_account', lazy='dynamic')
 
     def __repr__(self):
         return f"<BankAccount {self.bank_name} ****{self.account_last4}>"

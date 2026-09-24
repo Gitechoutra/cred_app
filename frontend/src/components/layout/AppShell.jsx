@@ -20,13 +20,12 @@ import { initials } from '../../utils/format';
  * notifications - rather than duplicating the navigation underneath it.
  */
 
-/* Six slots plus Profile. Scan sits dead centre, which is both the easiest
+/* Five slots plus Profile. Scan sits dead centre, which is both the easiest
    reach for a thumb and where every UPI app people already use puts it.
 
-   This is one past the comfortable ceiling: at 320px the labels share roughly
-   43px each, so "Transfer" and "History" are close to truncating. Scan earns
-   the squeeze because it is a primary action people arrive wanting to do;
-   bank accounts still lives in the account menu rather than taking a slot. */
+   Five is the comfortable ceiling at 320px, where the labels share roughly
+   53px each. Bank accounts lives in the account menu rather than taking a
+   slot, because it is something people set up once rather than reach for. */
 const NAV = [
   { to: '/home', label: 'Home', icon: IconHome, end: true },
   { to: '/cards', label: 'Cards', icon: IconCard },
@@ -322,7 +321,7 @@ export function IconCard(props) {
   );
 }
 
-export function IconTransfer(props) {
+export function IconPay(props) {
   return (
     <svg {...base(props)}>
       <path d="M4 8h13M13 4l4 4-4 4" />

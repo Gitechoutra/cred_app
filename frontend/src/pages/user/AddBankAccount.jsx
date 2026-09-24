@@ -220,7 +220,7 @@ export default function AddBankAccount() {
             <p className="mt-1 text-xs leading-relaxed text-slate">
               We deposit ₹1 and read back the account holder name your bank has on
               record. If it matches your KYC name, the account is verified
-              instantly. Transfers can only ever go to an account proven to be
+              instantly. Payments can only ever be collected from an account proven to be
               yours.
             </p>
           </div>

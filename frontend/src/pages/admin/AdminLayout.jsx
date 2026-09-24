@@ -7,7 +7,6 @@ import {
   IconLogout,
   IconReceipt,
   IconShield,
-  IconTransfer,
   IconUser,
   Logo,
 } from '../../components/layout/AppShell';
@@ -32,7 +31,6 @@ const NAV = [
   { to: '/admin', end: true, label: 'Overview', icon: IconHome, roles: ['L1_SUPPORT', 'L2_RISK_RECON', 'L3_SUPER_ADMIN'] },
   { to: '/admin/users', label: 'Users', icon: IconUser, roles: ['L1_SUPPORT', 'L2_RISK_RECON', 'L3_SUPER_ADMIN'] },
   { to: '/admin/kyc', label: 'KYC', icon: IconShield, roles: ['L1_SUPPORT', 'L2_RISK_RECON', 'L3_SUPER_ADMIN'] },
-  { to: '/admin/transfers', label: 'Transfers', icon: IconTransfer, roles: ['L1_SUPPORT', 'L2_RISK_RECON', 'L3_SUPER_ADMIN'] },
   { to: '/admin/reconciliation', label: 'Recon', icon: IconReceipt, roles: ['L2_RISK_RECON', 'L3_SUPER_ADMIN'] },
   { to: '/admin/settings', label: 'Settings', icon: IconLock, roles: ['L3_SUPER_ADMIN'] },
 ];

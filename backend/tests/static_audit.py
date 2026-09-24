@@ -125,8 +125,17 @@ def main():
             continue
         body = read(path)
         # Each HTTP verb inside a Resource should carry jwt_required.
+        #
+        # The decorator run is matched by what it is NOT - a blank line, or
+        # another decorator's opening @ - rather than by an allowed character
+        # set. The previous character class excluded newlines, so a decorator
+        # wrapped onto a second line (@roles_required with three role constants,
+        # say) ended the run early and hid the @jwt_required above it. Three
+        # properly protected admin endpoints were reported as unprotected for
+        # exactly that reason.
         for match in re.finditer(
-            r'((?:\s*@[\w.()\'\", =\[\]]+\n)*)\s*def (get|post|put|patch|delete)\(self',
+            r'((?:[ \t]*@[^\n]*\n(?:[ \t]+[^@\s][^\n]*\n)*)*)'
+            r'[ \t]*def (get|post|put|patch|delete)\(self',
             body,
         ):
             decorators = match.group(1)
@@ -203,8 +212,16 @@ def main():
                 cols = {c['name']: c for c in inspector.get_columns(table)}
                 return column in cols and cols[column].get('primary_key')
 
+            # Every money table this platform writes. Named explicitly and
+            # asserted present, because `if table in tables` quietly turns a
+            # dropped or renamed table into a pass rather than a failure.
+            MONEY_TABLES = ('qr_payments', 'emi_payments', 'master_transactions')
+
+            for table in MONEY_TABLES:
+                check(19, f'{table} exists to be audited', table in tables)
+
             for table, column in [
-                ('transfers', 'idempotency_key'),
+                ('qr_payments', 'idempotency_key'),
                 ('emi_payments', 'idempotency_key'),
                 ('emi_payments', 'gateway_payment_id'),
                 ('master_transactions', 'idempotency_key'),
@@ -214,7 +231,7 @@ def main():
                           has_unique(table, column))
 
             # Financial rows must reference a real user.
-            for table in ('transfers', 'emi_payments', 'master_transactions'):
+            for table in MONEY_TABLES:
                 if table in tables:
                     fks = inspector.get_foreign_keys(table)
                     check(19, f'{table} has a foreign key to users',
@@ -222,8 +239,9 @@ def main():
                           str([fk['referred_table'] for fk in fks]))
 
             # Amounts must not be nullable on a money row.
-            for table, column in [('transfers', 'principal_amount'),
-                                  ('emi_payments', 'amount')]:
+            for table, column in [('qr_payments', 'amount'),
+                                  ('emi_payments', 'amount'),
+                                  ('master_transactions', 'gross_amount')]:
                 if table in tables:
                     cols = {c['name']: c for c in inspector.get_columns(table)}
                     if column in cols:
@@ -243,12 +261,12 @@ def main():
           'debit' in ledger and 'credit' in ledger
           and ('!=' in ledger or 'abs(' in ledger))
 
-    transfer_engine = read(os.path.join(BACKEND, 'portal', 'helpers',
-                                        'transfer_engine.py'))
+    qr_engine = read(os.path.join(BACKEND, 'portal', 'helpers',
+                                  'qr_payment_engine.py'))
     emi_engine = read(os.path.join(BACKEND, 'portal', 'helpers',
                                    'emi_engine.py'))
-    check(19, 'transfer confirmation locks the row before deciding',
-          'with_for_update' in transfer_engine)
+    check(19, 'QR payment confirmation locks the row before deciding',
+          'with_for_update' in qr_engine)
     check(19, 'EMI confirmation locks the row before deciding',
           'with_for_update' in emi_engine)
 

@@ -169,12 +169,15 @@ export function statusLabel(status) {
 }
 
 const TRANSACTION_LABELS = {
-  CARD_TO_BANK_TRANSFER: 'Transfer to bank',
   EMI_MANUAL_PAY: 'EMI payment',
   EMI_AUTO_PAY: 'EMI auto-pay',
+  QR_UPI_PAYMENT: 'Scan & pay',
   FEE_DEBIT: 'Platform fee',
   REVERSAL_REFUND: 'Refund',
   PENNY_DROP: 'Account verification',
+  // Retired product. The ledger is append-only, so rows of this type still
+  // exist and still need a label a support agent can read.
+  CARD_TO_BANK_TRANSFER: 'Transfer to bank (retired)',
 };
 
 export function transactionLabel(type) {

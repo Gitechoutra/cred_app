@@ -1,24 +1,27 @@
 """
 End-to-end smoke test against a running CashU API.
 
-Walks the PRD's primary journey - onboarding through to a completed
-credit-to-bank transfer - and asserts the acceptance criteria that carry money:
+Walks the primary journey - onboarding, KYC, card linking, bank account, ledger,
+EMI, dashboard - and asserts the acceptance criteria that carry money:
 
     AC-001  tokenized card linking, zero raw PAN in the database
-    AC-002  fee disclosure arithmetic (10,000 -> 200 fee, 36 GST, 10,236 charged)
     AC-004  idempotency: a replayed key must not charge twice
+
+The spend leg is blocked: it walked the credit-to-bank transfer, which has been
+removed, and its replacement is the credit-line purchase flow.
 
 Run with the server already up:  python tests/smoke_flow.py
 """
 
 import json
+import os
 import random
 import sys
 import uuid
 
 import requests
 
-BASE = 'http://127.0.0.1:3000/v1'
+BASE = os.getenv('CASHU_API', 'http://127.0.0.1:5050/v1')
 TIMEOUT = 30
 
 PASS, FAIL = [], []
@@ -229,95 +232,23 @@ def main():
     }, token=token)
     check('Mismatched account numbers refused', response.status_code == 400)
 
-    # ── Fee disclosure (AC-002) ────────────────────────────────────────────
-    print('\n[5] Transfer quote - AC-002 arithmetic')
+    # AC-002 (fee arithmetic) and FR-006 (the transfer itself) covered the
+    # credit-to-bank product. That product has been removed; a purchase
+    # against an issued credit line replaces it and is not built yet.
+    #
+    # Left failing rather than skipped, because this is the suite that
+    # proves the primary money journey end to end. Sections 1-4 and 7-9
+    # below still run, so what does survive is still asserted.
+    print(chr(10) + '[5/6] Credit line spend')
+    check('a money-movement journey exists to walk end to end', False,
+          'BLOCKED: rebuild as the credit-line journey - apply, approve, '
+          'limit, purpose, activate, purchase, statement, bill payment.')
 
-    response = post('/transfers/quote', {'amount': 10000}, token=token)
-    quote_ok = check('Quote', response.status_code == 200, response.text[:300])
+    # Nothing was charged, so the ledger must be empty. Asserted rather
+    # than assumed: a ledger row here would mean money was recorded that no
+    # gateway ever collected.
+    on_razorpay = True
 
-    if quote_ok:
-        q = response.json()['data']
-        # 1.95% of 10,000 = 195.00; GST 18% of 195 = 35.10; total 10,230.10
-        check('Principal 10000', q['principal_amount'] == 10000.0, str(q['principal_amount']))
-        check('Fee = 1.95%', q['convenience_fee'] == 195.0, str(q['convenience_fee']))
-        check('GST on fee only', q['gst_on_fee'] == 35.10, str(q['gst_on_fee']))
-        check('Total charged', q['total_charged_to_card'] == 10230.10,
-              str(q['total_charged_to_card']))
-        check('Net disbursed = principal', q['net_payout_amount'] == 10000.0,
-              str(q['net_payout_amount']))
-        check('Breakdown rows present', len(q.get('breakdown', [])) == 5)
-
-    # ── Transfer (FR-006) ──────────────────────────────────────────────────
-    print('\n[6] Transfer')
-
-    # Below the minimum must be refused (PRD 9.2: 1,000 floor).
-    response = post('/transfers', {
-        'card_id': card_id, 'bank_account_id': bank_account_id, 'amount': 500,
-    }, token=token, idem=uuid.uuid4().hex)
-    check('Below minimum refused', response.status_code == 400)
-
-    # Missing idempotency key must be refused.
-    response = post('/transfers', {
-        'card_id': card_id, 'bank_account_id': bank_account_id, 'amount': 5000,
-    }, token=token)
-    check('Missing idempotency key refused', response.status_code == 400)
-
-    idem = uuid.uuid4().hex
-    response = post('/transfers', {
-        'card_id': card_id, 'bank_account_id': bank_account_id, 'amount': 5000,
-    }, token=token, idem=idem)
-
-    transfer_ok = check('Transfer initiated', response.status_code == 201,
-                        response.text[:300])
-    if not transfer_ok:
-        return finish()
-
-    transfer = response.json()['data']
-    transfer_id = transfer['transfer_id']
-    check('Status AUTH_PENDING', transfer['status'] == 'AUTH_PENDING',
-          transfer['status'])
-
-    # AC-004: the same key must return the same transfer, not open a second.
-    response = post('/transfers', {
-        'card_id': card_id, 'bank_account_id': bank_account_id, 'amount': 5000,
-    }, token=token, idem=idem)
-    replay_ok = response.status_code in (200, 201)
-    same = replay_ok and response.json()['data']['transfer_id'] == transfer_id
-    check('AC-004 idempotent replay', same, response.text[:200])
-
-    # What happens next depends on which rail is carrying the charge, so ask
-    # the server rather than assuming. On the simulated rail the charge and
-    # payout settle synchronously and the whole ledger path is exercised. On
-    # Razorpay the card has genuinely not been charged - nobody completed a
-    # checkout - and the correct behaviour is to refuse to advance.
-    on_razorpay = (transfer.get('checkout') or {}).get('provider') == 'RAZORPAY'
-
-    response = post(f'/transfers/{transfer_id}/confirm', token=token)
-    confirm_ok = check('Transfer confirmed', response.status_code == 200,
-                       response.text[:300])
-
-    if confirm_ok and on_razorpay:
-        pending = response.json()['data']
-        check('Unpaid Razorpay charge does not settle',
-              pending['status'] not in ('SUCCEEDED', 'PAYOUT_PROCESSING',
-                                        'INBOUND_CHARGED'),
-              pending['status'])
-        check('No UTR without a real charge', not pending.get('utr'))
-
-        response = get(f'/transfers/{transfer_id}/receipt', token=token)
-        check('Receipt refused for an unpaid transfer',
-              response.status_code in (400, 409), str(response.status_code))
-
-    elif confirm_ok:
-        settled = response.json()['data']
-        check('Transfer SUCCEEDED', settled['status'] == 'SUCCEEDED', settled['status'])
-        check('UTR issued', bool(settled.get('utr')))
-        check('Timeline rendered', len(settled.get('timeline', [])) == 5)
-
-        response = get(f'/transfers/{transfer_id}/receipt', token=token)
-        check('Receipt available', response.status_code == 200, response.text[:200])
-
-    # ── Ledger (FR-010) ────────────────────────────────────────────────────
     print('\n[7] Ledger')
 
     response = get('/transactions', token=token)
@@ -437,7 +368,8 @@ def main():
               str(data['summary']['total_credit_limit']))
         check('Utilization badge', 'utilization_badge' in data['summary'])
         check('Cards listed', len(data['cards']) == 1)
-        check('Quick actions', data['quick_actions']['can_transfer'] is True)
+        check('Quick actions', data['quick_actions']['can_pay_emi'] is True,
+              str(data['quick_actions']))
 
     return finish()
 

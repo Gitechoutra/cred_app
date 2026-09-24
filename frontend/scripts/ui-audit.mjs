@@ -173,10 +173,13 @@ for (const item of ['Profile', 'Security', 'Help & support', 'Logout']) {
 /* ── 26. Number inputs ────────────────────────────────────────────────── */
 console.log('\n[26] Number inputs');
 
-const amountScreens = ['src/pages/user/Transfer.jsx', 'src/pages/user/EmiPay.jsx'];
+const amountScreens = ['src/pages/user/EmiPay.jsx', 'src/pages/user/ScanPay.jsx'];
 for (const file of amountScreens) {
   const body = sources.get(file) || '';
   const name = file.split('/').pop();
+  // An audited screen that has been deleted or renamed would otherwise pass
+  // every check below against an empty string.
+  if (!check(26, `${name} exists to be audited`, body.length > 0, file)) continue;
   check(26, `${name} uses a numeric keypad hint`, body.includes('inputMode'));
   // One shared sanitiser, so the rules cannot drift between screens - which
   // they had: the transfer form allowed decimals while the EMI form stripped

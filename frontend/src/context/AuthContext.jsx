@@ -8,10 +8,10 @@ import { endpoints, tokens } from '../api/client';
  * Deliberately thin. The token pair is the only thing held here, and the
  * backend remains the authority on what it may do - nothing about KYC tier,
  * limits or feature flags is cached, because a stale copy of "you are allowed
- * to transfer" is a security decision made in the wrong place.
+ * to pay" is a security decision made in the wrong place.
  *
  * Access-token refresh is not handled here either. The API client already does
- * it transparently on a 401, so a user mid-transfer is never bounced to a login
+ * it transparently on a 401, so a user mid-payment is never bounced to a login
  * screen by a 15-minute expiry they cannot see.
  */
 

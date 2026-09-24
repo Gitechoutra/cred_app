@@ -32,7 +32,7 @@ def init_app(app):
 
         # -- Banking -------------------------------------------------------
         from .bank_accounts import BankAccounts, PennyDropStatus, AccountType
-        from .penny_drop_verifications import PennyDropVerifications
+        from .penny_drop_verifications import PennyDropVerifications  # noqa: F401
 
         # -- Ledger (before anything that references a transaction) --------
         from .ledger_accounts import LedgerAccounts, AccountClass
@@ -42,9 +42,8 @@ def init_app(app):
         )
         from .double_entry_ledger import DoubleEntryLedger
 
-        # -- Transfers -----------------------------------------------------
-        from .transfers import Transfers, TransferStatus
-        from .transfer_limits import TransferLimitCounters, RateLimitCounters
+        # -- Throttling ----------------------------------------------------
+        from .rate_limit_counters import RateLimitCounters  # noqa: F401
 
         # -- EMI -----------------------------------------------------------
         from .emi_providers import EMIProviders, ProviderIntegrationMode

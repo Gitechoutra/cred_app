@@ -10,7 +10,7 @@ import { useFetch } from '../../hooks/useProfile';
 import { dateTime, statusLabel, statusTone, titleCase } from '../../utils/format';
 
 const CATEGORIES = [
-  { value: 'TRANSFER_ISSUE', label: 'Transfer issue' },
+  { value: 'PAYMENT_ISSUE', label: 'Payment issue' },
   { value: 'EMI_ISSUE', label: 'EMI issue' },
   { value: 'CARD_ISSUE', label: 'Card issue' },
   { value: 'KYC_ISSUE', label: 'KYC issue' },
@@ -179,7 +179,7 @@ export default function Support() {
 
           <Input
             label="Subject"
-            placeholder="Transfer stuck since yesterday"
+            placeholder="Payment stuck since yesterday"
             value={form.subject}
             onChange={(event) => setForm({ ...form, subject: event.target.value })}
           />

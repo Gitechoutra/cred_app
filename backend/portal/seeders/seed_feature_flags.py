@@ -1,10 +1,10 @@
 """
 Seed feature flags.
 
-CREDIT_TO_BANK_TRANSFER ships ON in development so the flow is walkable, but the
-flag exists precisely because PRD open decision 1 leaves its legal model
-unresolved - the whole feature must be switchable off from the console without a
-deploy the moment compliance says so.
+CARD_ISSUANCE ships ON in development so the flow is walkable, but the flag
+exists precisely because a credit line is the regulated part of this platform -
+issuance must be switchable off from the console, without a deploy, the moment
+compliance or the issuing partner says so.
 """
 
 import logging
@@ -16,9 +16,10 @@ from portal.models.admin_settings import FeatureFlags, FlagRolloutType
 logger = logging.getLogger('cashu')
 
 FLAGS = [
-    (Flag.CREDIT_TO_BANK_TRANSFER, 'Credit-to-Bank Transfer',
-     'Master switch for FR-006. Turn off to suspend all card-to-bank transfers '
-     'immediately, without a deploy.', True),
+    (Flag.CARD_ISSUANCE, 'Card Issuance',
+     'Master switch for new credit-line applications and activations. Turn off '
+     'to stop issuing immediately, without a deploy. Existing cards keep '
+     'working.', True),
     (Flag.EMI_MANUAL_PAY, 'Manual EMI Payment',
      'Allows users to pay EMI installments on demand (FR-008).', True),
     (Flag.EMI_AUTO_PAY, 'EMI Auto-Pay Mandates',

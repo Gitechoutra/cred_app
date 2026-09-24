@@ -55,8 +55,6 @@ class BaseConfig:
     CASHFREE_ENV = os.getenv('CASHFREE_ENV', 'SANDBOX')  # SANDBOX | PRODUCTION
     CASHFREE_WEBHOOK_SECRET = os.getenv('CASHFREE_WEBHOOK_SECRET', '')
     CASHFREE_API_VERSION = os.getenv('CASHFREE_API_VERSION', '2023-08-01')
-    CASHFREE_PAYOUT_CLIENT_ID = os.getenv('CASHFREE_PAYOUT_CLIENT_ID', '')
-    CASHFREE_PAYOUT_CLIENT_SECRET = os.getenv('CASHFREE_PAYOUT_CLIENT_SECRET', '')
 
     # Where Cashfree returns the user after the 3DS challenge, and where it
     # POSTs order callbacks. The webhook URL set in the Cashfree dashboard is
@@ -65,7 +63,7 @@ class BaseConfig:
     # account and each needs its own callback target.
     CASHFREE_RETURN_URL = os.getenv(
         'CASHFREE_RETURN_URL',
-        os.getenv('FRONTEND_BASE_URL', 'http://localhost:3000') + '/transfer/status',
+        os.getenv('FRONTEND_BASE_URL', 'http://localhost:3000') + '/payment/status',
     )
     CASHFREE_NOTIFY_URL = os.getenv('CASHFREE_NOTIFY_URL', '')
 
@@ -82,26 +80,6 @@ class BaseConfig:
     # USE_SANDBOX_ADAPTERS: the point of wiring a real test key is to exercise
     # the real rail. Set this to False to force UPI back to the simulator.
     RAZORPAY_UPI_ENABLED = os.getenv('RAZORPAY_UPI_ENABLED', 'True') == 'True'
-
-    # Whether a transfer's card charge also goes through Razorpay. On by
-    # default, so the transfer and EMI flows share one checkout, one
-    # verification routine and one webhook.
-    #
-    # Turning this off is how the sandbox transfer path is restored: the
-    # simulated card rail settles synchronously and can therefore exercise the
-    # payout, refund and circuit-breaker logic end to end, which no real
-    # gateway can do without a human completing a payment.
-    RAZORPAY_TRANSFERS_ENABLED = (
-        os.getenv('RAZORPAY_TRANSFERS_ENABLED', 'True') == 'True'
-    )
-
-    # Whether UPI may settle a transfer's charge. Unset, this follows the key:
-    # on with a test key, off with a live one. That is deliberate - it exists so
-    # the UPI checkout can be exercised during testing without a real card, and
-    # a live deployment should make offering it a conscious decision, since a
-    # UPI-funded transfer moves money bank-to-bank rather than from a credit
-    # line and does not consume the card's limit.
-    TRANSFER_UPI_FUNDING = os.getenv('TRANSFER_UPI_FUNDING', '')
 
     # Prefilled into checkout so a tester does not retype a VPA every attempt.
     RAZORPAY_TEST_UPI_VPA = os.getenv('RAZORPAY_TEST_UPI_VPA', '')

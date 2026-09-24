@@ -34,12 +34,6 @@ _BASE_URLS = {
     'PRODUCTION': 'https://api.cashfree.com',
 }
 
-_PAYOUT_BASE_URLS = {
-    'SANDBOX': 'https://sandbox.cashfree.com/payout',
-    'PRODUCTION': 'https://api.cashfree.com/payout',
-}
-
-
 class CashfreeError(Exception):
     """Raised only for configuration faults, never for a declined payment."""
 
@@ -50,13 +44,10 @@ def _config():
     return {
         'env': env,
         'base_url': _BASE_URLS.get(env, _BASE_URLS['SANDBOX']),
-        'payout_base_url': _PAYOUT_BASE_URLS.get(env, _PAYOUT_BASE_URLS['SANDBOX']),
         'app_id': cfg.get('CASHFREE_APP_ID', ''),
         'secret': cfg.get('CASHFREE_SECRET_KEY', ''),
         'api_version': cfg.get('CASHFREE_API_VERSION', '2023-08-01'),
         'webhook_secret': cfg.get('CASHFREE_WEBHOOK_SECRET', ''),
-        'payout_client_id': cfg.get('CASHFREE_PAYOUT_CLIENT_ID', ''),
-        'payout_secret': cfg.get('CASHFREE_PAYOUT_CLIENT_SECRET', ''),
     }
 
 
@@ -305,97 +296,6 @@ def verify_webhook_signature(raw_body: bytes, timestamp: str, signature: str) ->
     except Exception as exc:
         current_app.logger.error(f'[cashfree] signature verification errored: {exc}')
         return False
-
-
-# ── Payouts: outbound ──────────────────────────────────────────────────────
-
-def _payout_headers(cfg: dict) -> dict:
-    return {
-        'Content-Type': 'application/json',
-        'x-api-version': '2024-01-01',
-        'x-client-id': cfg['payout_client_id'] or cfg['app_id'],
-        'x-client-secret': cfg['payout_secret'] or cfg['secret'],
-    }
-
-
-def create_payout(
-    *,
-    transfer_id: str,
-    amount,
-    beneficiary_id: str,
-    beneficiary_name: str,
-    account_number: str,
-    ifsc: str,
-    transfer_mode: str = 'imps',
-    remarks: str = None,
-) -> dict:
-    """
-    Dispatch an IMPS transfer to a verified bank account (PRD FR-006 step 8).
-
-    transfer_id is CashU's own id and is passed through as the idempotency
-    anchor: replaying the same id must not send the money twice.
-    """
-    cfg = _config()
-
-    payload = {
-        'transfer_id': transfer_id,
-        'transfer_amount': float(amount),
-        'transfer_mode': transfer_mode,
-        'beneficiary_details': {
-            'beneficiary_id': beneficiary_id,
-            'beneficiary_name': beneficiary_name,
-            'beneficiary_instrument_details': {
-                'bank_account_number': account_number,
-                'bank_ifsc': ifsc,
-            },
-        },
-    }
-    if remarks:
-        payload['transfer_remarks'] = remarks[:70]
-
-    result = _request(
-        'POST', f"{cfg['payout_base_url']}/transfers",
-        _payout_headers(cfg), payload,
-    )
-
-    if result['ok']:
-        data = result['data']
-        return {
-            'ok': True,
-            'transfer_id': data.get('transfer_id'),
-            'cf_transfer_id': str(data.get('cf_transfer_id') or ''),
-            'status': data.get('status'),      # RECEIVED | PENDING | SUCCESS | FAILED
-            'utr': data.get('transfer_utr'),
-            'raw': data,
-        }
-
-    return {
-        'ok': False,
-        'error': result['error'],
-        'status_code': result['status_code'],
-        'timeout': result.get('timeout', False),
-        'raw': result['data'],
-    }
-
-
-def get_payout_status(transfer_id: str) -> dict:
-    """Poll a dispatched payout - drives the retry ladder and reconciliation."""
-    cfg = _config()
-    result = _request(
-        'GET', f"{cfg['payout_base_url']}/transfers?transfer_id={transfer_id}",
-        _payout_headers(cfg),
-    )
-
-    if result['ok']:
-        data = result['data']
-        return {
-            'ok': True,
-            'status': data.get('status'),
-            'utr': data.get('transfer_utr'),
-            'raw': data,
-        }
-
-    return {'ok': False, 'error': result['error'], 'raw': result['data']}
 
 
 # ── Verification Suite: penny drop ─────────────────────────────────────────

@@ -19,10 +19,18 @@ import time
 
 import requests
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from throttle import throttled  # noqa: E402
+
 BASE = os.getenv('CASHU_API', 'http://127.0.0.1:5050/v1')
 TIMEOUT = 45
 
-PASS, FAIL = [], []
+PASS, FAIL, SKIP = [], [], []
+
+#: The configured API secret, read rather than hardcoded. The point of the
+#: leak checks below is that this exact value never appears in a response, and
+#: pasting a fragment of it into a test file is its own small leak.
+KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', '')
 
 
 def check(label, condition, detail=''):
@@ -32,20 +40,48 @@ def check(label, condition, detail=''):
     return condition
 
 
+def skip(label, reason):
+    """
+    Record that a check could not run, rather than passing or failing it.
+
+    The signature-attack cases below can only be proved against the real
+    Razorpay rail. When the rail is simulated there is no gateway signature to
+    forge, and the simulator settles by design - so asserting them would report
+    a security hole that does not exist, and silently dropping them would claim
+    coverage this run does not have.
+    """
+    SKIP.append(f'{label} ({reason})')
+    print(f'  [SKIP] {label} - {reason}')
+
+
+def leak_free(text):
+    """
+    Whether a response body is free of the API secret.
+
+    Checks the configured secret itself, so rotating the key does not quietly
+    turn this into a check of a stale string that can no longer appear.
+    """
+    if 'key_secret' in text:
+        return False
+    return not (KEY_SECRET and KEY_SECRET in text)
+
+
 def post(path, body=None, token=None, idem=None):
     headers = {'X-Device-UUID': 'upi-flow-test'}
     if token:
         headers['Authorization'] = f'Bearer {token}'
     if idem:
         headers['X-Idempotency-Key'] = idem
-    return requests.post(f'{BASE}{path}', json=body or {}, headers=headers, timeout=TIMEOUT)
+    return throttled(lambda: requests.post(
+        f'{BASE}{path}', json=body or {}, headers=headers, timeout=TIMEOUT))
 
 
 def get(path, token=None):
     headers = {'X-Device-UUID': 'upi-flow-test'}
     if token:
         headers['Authorization'] = f'Bearer {token}'
-    return requests.get(f'{BASE}{path}', headers=headers, timeout=TIMEOUT)
+    return throttled(lambda: requests.get(
+        f'{BASE}{path}', headers=headers, timeout=TIMEOUT))
 
 
 def main():
@@ -92,15 +128,29 @@ def main():
     upi = methods.get('upi') or {}
 
     check('UPI block present', bool(upi))
-    check('provider is RAZORPAY', upi.get('provider') == 'RAZORPAY', str(upi.get('provider')))
-    check('checkout key is a public test key',
-          str(upi.get('checkout_key', '')).startswith('rzp_test_'))
+
+    # Which rail this run is actually on. A Razorpay account does not have UPI
+    # enabled by default, and the server falls back to the simulator rather
+    # than handing the user a checkout it cannot serve - so this is a property
+    # of the merchant account, not a defect.
+    live_rail = upi.get('provider') == 'RAZORPAY'
+    if live_rail:
+        check('provider is RAZORPAY', True)
+    else:
+        skip('provider is RAZORPAY',
+             f'UPI is not enabled on the merchant account; rail is '
+             f'{upi.get("provider")}')
+    if live_rail:
+        check('checkout key is a public test key',
+              str(upi.get('checkout_key', '')).startswith('rzp_test_'))
+    else:
+        skip('checkout key is a public test key', 'simulated rail issues no key')
     check('Google Pay offered',
           any(a['id'] == 'google_pay' for a in upi.get('apps', [])))
     check('PhonePe offered',
           any(a['id'] == 'phonepe' for a in upi.get('apps', [])))
     check('no secret in the methods response',
-          'q3QQR8' not in response.text and 'key_secret' not in response.text)
+          leak_free(response.text))
     check('credit card still prohibited',
           any(p['mode'] == 'CREDIT_CARD' for p in methods.get('prohibited', [])))
 
@@ -119,9 +169,12 @@ def main():
     if not check('payment initiated', bool(payment_id), response.text[:300]):
         return finish()
 
-    check('a real Razorpay order was opened',
-          str(checkout.get('order_id', '')).startswith('order_'),
-          str(checkout.get('order_id')))
+    if live_rail:
+        check('a real Razorpay order was opened',
+              str(checkout.get('order_id', '')).startswith('order_'),
+              str(checkout.get('order_id')))
+    else:
+        skip('a real Razorpay order was opened', 'simulated rail')
     # The provider adapter is authoritative over the installment amount, so
     # this asserts against the EMI the server resolved, not the number the
     # client happened to send.
@@ -129,9 +182,12 @@ def main():
     check('order amount matches the EMI exactly',
           checkout.get('amount_paise') == expected_paise,
           f'order {checkout.get("amount_paise")} vs EMI {expected_paise}')
-    check('checkout key returned to client',
-          str(checkout.get('key', '')).startswith('rzp_test_'))
-    check('no secret in the initiate response', 'q3QQR8' not in response.text)
+    if live_rail:
+        check('checkout key returned to client',
+              str(checkout.get('key', '')).startswith('rzp_test_'))
+    else:
+        skip('checkout key returned to client', 'simulated rail issues no key')
+    check('no secret in the initiate response', leak_free(response.text))
     check('status is PROCESSING, not paid', payment.get('status') == 'PROCESSING',
           str(payment.get('status')))
     check('chosen UPI app recorded', payment.get('upi_app') == 'google_pay')
@@ -154,28 +210,37 @@ def main():
 
     # -- Forged verification ---------------------------------------------
     print('\nForged verification (the case that matters)')
-    response = post(f'/emi-payments/{payment_id}/verify', {
-        'razorpay_payment_id': 'pay_FORGED000000',
-        'razorpay_order_id': order_id,
-        'razorpay_signature': 'f' * 64,
-    }, token=token)
-    body = (response.json().get('data') or {})
-    check('forged signature did NOT settle the EMI',
-          body.get('status') not in ('SETTLED', 'SUCCESSFUL'),
-          str(body.get('status')))
+    # Only meaningful against the real rail. On the simulator there is no
+    # gateway signature to forge and the simulated payment settles by design,
+    # so these would report a hole that does not exist on the path that ships.
+    if not live_rail:
+        for label in ('forged signature did NOT settle the EMI',
+                      'payload for another order rejected',
+                      'payment still not marked paid after forgery attempts'):
+            skip(label, 'signature forgery is not testable on the simulated rail')
+    else:
+        response = post(f'/emi-payments/{payment_id}/verify', {
+            'razorpay_payment_id': 'pay_FORGED000000',
+            'razorpay_order_id': order_id,
+            'razorpay_signature': 'f' * 64,
+        }, token=token)
+        body = (response.json().get('data') or {})
+        check('forged signature did NOT settle the EMI',
+              body.get('status') not in ('SETTLED', 'SUCCESSFUL'),
+              str(body.get('status')))
 
-    response = post(f'/emi-payments/{payment_id}/verify', {
-        'razorpay_payment_id': 'pay_SOMEONEELSE',
-        'razorpay_order_id': 'order_NOTMINE0000',
-        'razorpay_signature': 'a' * 64,
-    }, token=token)
-    check('payload for another order rejected', response.status_code == 400,
-          f'got {response.status_code}')
+        response = post(f'/emi-payments/{payment_id}/verify', {
+            'razorpay_payment_id': 'pay_SOMEONEELSE',
+            'razorpay_order_id': 'order_NOTMINE0000',
+            'razorpay_signature': 'a' * 64,
+        }, token=token)
+        check('payload for another order rejected',
+              response.status_code == 400, f'got {response.status_code}')
 
-    response = get(f'/emi-payments/{payment_id}', token)
-    status = (response.json().get('data') or {}).get('status')
-    check('payment still not marked paid after forgery attempts',
-          status not in ('SETTLED', 'SUCCESSFUL'), str(status))
+        response = get(f'/emi-payments/{payment_id}', token)
+        status = (response.json().get('data') or {}).get('status')
+        check('payment still not marked paid after forgery attempts',
+              status not in ('SETTLED', 'SUCCESSFUL'), str(status))
 
     # -- Unsigned webhook --------------------------------------------------
     print('\nWebhook authentication')
@@ -205,10 +270,14 @@ def main():
     check('bad-signature webhook rejected 401', response.status_code == 401,
           f'got {response.status_code}')
 
-    response = get(f'/emi-payments/{payment_id}', token)
-    status = (response.json().get('data') or {}).get('status')
-    check('payment still not paid after webhook forgery',
-          status not in ('SETTLED', 'SUCCESSFUL'), str(status))
+    if live_rail:
+        response = get(f'/emi-payments/{payment_id}', token)
+        status = (response.json().get('data') or {}).get('status')
+        check('payment still not paid after webhook forgery',
+              status not in ('SETTLED', 'SUCCESSFUL'), str(status))
+    else:
+        skip('payment still not paid after webhook forgery',
+             'the simulated payment has already settled')
 
     # The one that matters most. A *correctly signed* delivery claiming this
     # real order was captured, when Razorpay's own API says it was not. If the
@@ -241,17 +310,28 @@ def main():
     check('signed webhook for a real order is accepted',
           response.status_code == 200, f'got {response.status_code}')
 
-    response = get(f'/emi-payments/{payment_id}', token)
-    status = (response.json().get('data') or {}).get('status')
-    check('SIGNED webhook claiming captured did NOT settle an unpaid EMI',
-          status not in ('SETTLED', 'SUCCESSFUL'), str(status))
+    if live_rail:
+        response = get(f'/emi-payments/{payment_id}', token)
+        status = (response.json().get('data') or {}).get('status')
+        check('SIGNED webhook claiming captured did NOT settle an unpaid EMI',
+              status not in ('SETTLED', 'SUCCESSFUL'), str(status))
+    else:
+        skip('SIGNED webhook claiming captured did NOT settle an unpaid EMI',
+             'needs a real order Razorpay can be asked about')
 
     # -- Cancel and retry --------------------------------------------------
     print('\nCancel and retry')
-    response = post(f'/emi-payments/{payment_id}/cancel', token=token)
-    cancelled = (response.json().get('data') or {})
-    check('unpaid attempt cancels cleanly',
-          cancelled.get('status') == 'CANCELLED', str(cancelled.get('status')))
+    if live_rail:
+        response = post(f'/emi-payments/{payment_id}/cancel', token=token)
+        cancelled = (response.json().get('data') or {})
+        check('unpaid attempt cancels cleanly',
+              cancelled.get('status') == 'CANCELLED',
+              str(cancelled.get('status')))
+    else:
+        # Refusing to cancel a settled payment is correct behaviour, so there
+        # is no unpaid attempt left to cancel on this rail.
+        skip('unpaid attempt cancels cleanly',
+             'the simulated payment settled, so nothing is unpaid to cancel')
 
     response = post('/emi-payments', {
         'emi_id': emi_id, 'payment_mode': 'UPI_COLLECT',
@@ -266,17 +346,32 @@ def main():
     # -- Receipt gating ----------------------------------------------------
     print('\nReceipt')
     response = get(f'/emi-payments/{payment_id}/receipt', token)
-    check('no receipt for an unpaid payment', response.status_code == 409,
-          f'got {response.status_code}')
+    if live_rail:
+        check('no receipt for an unpaid payment', response.status_code == 409,
+              f'got {response.status_code}')
+    else:
+        # The simulated payment did settle, so a receipt is the right answer.
+        # Asserting the gate needs a payment that never completed, which this
+        # rail cannot produce.
+        check('a settled payment does have a receipt',
+              response.status_code == 200, f'got {response.status_code}')
+        skip('no receipt for an unpaid payment',
+             'the simulated payment settled, so it is entitled to a receipt')
 
     return finish()
 
 
 def finish():
     print('\n' + '=' * 62)
-    print(f'{len(PASS)} passed, {len(FAIL)} failed')
+    print(f'{len(PASS)} passed, {len(FAIL)} failed, {len(SKIP)} skipped')
     for item in FAIL:
         print(f'  FAILED: {item}')
+    if SKIP:
+        print('\nNOT VERIFIED BY THIS RUN')
+        for item in SKIP:
+            print(f'  {item}')
+        print('\n  These are the gateway-signature guarantees. Enable UPI on '
+              'the Razorpay\n  account and rerun to cover them.')
     return 1 if FAIL else 0
 
 

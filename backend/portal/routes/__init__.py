@@ -17,7 +17,6 @@ def init_app():
     from .dashboard import routes               # noqa: F401
     from .cards import routes                   # noqa: F401
     from .bank_accounts import routes           # noqa: F401
-    from .transfers import routes               # noqa: F401
     from .emi import routes                     # noqa: F401
     from .emi_payments import routes            # noqa: F401
     from .mandates import routes                # noqa: F401
