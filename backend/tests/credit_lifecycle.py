@@ -646,8 +646,76 @@ def main():
           post(f'/admin/credit/accounts/{account_id}/statement',
                token=token).status_code in (401, 403))
 
-    # ── 13. Tier caps on an override ──────────────────────────────────────
-    print('\n[13] A limit override is still bounded by the KYC tier')
+    # ── 13. The contract the screens depend on ────────────────────────────
+    #
+    # Every field the credit screens read, asserted present. A screen that reads
+    # a field the API stopped returning does not fail loudly - it renders
+    # "undefined" or "₹NaN" into a page about somebody's money, and the build
+    # passes, and no other test here notices. So the field list is written down.
+    print('\n[13] Response contract for the UI')
+
+    CONTRACT = {
+        '/credit/account': (
+            get('/credit/account', token),
+            ['credit_account_id', 'status', 'card_number_masked', 'card_last4',
+             'card_network', 'name_on_card', 'expiry', 'credit_limit',
+             'available_credit', 'current_outstanding', 'utilization_percent',
+             'purpose', 'purpose_label', 'can_spend', 'statement_day',
+             'grace_days', 'unbilled_spend', 'next_step'],
+        ),
+        '/credit/eligibility': (
+            get('/credit/eligibility', token),
+            ['can_apply', 'kyc_tier', 'kyc_required', 'max_limit_for_tier',
+             'minimum_limit', 'full_kyc_required_above', 'employment_types',
+             'has_credit_line', 'open_application_id'],
+        ),
+        '/credit/statements/current': (
+            get('/credit/statements/current', token),
+            ['account', 'latest_statement', 'unbilled_spend',
+             'total_outstanding', 'payment_methods'],
+        ),
+        f"/credit/statements/{statement['statement_id']}": (
+            get(f"/credit/statements/{statement['statement_id']}", token),
+            ['statement_id', 'statement_number', 'period_start', 'period_end',
+             'statement_date', 'due_date', 'opening_balance', 'total_purchases',
+             'total_payments', 'total_refunds', 'total_fees', 'closing_balance',
+             'minimum_due', 'minimum_due_percent', 'amount_paid',
+             'amount_outstanding', 'minimum_outstanding', 'status',
+             'late_fee_charged', 'transactions'],
+        ),
+        f'/credit/applications/{application_id}': (
+            get(f'/credit/applications/{application_id}', token),
+            ['application_id', 'status', 'employment_type', 'monthly_income',
+             'existing_emi_outflow', 'requested_limit', 'offered_limit',
+             'approved_limit', 'eligibility_score', 'decision_reason',
+             'decision_message', 'submitted_at', 'kyc_verified_at',
+             'decided_at', 'is_open'],
+        ),
+    }
+
+    for path, (response, fields) in CONTRACT.items():
+        payload = data_of(response)
+        missing = [f for f in fields if f not in payload]
+        check(f'{path} returns every field the UI reads',
+              not missing, f'missing: {", ".join(missing)}')
+
+    txn_fields = ['credit_transaction_id', 'transaction_id', 'type', 'status',
+                  'amount', 'direction', 'balance_after', 'merchant_name',
+                  'merchant_category', 'description', 'statement_id',
+                  'is_test', 'created_on', 'settled_at']
+    rows = get('/credit/transactions', token).json().get('data') or []
+    missing = [f for f in txn_fields if rows and f not in rows[0]]
+    check('a credit transaction returns every field the UI reads',
+          bool(rows) and not missing, f'missing: {", ".join(missing)}')
+
+    purposes = data_of(get('/credit/account/purpose', token)).get('purposes', [])
+    missing = [f for f in ('value', 'label', 'requires_note')
+               if purposes and f not in purposes[0]]
+    check('a purpose option returns every field the UI reads',
+          bool(purposes) and not missing, f'missing: {", ".join(missing)}')
+
+    # ── 14. Tier caps on an override ──────────────────────────────────────
+    print('\n[14] A limit override is still bounded by the KYC tier')
     _, second = make_user('Credit Capped')
     if second and approve_kyc(second, admin, 'Credit Capped'):
         response = post('/credit/applications', {

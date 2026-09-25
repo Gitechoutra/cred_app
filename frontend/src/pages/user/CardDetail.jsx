@@ -8,7 +8,6 @@ import { Button, Card, EmptyState, Input, Row, Sheet, Skeleton } from '../../com
 import { useToast } from '../../context/ToastContext';
 import { useFetch } from '../../hooks/useProfile';
 import { date, money, statusLabel } from '../../utils/format';
-import { PayBillModal } from './PayBillModal';
 
 export default function CardDetail() {
   const { cardId } = useParams();
@@ -24,7 +23,6 @@ export default function CardDetail() {
   const [confirmUnlink, setConfirmUnlink] = useState(false);
   const [working, setWorking] = useState(false);
   const [form, setForm] = useState({});
-  const [isPayModalOpen, setIsPayModalOpen] = useState(false);
 
   function openEditor() {
     setForm({
@@ -137,9 +135,15 @@ export default function CardDetail() {
                   </p>
                 )}
                 
-                <Button variant="mint" full onClick={() => setIsPayModalOpen(true)}>
-                  Pay Bill
-                </Button>
+                {/* Paying an external card's bill is not something this
+                    platform has a rail for, so it does not offer a button that
+                    cannot work. The due date is tracked here; the payment is
+                    made with the issuer. CashU's own credit line is paid from
+                    /credit/pay. */}
+                <p className="text-2xs leading-relaxed text-slate">
+                  Pay this bill with {card.issuer_bank || 'your issuer'} directly.
+                  CashU tracks the due date so you do not miss it.
+                </p>
               </div>
             </Card>
           )}
@@ -290,15 +294,6 @@ export default function CardDetail() {
           be charged through CashU. Your transaction history stays intact.
         </p>
       </Sheet>
-      <PayBillModal 
-        card={card} 
-        isOpen={isPayModalOpen} 
-        onClose={() => setIsPayModalOpen(false)} 
-        onSuccess={() => {
-          setIsPayModalOpen(false);
-          refetch();
-        }}
-      />
     </div>
   );
 }

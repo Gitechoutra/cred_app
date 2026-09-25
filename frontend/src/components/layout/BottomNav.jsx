@@ -277,6 +277,10 @@ function SearchModal({ onClose }) {
   }, [onClose]);
 
   const SEARCH_ITEMS = [
+    { title: 'My Credit Line', hint: 'Limit, spends and statements', to: '/credit' },
+    { title: 'Apply for Credit', hint: 'Open a new credit line', to: '/credit/apply' },
+    { title: 'Pay Card Bill', hint: 'Settle your statement', to: '/credit/pay' },
+    { title: 'Statements', hint: 'Monthly credit card bills', to: '/credit/statements' },
     { title: 'Credit Cards', hint: 'Manage linked cards & limits', to: '/cards' },
     { title: 'Scan & Pay QR', hint: 'Scan UPI QR code', to: '/scan' },
     { title: 'EMIs & Installments', hint: 'View loan schedules', to: '/emi' },

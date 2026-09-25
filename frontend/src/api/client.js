@@ -296,7 +296,40 @@ export const endpoints = {
     link: (data) => api.post('/cards', data),
     update: (id, data) => api.patch(`/cards/${id}`, data),
     unlink: (id) => api.del(`/cards/${id}`),
-    payBill: (id, data) => api.post(`/cards/${id}/pay-bill`, data),
+  },
+  credit: {
+    // -- Application ----------------------------------------------------
+    eligibility: () => api.get('/credit/eligibility'),
+    applications: () => api.get('/credit/applications'),
+    apply: (data) => api.post('/credit/applications', data),
+    application: (id) => api.get(`/credit/applications/${id}`),
+    withdraw: (id) => api.post(`/credit/applications/${id}/withdraw`),
+
+    // -- The account ----------------------------------------------------
+    // 404s with NO_CREDIT_LINE when there is none, which is how the UI tells
+    // "no card yet" from "the card failed to load".
+    account: () => api.get('/credit/account'),
+    purposes: () => api.get('/credit/account/purpose'),
+    setPurpose: (data) => api.post('/credit/account/purpose', data),
+    activate: () => api.post('/credit/account/activate'),
+    block: (reason) => api.post('/credit/account/block', { reason }),
+    unblock: () => api.post('/credit/account/unblock'),
+
+    // -- Money ----------------------------------------------------------
+    // Both go through api.pay, so each carries a fresh idempotency key. The
+    // server answers a replay with the original transaction rather than
+    // charging again.
+    purchase: (data) => api.pay('/credit/purchases', data),
+    payBill: (data) => api.pay('/credit/payments', data),
+
+    transactions: (page = 1, type = '') => api.get(
+      `/credit/transactions?page=${page}${type ? `&type=${type}` : ''}`,
+    ),
+    transaction: (id) => api.get(`/credit/transactions/${id}`),
+
+    statements: (page = 1) => api.get(`/credit/statements?page=${page}`),
+    currentStatement: () => api.get('/credit/statements/current'),
+    statement: (id) => api.get(`/credit/statements/${id}`),
   },
   qrPayments: {
     // The scanned string is validated server-side; the client never parses it.
@@ -376,6 +409,17 @@ export const endpoints = {
     kycQueue: () => api.get('/admin/kyc/queue'),
     reviewKyc: (id, data) => api.post(`/admin/kyc/${id}/review`, data),
     kycDocumentUrl: (id, slot) => fetchBlobUrl(`/admin/kyc/${id}/document/${slot}`),
+    creditApplications: (params = '') => api.get(
+      `/admin/credit/applications${params}`,
+    ),
+    reviewCreditApplication: (id, data) => api.post(
+      `/admin/credit/applications/${id}/review`, data,
+    ),
+    creditAccount: (id) => api.get(`/admin/credit/accounts/${id}`),
+    blockCreditAccount: (id, reason) => api.post(
+      `/admin/credit/accounts/${id}/block`, { reason },
+    ),
+    cutStatement: (id) => api.post(`/admin/credit/accounts/${id}/statement`),
     reconciliation: () => api.get('/admin/reconciliation'),
     selfAudit: () => api.post('/admin/reconciliation/self-audit'),
     settings: () => api.get('/admin/settings'),

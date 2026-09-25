@@ -22,6 +22,18 @@ import Hub from '../pages/user/Hub';
 import ScanPay from '../pages/user/ScanPay';
 import Cards from '../pages/user/Cards';
 import CardDetail from '../pages/user/CardDetail';
+import CreditHome from '../pages/credit/CreditHome';
+import CreditApply from '../pages/credit/CreditApply';
+import CreditStatus from '../pages/credit/CreditStatus';
+import CreditPurpose from '../pages/credit/CreditPurpose';
+import CreditActivate from '../pages/credit/CreditActivate';
+import CreditPayBill from '../pages/credit/CreditPayBill';
+import {
+  CreditTransactionList, CreditTransactionDetail,
+} from '../pages/credit/CreditTransactions';
+import {
+  CreditStatementList, CreditStatementDetail,
+} from '../pages/credit/CreditStatements';
 import AddCard from '../pages/user/AddCard';
 import BankAccounts from '../pages/user/BankAccounts';
 import AddBankAccount from '../pages/user/AddBankAccount';
@@ -148,6 +160,20 @@ export default function App() {
       <Route path="/cards" element={<RequireAuth><Shell><Cards /></Shell></RequireAuth>} />
       <Route path="/cards/add" element={<RequireAuth><Shell><AddCard /></Shell></RequireAuth>} />
       <Route path="/cards/:cardId" element={<RequireAuth><Shell><CardDetail /></Shell></RequireAuth>} />
+
+      {/* The credit line, in journey order. Every one of these screens carries
+          a back button wired to real history, so a half-finished application is
+          never a dead end. */}
+      <Route path="/credit" element={<RequireAuth><Shell><CreditHome /></Shell></RequireAuth>} />
+      <Route path="/credit/apply" element={<RequireAuth><Shell><CreditApply /></Shell></RequireAuth>} />
+      <Route path="/credit/status/:applicationId" element={<RequireAuth><Shell><CreditStatus /></Shell></RequireAuth>} />
+      <Route path="/credit/purpose" element={<RequireAuth><Shell><CreditPurpose /></Shell></RequireAuth>} />
+      <Route path="/credit/activate" element={<RequireAuth><Shell><CreditActivate /></Shell></RequireAuth>} />
+      <Route path="/credit/pay" element={<RequireAuth><Shell><CreditPayBill /></Shell></RequireAuth>} />
+      <Route path="/credit/transactions" element={<RequireAuth><Shell><CreditTransactionList /></Shell></RequireAuth>} />
+      <Route path="/credit/transactions/:transactionId" element={<RequireAuth><Shell><CreditTransactionDetail /></Shell></RequireAuth>} />
+      <Route path="/credit/statements" element={<RequireAuth><Shell><CreditStatementList /></Shell></RequireAuth>} />
+      <Route path="/credit/statements/:statementId" element={<RequireAuth><Shell><CreditStatementDetail /></Shell></RequireAuth>} />
 
       <Route path="/banks" element={<RequireAuth><Shell><BankAccounts /></Shell></RequireAuth>} />
       <Route path="/banks/add" element={<RequireAuth><Shell><AddBankAccount /></Shell></RequireAuth>} />

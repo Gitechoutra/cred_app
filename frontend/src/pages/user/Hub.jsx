@@ -14,6 +14,7 @@ import {
   IconEmi,
   IconHelp,
   IconLock,
+  IconPay,
   IconPlus,
   IconQr,
   IconReceipt,
@@ -309,6 +310,13 @@ export default function Hub() {
 
         <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5 sm:gap-3">
           <QuickActionBtn
+            icon={IconPay}
+            title="Credit"
+            hint="Spend &amp; pay"
+            onClick={() => navigate('/credit')}
+            primary
+          />
+          <QuickActionBtn
             icon={IconQr}
             title="Scan &amp; Pay"
             hint="UPI QR Code"
@@ -534,6 +542,12 @@ export default function Hub() {
             title="Dashboard Overview"
             hint="Telemetry &amp; analytics"
             onClick={() => navigate('/dashboard')}
+          />
+          <QuickServiceCard
+            icon={IconPay}
+            title="My Credit Line"
+            hint="Limit, statements &amp; bill"
+            onClick={() => navigate('/credit')}
           />
           <QuickServiceCard
             icon={IconCard}

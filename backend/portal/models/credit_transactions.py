@@ -1,6 +1,8 @@
+from sqlalchemy.dialects.mysql import DATETIME
+
 from portal import db
 from portal.models.base import (
-    AppendOnlyMixin, TimestampMixin, uuid_pk, uuid_fk,
+    AppendOnlyMixin, uuid_pk, uuid_fk, utcnow,
 )
 
 
@@ -58,7 +60,7 @@ class MerchantCategory:
     ]
 
 
-class CreditTransactions(db.Model, TimestampMixin, AppendOnlyMixin):
+class CreditTransactions(db.Model, AppendOnlyMixin):
     """
     One movement on a credit line.
 
@@ -129,7 +131,18 @@ class CreditTransactions(db.Model, TimestampMixin, AppendOnlyMixin):
     #: a report, and so a production database can be checked for their absence.
     is_test = db.Column(db.Boolean, default=False, nullable=False)
 
-    settled_at = db.Column(db.DateTime, nullable=True)
+    settled_at = db.Column(DATETIME(fsp=6), nullable=True)
+
+    # Microsecond precision, not the TimestampMixin's plain DateTime. MySQL's
+    # DATETIME stores whole seconds, so two purchases made in the same second
+    # compared equal and `ORDER BY created_on DESC` returned them in an
+    # arbitrary order - a cardholder saw their own spends listed wrongly. The
+    # microseconds were already being generated; only the column was discarding
+    # them.
+    created_on = db.Column(DATETIME(fsp=6), default=utcnow, nullable=False)
+    updated_on = db.Column(
+        DATETIME(fsp=6), default=utcnow, onupdate=utcnow, nullable=False,
+    )
 
     account = db.relationship('CreditAccounts', backref=db.backref(
         'transactions', lazy='dynamic',

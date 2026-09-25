@@ -213,7 +213,8 @@ def statement_dict(statement: CreditStatements, detailed: bool = False) -> dict:
         data['late_fee_charged'] = statement.late_fee_charged_at is not None
         data['transactions'] = [
             transaction_dict(t) for t in statement.transactions.order_by(
-                CreditTransactions.created_on.asc()
+                CreditTransactions.created_on.asc(),
+                CreditTransactions.credit_transaction_id.asc(),
             ).all()
         ]
     return data
@@ -698,8 +699,13 @@ class CreditTransactionList(Resource):
                 )
             query = query.filter(CreditTransactions.transaction_type == requested)
 
+        # The id is a tiebreaker, not a sort key: a UUID says nothing about
+        # time. It is here because pagination needs a *total* order - two rows
+        # that compare equal can otherwise swap between the query for page 1 and
+        # the query for page 2, showing one row twice and hiding another.
         pagination = query.order_by(
-            CreditTransactions.created_on.desc()
+            CreditTransactions.created_on.desc(),
+            CreditTransactions.credit_transaction_id.desc(),
         ).paginate(page=page, per_page=per_page, error_out=False)
 
         return paginated(

@@ -399,7 +399,7 @@ export function Timeline({ steps }) {
         const failed = step.failed;
 
         return (
-          <li key={step.key} className="relative flex gap-3.5 pb-6 last:pb-0">
+          <li key={step.key || step.label} className="relative flex gap-3.5 pb-6 last:pb-0">
             {!last && (
               <span
                 aria-hidden="true"
@@ -417,7 +417,9 @@ export function Timeline({ steps }) {
                   ? 'border-alert bg-alert text-white'
                   : step.done
                     ? 'border-mint bg-mint text-ink'
-                    : 'border-line bg-canvas',
+                    : step.current
+                      ? 'border-mint bg-canvas'
+                      : 'border-line bg-canvas',
               )}
             >
               {failed ? (
@@ -435,7 +437,12 @@ export function Timeline({ steps }) {
                   />
                 </svg>
               ) : (
-                <span className="h-1.5 w-1.5 rounded-full bg-line" />
+                <span
+                  className={cx(
+                    'h-1.5 w-1.5 rounded-full',
+                    step.current ? 'animate-pulse bg-mint' : 'bg-line',
+                  )}
+                />
               )}
             </span>
 
@@ -443,7 +450,9 @@ export function Timeline({ steps }) {
               <p
                 className={cx(
                   'text-sm font-medium',
-                  failed ? 'text-alert' : step.done ? 'text-ink' : 'text-slate-light',
+                  failed
+                    ? 'text-alert'
+                    : step.done || step.current ? 'text-ink' : 'text-slate-light',
                 )}
               >
                 {step.label}
@@ -457,6 +466,20 @@ export function Timeline({ steps }) {
                     minute: '2-digit',
                     hour12: true,
                   })}
+                </p>
+              )}
+              {/* Free text, for a step whose useful detail is not a timestamp:
+                  "usually within one working day", or the reason a step
+                  failed. A state machine rendered as bare labels tells someone
+                  waiting on a decision nothing they can act on. */}
+              {step.detail && (
+                <p
+                  className={cx(
+                    'mt-0.5 text-2xs',
+                    failed ? 'text-alert' : 'text-slate',
+                  )}
+                >
+                  {step.detail}
                 </p>
               )}
             </div>
