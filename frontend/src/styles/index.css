@@ -253,3 +253,35 @@
   /* Parallax is applied as an inline transform, so it needs neutralising by
      the hook rather than here - useParallax returns a zero offset instead. */
 }
+
+/* ── Credit line ─────────────────────────────────────────────────────────── */
+
+@layer components {
+  /* Frosted panel for surfaces that sit over the card art or a tinted
+     background. Kept to one strength everywhere: glass is a material here,
+     not an effect, and three different blurs on one screen read as noise. */
+  .glass-panel {
+    @apply rounded-2xl border border-white/60 bg-white/70 shadow-card backdrop-blur-xl;
+  }
+
+  /* An outcome mark that draws itself. The dash length comfortably exceeds
+     every path it is used on, so no path is cut short. */
+  .draw-stroke {
+    stroke-dasharray: 40;
+    stroke-dashoffset: 40;
+    animation: draw-stroke 520ms 160ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+}
+
+@keyframes draw-stroke {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .draw-stroke {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}

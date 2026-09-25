@@ -69,7 +69,7 @@
     "section": 18,
     "check": "success envelope has success+data",
     "passed": true,
-    "detail": "{'success': True, 'message': 'Success', 'data': {'user_id': 'a3751762-e0f2-4d49-9d5f-1639bd38082f', 'phone': '9969247131"
+    "detail": "{'success': True, 'message': 'Success', 'data': {'user_id': '96a2d728-9508-4b55-9b72-c00e40e9244d', 'phone': '9213831042"
   },
   {
     "section": 18,
@@ -123,7 +123,7 @@
     "section": 7,
     "check": "valid bank account accepted",
     "passed": true,
-    "detail": "{\n    \"success\": true,\n    \"message\": \"Bank account verified successfully.\",\n    \"data\": {\n        \"bank_account_id\": \"6112cc86-58ff-4061-9c74-1fe760030b84\",\n        \"masked_account\": \"**** 4840\",\n   "
+    "detail": "{\n    \"success\": true,\n    \"message\": \"Bank account verified successfully.\",\n    \"data\": {\n        \"bank_account_id\": \"dc2d14de-0d5f-42e9-9fbd-7adfe156e797\",\n        \"masked_account\": \"**** 2187\",\n   "
   },
   {
     "section": 7,
@@ -243,13 +243,13 @@
     "section": 9,
     "check": "payment accepts a valid amount",
     "passed": true,
-    "detail": "{\n    \"success\": true,\n    \"message\": \"Complete the payment in your UPI app.\",\n    \"data\": {\n        \"qr_payment_id\": \"74def130-8e1c-49b5-8dbd-fe3bb2266ebe\",\n  "
+    "detail": "{\n    \"success\": true,\n    \"message\": \"Complete the payment in your UPI app.\",\n    \"data\": {\n        \"qr_payment_id\": \"2d322054-8264-4268-ac35-0d1bb3c0f296\",\n  "
   },
   {
     "section": 9,
     "check": "payment accepts the minimum of Rs. 1",
     "passed": true,
-    "detail": "{\n    \"success\": true,\n    \"message\": \"Complete the payment in your UPI app.\",\n    \"data\": {\n        \"qr_payment_id\": \"2b220efa-63cf-4491-b151-b318127e41be\",\n        \"transaction_id\": null,\n        \"p"
+    "detail": "{\n    \"success\": true,\n    \"message\": \"Complete the payment in your UPI app.\",\n    \"data\": {\n        \"qr_payment_id\": \"ecf04556-317f-48ea-939d-e0d404d7cffc\",\n        \"transaction_id\": null,\n        \"p"
   },
   {
     "section": 9,
@@ -369,7 +369,7 @@
     "section": 14,
     "check": "transaction list responds",
     "passed": true,
-    "detail": "{\n    \"success\": true,\n    \"data\": [\n        {\n            \"transaction_id\": \"f9d22cbd-0c9d-4925-9c7f-0e251fc4b728\",\n            \"type\": \"QR_UPI_PAYMENT\",\n     "
+    "detail": "{\n    \"success\": true,\n    \"data\": [\n        {\n            \"transaction_id\": \"77089c7b-718f-4f45-bae2-1c343e7b3774\",\n            \"type\": \"QR_UPI_PAYMENT\",\n     "
   },
   {
     "section": 14,
@@ -417,7 +417,7 @@
     "section": 28,
     "check": "a replayed idempotency key returns the original payment",
     "passed": true,
-    "detail": "972484c7-ca9c-4090-9744-98a1d4e6cd83 vs 972484c7-ca9c-4090-9744-98a1d4e6cd83"
+    "detail": "b8e5c68c-2467-411f-ba6a-3c44bee854c2 vs b8e5c68c-2467-411f-ba6a-3c44bee854c2"
   },
   {
     "section": 28,

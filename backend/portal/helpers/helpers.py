@@ -189,4 +189,16 @@ def money_str(value) -> str:
 
 
 def iso(value):
-    return value.isoformat() if value else None
+    """
+    ISO 8601, with the zone stated for a timestamp.
+
+    Timestamps are stored as naive UTC (see models.base.utcnow). Serialised
+    without an offset, a browser parses them as *local* time, so every time of
+    day showed five and a half hours early in India. A date carries no time and
+    is passed through untouched.
+    """
+    if not value:
+        return None
+    if isinstance(value, datetime) and value.tzinfo is None:
+        return value.isoformat() + 'Z'
+    return value.isoformat()

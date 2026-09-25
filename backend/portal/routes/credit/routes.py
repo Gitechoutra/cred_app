@@ -433,10 +433,18 @@ class CreditApplicationList(Resource):
                 args['monthly_income'], 'monthly_income',
                 minimum=1, maximum=100000000,
             )
-            outflow = validate_amount(
-                args['existing_emi_outflow'], 'existing_emi_outflow',
-                minimum=0, maximum=100000000,
-            ) if args.get('existing_emi_outflow') not in (None, '') else 0
+            # Zero is a real answer here - most applicants have no EMIs - but
+            # validate_amount refuses anything not above zero, whatever minimum
+            # it is given. So a declared zero is taken as zero before it gets
+            # there; without this, "I have no EMIs" could not be submitted.
+            raw_outflow = args.get('existing_emi_outflow')
+            if raw_outflow in (None, '') or str(raw_outflow).strip() in ('0', '0.0', '0.00'):
+                outflow = 0
+            else:
+                outflow = validate_amount(
+                    raw_outflow, 'existing_emi_outflow',
+                    minimum=0, maximum=100000000,
+                )
             requested = validate_amount(
                 args['requested_limit'], 'requested_limit',
                 minimum=1, maximum=100000000,

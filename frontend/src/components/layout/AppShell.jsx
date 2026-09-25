@@ -6,6 +6,7 @@ import { cx } from '../ui';
 import { BottomNav, ProfileMenu } from './BottomNav';
 import { useAuth } from '../../context/AuthContext';
 import { useProfile } from '../../hooks/useProfile';
+import { useBack } from '../../hooks/useNavHistory';
 import { initials } from '../../utils/format';
 
 /**
@@ -206,19 +207,26 @@ function greeting() {
  * `back` is optional here in a way it was not on mobile - a web app has
  * persistent navigation, so a back affordance is only offered on the drill-down
  * pages where it genuinely helps.
+ *
+ * `back` always means "the screen the user came from". A string is not where
+ * the button goes - it is the parent to fall back to when there is no earlier
+ * screen in this tab, because the page was opened from a link. A hard-coded
+ * destination pushes a new history entry, and the browser's own back button
+ * then returns to the page just left; that is how two screens end up in a loop.
+ * A function is for in-page steps that are not history entries.
  */
-export function PageHeader({ title, subtitle, back, action }) {
-  const navigate = useNavigate();
+export function PageHeader({ title, subtitle, back, action, eyebrow }) {
+  const goBack = useBack(typeof back === 'string' ? back : '/home');
 
   return (
     <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
-      <div className="flex min-w-0 items-start gap-3">
+      <div className="flex min-w-0 flex-1 items-start gap-3">
         {back && (
           <button
             type="button"
-            onClick={() => (typeof back === 'string' ? navigate(back) : back === true ? navigate(-1) : back())}
+            onClick={() => (typeof back === 'function' ? back() : goBack())}
             aria-label="Go back"
-            className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-canvas text-ink transition hover:bg-mist"
+            className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-line bg-canvas/80 text-ink shadow-sm backdrop-blur transition-all duration-base ease-glide hover:-translate-x-0.5 hover:bg-mist active:scale-95"
           >
             <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none">
               <path
@@ -233,7 +241,16 @@ export function PageHeader({ title, subtitle, back, action }) {
         )}
 
         <div className="min-w-0">
-          <h1 className="truncate text-2xl font-bold tracking-tight text-ink">{title}</h1>
+          {eyebrow && (
+            <p className="text-2xs font-semibold uppercase tracking-[0.14em] text-mint-700">
+              {eyebrow}
+            </p>
+          )}
+          {title && (
+            <h1 className="truncate text-xl font-bold tracking-tight text-ink sm:text-2xl">
+              {title}
+            </h1>
+          )}
           {subtitle && <p className="mt-0.5 text-sm text-slate">{subtitle}</p>}
         </div>
       </div>

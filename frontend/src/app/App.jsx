@@ -28,6 +28,7 @@ import CreditStatus from '../pages/credit/CreditStatus';
 import CreditPurpose from '../pages/credit/CreditPurpose';
 import CreditActivate from '../pages/credit/CreditActivate';
 import CreditPayBill from '../pages/credit/CreditPayBill';
+import CreditSpend from '../pages/credit/CreditSpend';
 import {
   CreditTransactionList, CreditTransactionDetail,
 } from '../pages/credit/CreditTransactions';
@@ -169,6 +170,7 @@ export default function App() {
       <Route path="/credit/status/:applicationId" element={<RequireAuth><Shell><CreditStatus /></Shell></RequireAuth>} />
       <Route path="/credit/purpose" element={<RequireAuth><Shell><CreditPurpose /></Shell></RequireAuth>} />
       <Route path="/credit/activate" element={<RequireAuth><Shell><CreditActivate /></Shell></RequireAuth>} />
+      <Route path="/credit/spend" element={<RequireAuth><Shell><CreditSpend /></Shell></RequireAuth>} />
       <Route path="/credit/pay" element={<RequireAuth><Shell><CreditPayBill /></Shell></RequireAuth>} />
       <Route path="/credit/transactions" element={<RequireAuth><Shell><CreditTransactionList /></Shell></RequireAuth>} />
       <Route path="/credit/transactions/:transactionId" element={<RequireAuth><Shell><CreditTransactionDetail /></Shell></RequireAuth>} />

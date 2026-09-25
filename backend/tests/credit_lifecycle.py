@@ -977,6 +977,23 @@ def main():
     check('a purpose option returns every field the UI reads',
           bool(purposes) and not missing, f'missing: {", ".join(missing)}')
 
+    # ── 13b. Applying with no existing EMIs ───────────────────────────────
+    # "I have no EMIs" is the commonest answer, and a declared zero used to be
+    # refused as "Amount must be greater than zero".
+    print('\n[13b] Applying with no existing EMIs')
+    _, zero_emi = make_user('Credit No Emis')
+    if zero_emi:
+        response = post('/credit/applications', {
+            'employment_type': 'SALARIED', 'monthly_income': 30000,
+            'existing_emi_outflow': 0,
+        }, token=zero_emi)
+        check('an application declaring zero EMIs is accepted',
+              response.status_code == 201, response.text[:200])
+        check('the zero is recorded as zero',
+              data_of(response).get('existing_emi_outflow') == 0)
+    else:
+        check('zero-EMI application check ran', False, 'user unavailable')
+
     # ── 14. Tier caps on an override ──────────────────────────────────────
     print('\n[14] A limit override is still bounded by the KYC tier')
     _, second = make_user('Credit Capped')

@@ -58,7 +58,12 @@ export default function EmiPay() {
   const inFlight = useRef(false);
   const mounted = useRef(true);
 
-  useEffect(() => () => { mounted.current = false; }, []);
+  // Re-armed on every mount: StrictMode remounts in development, and a ref
+  // only ever cleared left the screen unable to show a payment's result.
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const isUpi = UPI_MODES.includes(mode);
   const payable = amount ? Number(amount) : Number(emi?.emi_amount || 0);

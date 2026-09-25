@@ -37,7 +37,12 @@ export default function ScanPay() {
 
   const inFlight = useRef(false);
   const mounted = useRef(true);
-  useEffect(() => () => { mounted.current = false; }, []);
+  // Re-armed on every mount: StrictMode remounts in development, and a ref
+  // only ever cleared left the screen unable to show a payment's result.
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const decode = useCallback(async (raw) => {
     setBusy(true);

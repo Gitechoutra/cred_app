@@ -249,11 +249,17 @@ export const api = {
   del: (path) => request(path, { method: 'DELETE' }),
   upload: (path, form) => request(path, { method: 'POST', form }),
 
-  /** POST that moves money - always carries a fresh idempotency key. */
-  pay: (path, body) => request(path, {
+  /**
+   * POST that moves money - always carries an idempotency key.
+   *
+   * A caller that may retry passes its own `key` and keeps it for the whole
+   * attempt. Minting a fresh one per call made a retry after a dropped response
+   * a *second* charge: the server had no way to know it was the same purchase.
+   */
+  pay: (path, body, key) => request(path, {
     method: 'POST',
     body,
-    idempotent: newIdempotencyKey(),
+    idempotent: key || newIdempotencyKey(),
   }),
 };
 
@@ -302,7 +308,7 @@ export const endpoints = {
     eligibility: () => api.get('/credit/eligibility'),
     applications: () => api.get('/credit/applications'),
     apply: (data) => api.post('/credit/applications', data),
-    application: (id) => api.get(`/credit/applications/${id}`),
+    application: (id, opts = {}) => api.get(`/credit/applications/${id}`, opts),
     withdraw: (id) => api.post(`/credit/applications/${id}/withdraw`),
 
     // -- The account ----------------------------------------------------
@@ -316,16 +322,27 @@ export const endpoints = {
     unblock: () => api.post('/credit/account/unblock'),
 
     // -- Money ----------------------------------------------------------
-    // Both go through api.pay, so each carries a fresh idempotency key. The
-    // server answers a replay with the original transaction rather than
-    // charging again.
-    purchase: (data) => api.pay('/credit/purchases', data),
-    payBill: (data) => api.pay('/credit/payments', data),
+    // Both go through api.pay. The screen passes the key it holds for the
+    // attempt, so a retry after a network failure replays the same purchase or
+    // payment - the server answers with the original instead of charging again.
+    purchase: (data, key) => api.pay('/credit/purchases', data, key),
 
-    transactions: (page = 1, type = '') => api.get(
-      `/credit/transactions?page=${page}${type ? `&type=${type}` : ''}`,
+    // A bill payment is opened, then settled by the gateway's own record of it
+    // - never by this client saying it paid. verify and cancel both ask the
+    // gateway before changing anything.
+    billMethods: () => api.get('/credit/payments/methods'),
+    payBill: (data, key) => api.pay('/credit/payments', data, key),
+    verifyBill: (id, data = {}, opts = {}) => api.post(
+      `/credit/payments/${id}/verify`, data, opts,
     ),
-    transaction: (id) => api.get(`/credit/transactions/${id}`),
+    cancelBill: (id) => api.post(`/credit/payments/${id}/cancel`),
+
+    transactions: (page = 1, type = '', status = '', opts = {}) => api.get(
+      `/credit/transactions?page=${page}`
+        + `${type ? `&type=${type}` : ''}${status ? `&status=${status}` : ''}`,
+      opts,
+    ),
+    transaction: (id, opts = {}) => api.get(`/credit/transactions/${id}`, opts),
 
     statements: (page = 1) => api.get(`/credit/statements?page=${page}`),
     currentStatement: () => api.get('/credit/statements/current'),
