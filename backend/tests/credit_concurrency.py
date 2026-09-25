@@ -280,6 +280,67 @@ def main():
     check('each purchase recorded a distinct running balance',
           balances == [1000, 2000, 3000, 4000, 5000, 6000], str(balances))
 
+    # ── 4. Bill payments under contention ─────────────────────────────────
+    #
+    # Two defences, both only visible under concurrency. Opening: two taps on
+    # Pay with different keys must not open two orders, or a payer who
+    # completes both is charged twice. Settling: the browser, the webhook and
+    # the poller all verify the same payment, and credit must come back once.
+    print('\n[4] Bill payments: racing opens, and a verify storm')
+    methods = data_of(get('/credit/payments/methods', token_three))
+    rail = next((m['provider'] for m in methods.get('permitted', [])
+                 if m['mode'] == 'NETBANKING'), None)
+    if rail != 'SANDBOX':
+        check('bill payment races need the simulated rail (skipped)', True)
+        return finish()
+
+    def open_payment(_):
+        return post('/credit/payments',
+                    {'amount': 1000, 'payment_method': 'NETBANKING'},
+                    token=token_three, idem=uuid.uuid4().hex,
+                    retry_throttle=False)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = [f.result() for f in [pool.submit(open_payment, i) for i in range(4)]]
+
+    opened = [r for r in results if r.status_code == 201]
+    check('exactly one of four racing payments opened', len(opened) == 1,
+          f'statuses {sorted(r.status_code for r in results)}')
+    check('the others were refused as already in progress',
+          sum(r.status_code == 409 for r in results) == 3,
+          f'statuses {sorted(r.status_code for r in results)}')
+    if not opened:
+        return finish()
+
+    payment_id = data_of(opened[0])['transaction']['credit_transaction_id']
+
+    def verify(_):
+        return post(f'/credit/payments/{payment_id}/verify',
+                    token=token_three, retry_throttle=False)
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = [f.result() for f in [pool.submit(verify, i) for i in range(6)]]
+
+    check('every concurrent verify answered',
+          all(r.status_code == 200 for r in results),
+          f'statuses {sorted(r.status_code for r in results)}')
+    check('every verify reports the same settled payment',
+          {data_of(r)['transaction']['status'] for r in results} == {'SUCCEEDED'})
+
+    account = data_of(get('/credit/account', token_three))
+    check('credit was restored once, not six times',
+          account['current_outstanding'] == 5000
+          and account['available_credit'] == 25000,
+          f"outstanding {account['current_outstanding']} "
+          f"available {account['available_credit']}")
+    payments = get('/credit/transactions?type=PAYMENT&status=SUCCEEDED',
+                   token_three).json().get('data') or []
+    check('exactly one settled payment exists', len(payments) == 1,
+          f'{len(payments)} rows')
+
+    ok, account = invariant_holds(token_three)
+    check('the invariant survived the verify storm', ok, str(account))
+
     return finish()
 
 

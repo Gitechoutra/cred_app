@@ -73,6 +73,11 @@ class CreditStatements(db.Model, TimestampMixin, AppendOnlyMixin):
     #: The percentage used, recorded so an old statement still explains its own
     #: minimum after the setting changes.
     minimum_due_percent = db.Column(db.Numeric(5, 2), nullable=False)
+    #: The limit and the credit available when the cycle closed. Printed on the
+    #: statement, and stored because both move the moment anything is spent or
+    #: paid - an issued statement must keep saying what it said.
+    credit_limit = db.Column(db.Numeric(12, 2), nullable=True)
+    available_credit = db.Column(db.Numeric(12, 2), nullable=True)
 
     # -- What has happened since -------------------------------------------
     amount_paid = db.Column(db.Numeric(12, 2), default=0, nullable=False)

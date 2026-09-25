@@ -399,10 +399,21 @@ def main():
     check('a purchase without an idempotency key is refused',
           response.status_code == 400, f'got {response.status_code}')
 
+    check('the transaction carries a quotable reference',
+          str(body['transaction'].get('reference', '')).startswith('CCT'),
+          str(body['transaction'].get('reference')))
+    check('available credit after the purchase is recorded on it',
+          body['transaction'].get('available_after') == 28000,
+          str(body['transaction'].get('available_after')))
+    check('the purchase shows the purpose of the credit line',
+          body['transaction'].get('credit_purpose') == 'Education',
+          str(body['transaction'].get('credit_purpose')))
+
     # Over the remaining limit: 28,000 available, 30,000 asked.
+    decline_key = uuid.uuid4().hex
     response = post('/credit/purchases', {
         'amount': 30000, 'merchant_name': 'Too Expensive',
-    }, token=token, idem=uuid.uuid4().hex)
+    }, token=token, idem=decline_key)
     check('a purchase over the available limit is refused',
           response.status_code == 400, f'got {response.status_code}')
     check('the refusal names the available amount, not a gateway error',
@@ -410,7 +421,30 @@ def main():
           str(error_of(response).get('code')))
     check('the refusal tells the user how to fix it',
           bool(error_of(response).get('recovery')))
+    declined = (error_of(response).get('details') or {}).get('transaction') or {}
+    check('the decline is recorded as a FAILED transaction',
+          declined.get('status') == 'FAILED', str(declined.get('status')))
+    check('the declined transaction has a reference to quote',
+          str(declined.get('reference', '')).startswith('CCT'))
+    check('the declined transaction says what was still available',
+          declined.get('available_after') == 28000,
+          str(declined.get('available_after')))
     assert_invariant(token, 'after a refused purchase')
+
+    # The same attempt replayed - a retry after a dropped response. It must be
+    # declined again, not quietly re-tried.
+    response = post('/credit/purchases', {
+        'amount': 30000, 'merchant_name': 'Too Expensive',
+    }, token=token, idem=decline_key)
+    check('a replayed declined key is declined again',
+          response.status_code == 400
+          and error_of(response).get('code') == 'INSUFFICIENT_CREDIT',
+          f'got {response.status_code} {error_of(response).get("code")}')
+    check('the replay names the same declined transaction',
+          ((error_of(response).get('details') or {}).get('transaction') or {})
+          .get('credit_transaction_id') == declined.get('credit_transaction_id'))
+    check('nothing was charged by the decline or its replay',
+          data_of(get('/credit/account', token)).get('current_outstanding') == 12000)
 
     # A client cannot set its own balance. These fields are not in any parser,
     # so they are ignored rather than honoured - which is what this asserts.
@@ -447,10 +481,25 @@ def main():
     response = get('/credit/transactions', token)
     history = response.json().get('data') or []
     check('history is readable', response.status_code == 200)
-    check('both purchases are in history', len(history) == 2, str(len(history)))
+    settled = [h for h in history if h['status'] == 'SUCCEEDED']
+    check('both purchases are in history', len(settled) == 2, str(len(settled)))
     check('newest first',
-          history[0]['amount'] == 100 and history[1]['amount'] == 12000,
-          str([h['amount'] for h in history]))
+          settled[0]['amount'] == 100 and settled[1]['amount'] == 12000,
+          str([h['amount'] for h in settled]))
+    # Two refused before activation, and one over the limit.
+    failed = [h for h in history if h['status'] == 'FAILED']
+    check('declined attempts appear in history too', len(failed) == 3,
+          str(len(failed)))
+    check('a declined attempt says why',
+          all(h.get('failure_reason') for h in failed))
+
+    response = get('/credit/transactions?status=FAILED', token)
+    check('filtering by status works',
+          len(response.json().get('data') or []) == 3,
+          str(len(response.json().get('data') or [])))
+    response = get('/credit/transactions?status=NONSENSE', token)
+    check('an unknown status filter is refused', response.status_code == 400,
+          f'got {response.status_code}')
 
     response = get('/credit/transactions?type=PAYMENT', token)
     check('filtering by type works',
@@ -502,6 +551,16 @@ def main():
     check('the statement lists what it billed',
           len(detail.get('transactions', [])) == 2,
           str(len(detail.get('transactions', []))))
+    check('declined attempts are not billed',
+          all(t['status'] == 'SUCCEEDED' for t in detail.get('transactions', [])))
+    check('the statement records the limit at the close of the cycle',
+          detail.get('credit_limit') == 40000, str(detail.get('credit_limit')))
+    check('the statement records the available credit at the close',
+          detail.get('available_credit') == 27900,
+          str(detail.get('available_credit')))
+    check('total amount due is the closing balance',
+          detail.get('total_amount_due') == 12100,
+          str(detail.get('total_amount_due')))
 
     current = data_of(get('/credit/statements/current', token))
     check('unbilled spend is zero once everything is billed',
@@ -512,11 +571,23 @@ def main():
           str(current.get('total_outstanding')))
 
     # ── 10. Bill payment restores credit ──────────────────────────────────
-    print('\n[10] Bill payment and credit restored')
+    print('\n[10] Bill payment: verified at the gateway, then credit restored')
     before = data_of(get('/credit/account', token))
 
+    methods = data_of(get('/credit/payments/methods', token))
+    offered = {m['mode'] for m in methods.get('permitted', [])}
+    check('UPI, UPI ID, net banking and debit card are offered',
+          {'UPI_INTENT', 'UPI_COLLECT', 'NETBANKING', 'DEBIT_CARD'} <= offered,
+          str(offered))
+    check('a credit card is named as not permitted, with a reason',
+          any(p['mode'] == 'CREDIT_CARD' and p.get('reason')
+              for p in methods.get('prohibited', [])))
+    card_rail = next((m['provider'] for m in methods.get('permitted', [])
+                      if m['mode'] == 'NETBANKING'), None)
+    simulated = card_rail == 'SANDBOX'
+
     response = post('/credit/payments', {
-        'amount': 99999, 'payment_method': 'UPI',
+        'amount': 99999, 'payment_method': 'NETBANKING',
     }, token=token, idem=uuid.uuid4().hex)
     check('an overpayment is refused', response.status_code == 400,
           f'got {response.status_code}')
@@ -532,37 +603,103 @@ def main():
 
     pay_key = uuid.uuid4().hex
     response = post('/credit/payments', {
-        'amount': 5000, 'payment_method': 'UPI',
+        'amount': 5000, 'payment_method': 'NETBANKING',
+        'statement_id': statement['statement_id'],
     }, token=token, idem=pay_key)
-    payment = data_of(response)
-    if not check('payment accepted', response.status_code == 201,
+    opened = data_of(response)
+    if not check('payment opened', response.status_code == 201,
                  response.text[:250]):
         return finish()
+    payment = opened['transaction']
 
-    check('the outstanding balance fell by the amount paid',
-          payment['account']['current_outstanding'] == 7100,
-          str(payment['account']['current_outstanding']))
-    check('credit was restored by the amount paid',
-          payment['account']['available_credit']
-          == before['available_credit'] + 5000,
-          f"{before['available_credit']} -> "
-          f"{payment['account']['available_credit']}")
-    check('the response says how much credit came back',
-          payment.get('credit_restored') == 5000,
-          str(payment.get('credit_restored')))
-    check('recorded as a credit, not a debit',
-          payment['transaction']['direction'] == 'CREDIT')
-    assert_invariant(token, 'after a partial payment')
+    # The defect this section exists for: credit used to come back the moment
+    # the client said it had paid.
+    check('the payment waits in PROCESSING for the gateway',
+          payment['status'] == 'PROCESSING', str(payment['status']))
+    now = data_of(get('/credit/account', token))
+    check('no credit is restored before the gateway confirms',
+          now['available_credit'] == before['available_credit']
+          and now['current_outstanding'] == 12100,
+          f"available {now['available_credit']} "
+          f"outstanding {now['current_outstanding']}")
+    check('nothing is reported as restored yet',
+          opened.get('credit_restored') == 0, str(opened.get('credit_restored')))
+    check('checkout details are returned', bool(opened.get('checkout')))
+    check('the pending payment is visible to the pay screen',
+          (data_of(get('/credit/statements/current', token))
+           .get('pending_payment') or {})
+          .get('credit_transaction_id') == payment['credit_transaction_id'])
+    assert_invariant(token, 'while a payment is processing')
 
     response = post('/credit/payments', {
-        'amount': 5000, 'payment_method': 'UPI',
+        'amount': 1000, 'payment_method': 'NETBANKING',
+    }, token=token, idem=uuid.uuid4().hex)
+    check('a second payment is refused while one is processing',
+          response.status_code == 409, f'got {response.status_code}')
+    check('the refusal names the payment in flight',
+          ((error_of(response).get('details') or {}).get('transaction') or {})
+          .get('credit_transaction_id') == payment['credit_transaction_id'])
+
+    response = post('/credit/payments', {
+        'amount': 5000, 'payment_method': 'NETBANKING',
     }, token=token, idem=pay_key)
-    replay = data_of(response)
+    check('a replayed payment key returns the same payment',
+          response.status_code == 200
+          and data_of(response)['transaction']['credit_transaction_id']
+          == payment['credit_transaction_id'],
+          f'got {response.status_code}')
+
+    pid = payment['credit_transaction_id']
+    response = post(f'/credit/payments/{pid}/verify',
+                    {'razorpay_order_id': 'order_someone_elses'}, token=token)
+    check('a verify naming a different order is refused',
+          response.status_code == 400, f'got {response.status_code}')
+
+    _, stranger = make_user('Payment Stranger')
+    if stranger:
+        check("another user cannot verify this user's payment",
+              post(f'/credit/payments/{pid}/verify', token=stranger)
+              .status_code == 404)
+
+    if not simulated:
+        check('gateway-driven checks need the simulated rail (skipped)', True)
+        return finish()
+
+    response = post(f'/credit/payments/{pid}/verify', token=token)
+    settled = data_of(response)
+    check('verification settles the payment',
+          response.status_code == 200
+          and settled['transaction']['status'] == 'SUCCEEDED',
+          response.text[:250])
+    check('the outstanding balance fell by the amount paid',
+          settled['account']['current_outstanding'] == 7100,
+          str(settled['account']['current_outstanding']))
+    check('credit was restored by the amount paid',
+          settled['account']['available_credit']
+          == before['available_credit'] + 5000,
+          f"{before['available_credit']} -> "
+          f"{settled['account']['available_credit']}")
+    check('the response says how much credit came back',
+          settled.get('credit_restored') == 5000,
+          str(settled.get('credit_restored')))
+    check('recorded as a credit, not a debit',
+          settled['transaction']['direction'] == 'CREDIT')
+    check('available credit after the payment is recorded on it',
+          settled['transaction'].get('available_after') == 32900,
+          str(settled['transaction'].get('available_after')))
+    check('the method it was paid by is recorded',
+          settled['transaction'].get('payment_method') == 'NETBANKING')
+    assert_invariant(token, 'after a verified payment')
+
+    response = post(f'/credit/payments/{pid}/verify', token=token)
+    check('verifying again does not restore credit twice',
+          data_of(response).get('account', {}).get('current_outstanding') == 7100)
+    response = post('/credit/payments', {
+        'amount': 5000, 'payment_method': 'NETBANKING',
+    }, token=token, idem=pay_key)
     check('a replayed payment key does not collect twice',
           response.status_code == 200
-          and replay['account']['current_outstanding'] == 7100,
-          f"{response.status_code} outstanding "
-          f"{replay.get('account', {}).get('current_outstanding')}")
+          and data_of(response)['account']['current_outstanding'] == 7100)
     assert_invariant(token, 'after a replayed payment')
 
     statement_now = data_of(
@@ -578,12 +715,72 @@ def main():
           statement_now.get('minimum_outstanding') == 0,
           str(statement_now.get('minimum_outstanding')))
 
-    # Settle the rest.
-    response = post('/credit/payments', {
-        'amount': 7100, 'payment_method': 'NETBANKING',
-    }, token=token, idem=uuid.uuid4().hex)
+    # -- The ways a payment does not go through -------------------------------
+    def open_payment(amount, outcome, method='NETBANKING'):
+        return post('/credit/payments', {
+            'amount': amount, 'payment_method': method,
+            'sandbox_outcome': outcome,
+        }, token=token, idem=uuid.uuid4().hex)
+
+    response = open_payment(1000, 'DECLINE')
+    declined_id = data_of(response).get('transaction', {}).get('credit_transaction_id')
+    response = post(f'/credit/payments/{declined_id}/verify', token=token)
+    outcome = data_of(response).get('transaction', {})
+    check('a payment the bank declines ends FAILED',
+          outcome.get('status') == 'FAILED', str(outcome.get('status')))
+    check('a failed payment says why', bool(outcome.get('failure_reason')))
+    check('a failed payment restores no credit',
+          data_of(get('/credit/account', token))['current_outstanding'] == 7100)
+
+    response = open_payment(1000, 'ABANDON')
+    abandoned_id = data_of(response).get('transaction', {}).get('credit_transaction_id')
+    response = post(f'/credit/payments/{abandoned_id}/verify', token=token)
+    check('an unpaid checkout stays PROCESSING on verify',
+          data_of(response).get('transaction', {}).get('status') == 'PROCESSING')
+    response = post(f'/credit/payments/{abandoned_id}/cancel', token=token)
+    check('cancelling an unpaid checkout ends CANCELLED',
+          data_of(response).get('transaction', {}).get('status') == 'CANCELLED',
+          response.text[:200])
+    check('a cancelled payment restores no credit',
+          data_of(get('/credit/account', token))['current_outstanding'] == 7100)
+
+    response = open_payment(1000, 'TIMEOUT')
+    check('a gateway timeout is reported as one',
+          response.status_code == 504
+          and error_of(response).get('code') == 'GATEWAY_TIMEOUT',
+          f'got {response.status_code} {error_of(response).get("code")}')
+    check('the timed-out attempt is recorded as FAILED',
+          ((error_of(response).get('details') or {}).get('transaction') or {})
+          .get('status') == 'FAILED')
+    assert_invariant(token, 'after failed, cancelled and timed-out payments')
+
+    # UPI, through whichever rail is live.
+    response = open_payment(500, None, method='UPI_INTENT')
+    upi = data_of(response)
+    upi_id = upi.get('transaction', {}).get('credit_transaction_id')
+    check('a UPI payment opens', response.status_code == 201, response.text[:200])
+    if upi.get('checkout', {}).get('provider') == 'RAZORPAY':
+        check('Razorpay checkout gets a key and an order',
+              bool(upi['checkout'].get('key'))
+              and bool(upi['checkout'].get('order_id')))
+        response = post(f'/credit/payments/{upi_id}/cancel', token=token)
+        check('an unpaid Razorpay order can be cancelled',
+              data_of(response).get('transaction', {}).get('status') == 'CANCELLED',
+              response.text[:200])
+    else:
+        response = post(f'/credit/payments/{upi_id}/verify', token=token)
+        check('a simulated UPI payment settles',
+              data_of(response).get('transaction', {}).get('status') == 'SUCCEEDED')
+
+    remaining = data_of(get('/credit/account', token))['current_outstanding']
+    response = open_payment(remaining, None)
+    response = post(
+        f"/credit/payments/{data_of(response)['transaction']['credit_transaction_id']}/verify",
+        token=token,
+    )
     final = data_of(response)
-    check('the balance can be cleared in full', response.status_code == 201,
+    check('the balance can be cleared in full',
+          final.get('transaction', {}).get('status') == 'SUCCEEDED',
           response.text[:200])
     check('nothing outstanding once cleared',
           final['account']['current_outstanding'] == 0,
@@ -606,6 +803,11 @@ def main():
     check('paying a settled line is refused', response.status_code == 409,
           f'got {response.status_code}')
 
+    payments = get('/credit/transactions?type=PAYMENT', token).json().get('data') or []
+    check('every payment attempt is in history with its outcome',
+          {'SUCCEEDED', 'FAILED', 'CANCELLED'} <= {p['status'] for p in payments},
+          str({p['status'] for p in payments}))
+
     # ── 11. Blocking ──────────────────────────────────────────────────────
     print('\n[11] Blocking')
     response = post('/credit/account/block', {'reason': 'Lost my phone'},
@@ -627,6 +829,58 @@ def main():
               'amount': 100, 'merchant_name': 'Unblocked Shop',
           }, token=token, idem=uuid.uuid4().hex).status_code == 201)
     assert_invariant(token, 'after blocking and unblocking')
+
+    # ── 11b. Refunds ──────────────────────────────────────────────────────
+    print('\n[11b] Refunds')
+    response = post('/credit/purchases', {
+        'amount': 2000, 'merchant_name': 'Returnable Goods',
+        'merchant_category': 'SHOPPING',
+    }, token=token, idem=uuid.uuid4().hex)
+    bought = data_of(response).get('transaction', {})
+    bought_id = bought.get('credit_transaction_id')
+    before_refund = data_of(get('/credit/account', token))
+
+    check('a cardholder cannot refund their own purchase',
+          post(f'/admin/credit/transactions/{bought_id}/refund',
+               {'reason': 'mine', 'amount': 2000}, token=token)
+          .status_code in (401, 403))
+    check('a refund without a reason is refused',
+          post(f'/admin/credit/transactions/{bought_id}/refund',
+               {'reason': ''}, token=admin).status_code == 400)
+
+    response = post(f'/admin/credit/transactions/{bought_id}/refund',
+                    {'reason': 'Merchant confirmed a partial return',
+                     'amount': 500},
+                    token=admin, idem=uuid.uuid4().hex)
+    check('a partial refund is issued', response.status_code == 200,
+          response.text[:200])
+    after = data_of(get('/credit/account', token))
+    check('a refund restores credit',
+          after['available_credit'] == before_refund['available_credit'] + 500,
+          f"{before_refund['available_credit']} -> {after['available_credit']}")
+    detail = data_of(get(f'/credit/transactions/{bought_id}', token))
+    check('the purchase shows how much was refunded',
+          detail.get('refunded_amount') == 500, str(detail.get('refunded_amount')))
+    check('a partly refunded purchase is still SUCCEEDED',
+          detail.get('status') == 'SUCCEEDED', str(detail.get('status')))
+
+    response = post(f'/admin/credit/transactions/{bought_id}/refund',
+                    {'reason': 'Remainder returned'}, token=admin,
+                    idem=uuid.uuid4().hex)
+    check('the remainder can be refunded', response.status_code == 200,
+          response.text[:200])
+    detail = data_of(get(f'/credit/transactions/{bought_id}', token))
+    check('a fully refunded purchase reads as REVERSED',
+          detail.get('status') == 'REVERSED', str(detail.get('status')))
+    check('a purchase cannot be refunded past its amount',
+          post(f'/admin/credit/transactions/{bought_id}/refund',
+               {'reason': 'again', 'amount': 1}, token=admin,
+               idem=uuid.uuid4().hex).status_code in (400, 409))
+    refunds = get('/credit/transactions?type=REFUND', token).json().get('data') or []
+    check('refunds appear in history as credits',
+          len(refunds) == 2 and all(r['direction'] == 'CREDIT' for r in refunds),
+          str(len(refunds)))
+    assert_invariant(token, 'after refunds')
 
     # ── 12. Authorization ─────────────────────────────────────────────────
     print('\n[12] Authorization')
@@ -672,7 +926,7 @@ def main():
         '/credit/statements/current': (
             get('/credit/statements/current', token),
             ['account', 'latest_statement', 'unbilled_spend',
-             'total_outstanding', 'payment_methods'],
+             'total_outstanding', 'payment_methods', 'pending_payment'],
         ),
         f"/credit/statements/{statement['statement_id']}": (
             get(f"/credit/statements/{statement['statement_id']}", token),
@@ -680,6 +934,7 @@ def main():
              'statement_date', 'due_date', 'opening_balance', 'total_purchases',
              'total_payments', 'total_refunds', 'total_fees', 'closing_balance',
              'minimum_due', 'minimum_due_percent', 'amount_paid',
+             'total_amount_due', 'credit_limit', 'available_credit',
              'amount_outstanding', 'minimum_outstanding', 'status',
              'late_fee_charged', 'transactions'],
         ),
@@ -702,11 +957,19 @@ def main():
     txn_fields = ['credit_transaction_id', 'transaction_id', 'type', 'status',
                   'amount', 'direction', 'balance_after', 'merchant_name',
                   'merchant_category', 'description', 'statement_id',
-                  'is_test', 'created_on', 'settled_at']
+                  'is_test', 'created_on', 'settled_at', 'reference',
+                  'available_after', 'credit_purpose', 'failure_reason',
+                  'refunded_amount', 'payment_method_label', 'is_terminal']
     rows = get('/credit/transactions', token).json().get('data') or []
     missing = [f for f in txn_fields if rows and f not in rows[0]]
     check('a credit transaction returns every field the UI reads',
           bool(rows) and not missing, f'missing: {", ".join(missing)}')
+
+    methods = data_of(get('/credit/payments/methods', token))
+    missing = [f for f in ('permitted', 'prohibited', 'minimum_amount', 'upi',
+                           'sandbox', 'prefill') if f not in methods]
+    check('/credit/payments/methods returns every field the UI reads',
+          not missing, f'missing: {", ".join(missing)}')
 
     purposes = data_of(get('/credit/account/purpose', token)).get('purposes', [])
     missing = [f for f in ('value', 'label', 'requires_note')

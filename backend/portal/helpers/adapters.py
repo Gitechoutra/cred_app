@@ -51,6 +51,11 @@ class Simulate:
     #: processing state entirely.
     AUTH_DECLINE = 'SIMAUTHDECL'
 
+    #: The payer opened checkout and left without attempting anything. Without
+    #: this the sandbox reports every order PAID, so cancelling a sandbox
+    #: payment would settle it instead - the cancel path could not be exercised.
+    ABANDON = 'SIMABANDON'
+
 
 def _simulating(reference: str, directive: str) -> bool:
     return bool(reference) and directive in str(reference).upper()
@@ -73,6 +78,16 @@ def _use_sandbox() -> bool:
         )
         return True
     return False
+
+
+def card_gateway_provider() -> str:
+    """
+    Which rail a netbanking or debit-card collection would use right now.
+
+    Public so a caller can tell the payer in advance that a payment will be
+    simulated, rather than finding out from the order it gets back.
+    """
+    return 'SANDBOX' if _use_sandbox() else 'CASHFREE'
 
 
 def _ref(prefix: str) -> str:
@@ -244,6 +259,8 @@ def get_payment_status(order_id: str) -> dict:
                 'failure_code': 'CARD_DECLINED',
                 'failure_reason': 'Issuer declined the transaction.',
             }
+        if _simulating(order_id, Simulate.ABANDON):
+            return {'ok': True, 'status': 'ACTIVE', 'paid': False}
         return {
             'ok': True, 'status': 'PAID', 'paid': True,
             'gateway_payment_id': _ref('cf_pay_sbx'),
@@ -500,12 +517,19 @@ def get_razorpay_payment_status(*, order_id: str, payment_id: str = None) -> dic
     it as paid would show a success screen for a payment that later reverses.
     """
     if upi_provider() == 'SANDBOX':
-        if _simulating(order_id, Simulate.DECLINE):
+        if (
+            _simulating(order_id, Simulate.DECLINE)
+            or _simulating(order_id, Simulate.AUTH_DECLINE)
+        ):
             return {
                 'ok': True, 'status': 'FAILED', 'paid': False,
                 'failure_code': 'UPI_DECLINED',
                 'failure_reason': 'The payment was declined in your UPI app.',
             }
+        if _simulating(order_id, Simulate.ABANDON):
+            # The order exists and nobody paid it - the same answer Razorpay
+            # gives for an order with no payment attempts.
+            return {'ok': True, 'status': 'PENDING', 'paid': False}
         return {
             'ok': True, 'status': 'PAID', 'paid': True,
             'gateway_payment_id': _ref('pay_sbx'),

@@ -70,6 +70,18 @@ def _poll_pending_payments():
     return emi_engine.poll_pending_payments()
 
 
+def _poll_credit_bill_payments():
+    """
+    Settle card bill payments the browser never came back for.
+
+    Frequent, unlike the EMI poll: a payer is usually looking at the screen
+    waiting for their credit to come back, and every minute here is a minute
+    of spendable limit they have paid for and cannot use.
+    """
+    from portal.helpers import credit_engine
+    return credit_engine.poll_processing_bill_payments()
+
+
 # -- Credit line billing ---------------------------------------------------
 
 def _cut_credit_statements():
@@ -247,6 +259,8 @@ def init_scheduler(app):
         # -- Money: must run, and run often ------------------------------
         ('payment_status_poll', _poll_pending_payments,
          IntervalTrigger(minutes=15)),
+        ('credit_bill_payment_poll', _poll_credit_bill_payments,
+         IntervalTrigger(minutes=2)),
 
         # -- Outbox ------------------------------------------------------
         ('domain_event_drain', _drain_domain_events,

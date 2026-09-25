@@ -22,7 +22,7 @@ than creating a second one.
 from flask_jwt_extended import jwt_required
 from flask_restx import Resource, reqparse
 
-from portal.helpers import credit_engine, settings, test_cards
+from portal.helpers import adapters, credit_engine, settings, test_cards
 from portal.helpers.helpers import (
     ErrorCode, failure, idempotency_key, iso, paginated, success, to_float,
 )
@@ -38,7 +38,8 @@ from portal.models.credit_applications import (
 )
 from portal.models.credit_statements import CreditStatements
 from portal.models.credit_transactions import (
-    CreditTransactions, CreditTransactionType, MerchantCategory,
+    BillPaymentMethod, CreditTransactions, CreditTransactionStatus,
+    CreditTransactionType, MerchantCategory,
 )
 
 from . import logger, ns
@@ -72,6 +73,18 @@ pay_parser = reqparse.RequestParser()
 pay_parser.add_argument('amount', required=True, location='json')
 pay_parser.add_argument('payment_method', type=str, required=False, location='json')
 pay_parser.add_argument('statement_id', type=str, required=False, location='json')
+#: Development only: the outcome the simulated gateway should produce, so a
+#: decline, an abandoned checkout and a timeout can all be walked through.
+#: Ignored in production and whenever the rail is a real gateway.
+pay_parser.add_argument('sandbox_outcome', type=str, required=False, location='json')
+
+# Checkout hands these back in the browser. Accepted, never trusted: the
+# signature is verified server-side and the payment is then re-read from the
+# gateway before any credit is restored.
+verify_parser = reqparse.RequestParser()
+verify_parser.add_argument('razorpay_payment_id', type=str, required=False, location='json')
+verify_parser.add_argument('razorpay_order_id', type=str, required=False, location='json')
+verify_parser.add_argument('razorpay_signature', type=str, required=False, location='json')
 
 block_parser = reqparse.RequestParser()
 block_parser.add_argument('reason', type=str, required=False, location='json')
@@ -80,16 +93,22 @@ list_parser = reqparse.RequestParser()
 list_parser.add_argument('page', type=int, default=1, location='args')
 list_parser.add_argument('per_page', type=int, default=20, location='args')
 list_parser.add_argument('type', type=str, required=False, location='args')
+list_parser.add_argument('status', type=str, required=False, location='args')
 
 
-#: Instruments a card bill may be settled from. A credit line may not pay
-#: another credit line, which is why CREDIT_CARD is absent rather than merely
-#: undocumented.
-BILL_PAYMENT_METHODS = {
-    'UPI': 'UPI_VPA',
-    'NETBANKING': 'NETBANKING',
-    'DEBIT_CARD': 'DEBIT_CARD',
-    'AUTO_PAY': 'BANK_ACCOUNT_MANDATE',
+#: Names older clients send for a bill-payment method. 'UPI' predates the split
+#: into app and ID, and meant paying from an app.
+_METHOD_ALIASES = {'UPI': BillPaymentMethod.UPI_INTENT}
+
+#: One phrasing per outcome, shared by the pay, verify and cancel responses. The
+#: same state described three ways is how somebody ends up believing a payment
+#: succeeded on one screen and failed on another.
+_PAYMENT_OUTCOME = {
+    CreditTransactionStatus.PROCESSING: (
+        'Your bank has not confirmed this payment yet. Do not pay again - we '
+        'will update it automatically.'
+    ),
+    CreditTransactionStatus.CANCELLED: 'Payment cancelled. Nothing was charged.',
 }
 
 
@@ -169,23 +188,95 @@ def account_dict(account, detailed: bool = False) -> dict:
     return data
 
 
-def transaction_dict(txn: CreditTransactions) -> dict:
+def transaction_reference(txn: CreditTransactions) -> str:
+    """
+    The transaction ID a holder quotes to support.
+
+    Derived from the row's UUID rather than stored, so it is unique by
+    construction and the same on every screen, receipt and statement. The
+    prefix says what it is at a glance when read out over the phone.
+    """
+    return f'CCT{txn.credit_transaction_id.replace("-", "")[:12].upper()}'
+
+
+def transaction_dict(txn: CreditTransactions, *, purpose_label: str = None,
+                     refunded: float = None) -> dict:
     return {
         'credit_transaction_id': txn.credit_transaction_id,
+        'reference': transaction_reference(txn),
         'transaction_id': txn.transaction_id,
         'type': txn.transaction_type,
         'status': txn.status,
+        'is_terminal': txn.status in CreditTransactionStatus.TERMINAL,
         'amount': to_float(txn.amount),
         'direction': 'DEBIT' if txn.is_debit else 'CREDIT',
         'balance_after': to_float(txn.balance_after),
+        'available_after': to_float(txn.available_after),
         'merchant_name': txn.merchant_name,
         'merchant_category': txn.merchant_category,
         'description': txn.description,
+        # The purpose the line was opened for. Per account rather than per row,
+        # so it is passed in by a caller that already has the account loaded.
+        'credit_purpose': purpose_label,
         'statement_id': txn.statement_id,
         'is_test': txn.is_test,
+        'failure_code': txn.failure_code,
+        'failure_reason': txn.failure_reason,
+        'refunded_amount': refunded or 0.0,
+        'payment_method': txn.payment_method,
+        'payment_method_label': (
+            BillPaymentMethod.LABELS.get(txn.payment_method)
+            if txn.payment_method else None
+        ),
+        'gateway_provider': txn.gateway_provider,
+        'gateway_payment_id': txn.gateway_payment_id,
+        'gateway_reference': txn.gateway_reference,
         'created_on': iso(txn.created_on),
         'settled_at': iso(txn.settled_at),
     }
+
+
+def _refunded_totals(rows) -> dict:
+    """
+    How much of each purchase in `rows` has been refunded, in one query.
+
+    A purchase stays SUCCEEDED after a partial refund and moves to REVERSED only
+    when fully refunded, so the amount is what tells "partly refunded" from
+    "untouched".
+    """
+    from portal import db
+
+    ids = [
+        r.credit_transaction_id for r in rows
+        if r.transaction_type == CreditTransactionType.PURCHASE
+    ]
+    if not ids:
+        return {}
+
+    totals = db.session.query(
+        CreditTransactions.reverses_credit_transaction_id,
+        db.func.sum(CreditTransactions.amount),
+    ).filter(
+        CreditTransactions.reverses_credit_transaction_id.in_(ids),
+        CreditTransactions.status == CreditTransactionStatus.SUCCEEDED,
+    ).group_by(CreditTransactions.reverses_credit_transaction_id).all()
+
+    return {purchase_id: to_float(total) for purchase_id, total in totals}
+
+
+def transactions_payload(rows, account=None) -> list:
+    purpose = (
+        CreditPurpose.LABELS.get(account.purpose)
+        if account is not None and account.purpose else None
+    )
+    refunded = _refunded_totals(rows)
+    return [
+        transaction_dict(
+            r, purpose_label=purpose,
+            refunded=refunded.get(r.credit_transaction_id),
+        )
+        for r in rows
+    ]
 
 
 def statement_dict(statement: CreditStatements, detailed: bool = False) -> dict:
@@ -203,6 +294,11 @@ def statement_dict(statement: CreditStatements, detailed: bool = False) -> dict:
         'total_fees': to_float(statement.total_fees),
         'closing_balance': to_float(statement.closing_balance),
         'minimum_due': to_float(statement.minimum_due),
+        # The bill as issued, under the name people use for it. The same figure
+        # as closing_balance; both are sent so neither screen has to know that.
+        'total_amount_due': to_float(statement.closing_balance),
+        'credit_limit': to_float(statement.credit_limit),
+        'available_credit': to_float(statement.available_credit),
         'amount_paid': to_float(statement.amount_paid),
         'amount_outstanding': to_float(statement.amount_outstanding),
         'minimum_outstanding': to_float(statement.minimum_outstanding),
@@ -211,12 +307,13 @@ def statement_dict(statement: CreditStatements, detailed: bool = False) -> dict:
     if detailed:
         data['minimum_due_percent'] = to_float(statement.minimum_due_percent)
         data['late_fee_charged'] = statement.late_fee_charged_at is not None
-        data['transactions'] = [
-            transaction_dict(t) for t in statement.transactions.order_by(
+        data['transactions'] = transactions_payload(
+            statement.transactions.order_by(
                 CreditTransactions.created_on.asc(),
                 CreditTransactions.credit_transaction_id.asc(),
-            ).all()
-        ]
+            ).all(),
+            statement.account,
+        )
     return data
 
 
@@ -251,20 +348,45 @@ def _next_step(account) -> str:
     }.get(account.status, 'NONE')
 
 
+#: HTTP status by refusal code. Derived from the code so the engine does not have
+#: to know about HTTP, and so a new refusal cannot be reported as a 400 when it
+#: is really a conflict or the gateway's fault.
+_HTTP_STATUS = {
+    ErrorCode.NOT_FOUND: 404,
+    ErrorCode.CONFLICT: 409,
+    ErrorCode.FORBIDDEN: 403,
+    ErrorCode.PROVIDER_ERROR: 502,
+    'GATEWAY_ERROR': 502,
+    'GATEWAY_TIMEOUT': 504,
+}
+
+
 def _engine_failure(exc: credit_engine.CreditError):
     """
     Render a CreditError.
 
-    The status is derived from the code so the engine does not have to know
-    about HTTP, and so a new refusal reason cannot accidentally be reported as
-    a 400 when it is really a conflict.
+    When the refusal was recorded - a declined purchase, a failed payment, a
+    payment already in flight - the row goes back in `details`, so the client
+    can show its reference and status instead of an anonymous error.
     """
-    status = {
-        ErrorCode.NOT_FOUND: 404,
-        ErrorCode.CONFLICT: 409,
-        ErrorCode.FORBIDDEN: 403,
-    }.get(exc.code, 400)
-    return failure(exc.code, exc.message, status, recovery=exc.recovery)
+    details = (
+        {'transaction': transaction_dict(exc.transaction)}
+        if exc.transaction is not None else None
+    )
+    return failure(
+        exc.code, exc.message, _HTTP_STATUS.get(exc.code, 400),
+        details=details, recovery=exc.recovery,
+    )
+
+
+def _declined(txn: CreditTransactions):
+    """A replayed key whose original attempt was declined: decline it again."""
+    return failure(
+        txn.failure_code or 'DECLINED',
+        txn.failure_reason or 'This transaction was declined.',
+        _HTTP_STATUS.get(txn.failure_code, 400),
+        details={'transaction': transaction_dict(txn)},
+    )
 
 
 # ── Application ────────────────────────────────────────────────────────────
@@ -650,12 +772,13 @@ class CreditPurchaseList(Resource):
                 is_test=is_test,
             )
         except credit_engine.DuplicateSpend as exc:
+            if exc.transaction.status == CreditTransactionStatus.FAILED:
+                return _declined(exc.transaction)
+            fresh = credit_engine.account_for(user.user_id)
             return success(
                 {
-                    'transaction': transaction_dict(exc.transaction),
-                    'account': account_dict(
-                        credit_engine.account_for(user.user_id)
-                    ),
+                    'transaction': transactions_payload([exc.transaction], fresh)[0],
+                    'account': account_dict(fresh),
                 },
                 'This purchase was already recorded.',
             )
@@ -664,10 +787,10 @@ class CreditPurchaseList(Resource):
 
         return success(
             {
-                'transaction': transaction_dict(record),
+                'transaction': transactions_payload([record], record.account)[0],
                 'account': account_dict(record.account),
             },
-            'Purchase recorded.',
+            'Purchase successful.',
             201,
         )
 
@@ -698,6 +821,14 @@ class CreditTransactionList(Resource):
                     f'Unknown transaction type: {requested}.', 400,
                 )
             query = query.filter(CreditTransactions.transaction_type == requested)
+        if args.get('status'):
+            wanted = args['status'].upper()
+            if wanted not in CreditTransactionStatus.CHOICES:
+                return failure(
+                    ErrorCode.VALIDATION_ERROR,
+                    f'Unknown transaction status: {wanted}.', 400,
+                )
+            query = query.filter(CreditTransactions.status == wanted)
 
         # The id is a tiebreaker, not a sort key: a UUID says nothing about
         # time. It is here because pagination needs a *total* order - two rows
@@ -709,7 +840,7 @@ class CreditTransactionList(Resource):
         ).paginate(page=page, per_page=per_page, error_out=False)
 
         return paginated(
-            [transaction_dict(t) for t in pagination.items],
+            transactions_payload(pagination.items, account),
             page, per_page, pagination.total,
         )
 
@@ -727,7 +858,7 @@ class CreditTransactionDetail(Resource):
         ).first()
         if not txn:
             return failure(ErrorCode.NOT_FOUND, 'Transaction not found.', 404)
-        return success(transaction_dict(txn))
+        return success(transactions_payload([txn], txn.account)[0])
 
 
 # ── Statements and bill payment ────────────────────────────────────────────
@@ -783,6 +914,11 @@ class CurrentStatement(Resource):
         latest = CreditStatements.query.filter_by(
             credit_account_id=account.credit_account_id,
         ).order_by(CreditStatements.period_end.desc()).first()
+        pending = CreditTransactions.query.filter_by(
+            credit_account_id=account.credit_account_id,
+            transaction_type=CreditTransactionType.PAYMENT,
+            status=CreditTransactionStatus.PROCESSING,
+        ).first()
 
         return success({
             'account': account_dict(account),
@@ -791,7 +927,12 @@ class CurrentStatement(Resource):
             ),
             'unbilled_spend': to_float(_unbilled_spend(account)),
             'total_outstanding': to_float(account.current_outstanding),
-            'payment_methods': sorted(BILL_PAYMENT_METHODS),
+            'payment_methods': BillPaymentMethod.CHOICES,
+            # A payment still waiting on the gateway, so the pay screen can pick
+            # it up again instead of offering a second one.
+            'pending_payment': (
+                transaction_dict(pending) if pending is not None else None
+            ),
         })
 
 
@@ -811,6 +952,104 @@ class CreditStatementDetail(Resource):
         return success(statement_dict(statement, detailed=True))
 
 
+def _payment_for(user, credit_transaction_id):
+    return CreditTransactions.query.filter_by(
+        credit_transaction_id=credit_transaction_id,
+        user_id=user.user_id,
+        transaction_type=CreditTransactionType.PAYMENT,
+    ).first()
+
+
+def _payment_response(record, user, status_code=200):
+    """
+    A bill payment in whatever state it is in, and the account as it now stands.
+
+    `credit_restored` is non-zero only for a SUCCEEDED payment, because that is
+    the only state in which any credit was restored.
+    """
+    fresh = credit_engine.account_for(user.user_id)
+    succeeded = record.status == CreditTransactionStatus.SUCCEEDED
+
+    if succeeded:
+        message = (
+            f'Payment received. Rs. {to_float(record.amount):,.2f} of credit is '
+            f'available again.'
+        )
+    elif record.status == CreditTransactionStatus.FAILED and record.failure_reason:
+        message = record.failure_reason
+    else:
+        message = _PAYMENT_OUTCOME.get(record.status, 'Payment status updated.')
+
+    payload = {
+        'transaction': transaction_dict(record),
+        'account': account_dict(fresh, detailed=True) if fresh else None,
+        'credit_restored': to_float(record.amount) if succeeded else 0.0,
+    }
+    checkout = getattr(record, 'checkout', None)
+    if checkout is not None:
+        payload['checkout'] = checkout
+    return success(payload, message, status_code)
+
+
+@ns.route('/payments/methods')
+class BillPaymentMethods(Resource):
+    @ns.doc('credit_bill_payment_methods', security='Bearer')
+    @jwt_required()
+    @active_user_required
+    def get(self):
+        """
+        How a card bill may be paid, and which rail each way would use.
+
+        The prohibition is stated rather than left as an absence, so the screen
+        can say why a credit card is not on the list. `sandbox` tells the client
+        a payment will be simulated - never true in production.
+        """
+        user = current_user()
+        providers = {
+            method: credit_engine.bill_payment_provider(method)
+            for method in BillPaymentMethod.CHOICES
+        }
+        return success({
+            'permitted': [
+                {'mode': BillPaymentMethod.UPI_INTENT, 'label': 'UPI',
+                 'description': 'Google Pay, PhonePe, Paytm or any UPI app',
+                 'provider': providers[BillPaymentMethod.UPI_INTENT]},
+                {'mode': BillPaymentMethod.UPI_COLLECT, 'label': 'UPI ID',
+                 'description': 'Get a collect request on your UPI ID',
+                 'provider': providers[BillPaymentMethod.UPI_COLLECT]},
+                {'mode': BillPaymentMethod.NETBANKING, 'label': 'Net Banking',
+                 'description': 'All major Indian banks',
+                 'provider': providers[BillPaymentMethod.NETBANKING]},
+                {'mode': BillPaymentMethod.DEBIT_CARD, 'label': 'Debit Card',
+                 'description': 'RuPay, Visa or Mastercard debit',
+                 'provider': providers[BillPaymentMethod.DEBIT_CARD]},
+            ],
+            'prohibited': [{
+                'mode': 'CREDIT_CARD',
+                'label': 'Credit card',
+                'reason': 'A credit card bill cannot be paid from another '
+                          'credit line.',
+            }],
+            'minimum_amount': to_float(
+                settings.get_decimal(Key.PAYMENT_MIN_AMOUNT)
+            ),
+            'upi': {
+                'provider': adapters.upi_provider(),
+                'checkout_key': adapters.upi_public_key(),
+                'apps': adapters.UPI_APPS,
+            },
+            'sandbox': (
+                credit_engine.simulator_allowed()
+                and 'SANDBOX' in providers.values()
+            ),
+            'prefill': {
+                'name': user.full_name or '',
+                'contact': user.phone or '',
+                'email': user.email or '',
+            },
+        })
+
+
 @ns.route('/payments')
 class CreditBillPayment(Resource):
     @ns.doc('pay_credit_bill', security='Bearer')
@@ -818,16 +1057,16 @@ class CreditBillPayment(Resource):
     @active_user_required
     def post(self):
         """
-        Pay the card bill, restoring the credit it frees.
+        Start paying the card bill.
+
+        Opens a gateway order and returns what the client needs to take the
+        payer through checkout. No credit is restored here: the payment stays
+        PROCESSING until /verify, the webhook or the poller hears from the
+        gateway that the money arrived.
 
         Requires X-Idempotency-Key. Paying twice by accident is worse than
         spending twice - the money has actually left the payer's account - so a
-        replay returns the original payment rather than collecting again.
-
-        The amount is bounded by what is outstanding. An overpayment is refused
-        rather than banked, because a credit balance on the line is a state this
-        product does not model and taking money into an unrepresented state is
-        the worst of the options.
+        replay returns the original payment rather than opening a second order.
         """
         args = pay_parser.parse_args()
         user = current_user()
@@ -838,15 +1077,21 @@ class CreditBillPayment(Resource):
                 'NO_CREDIT_LINE', 'You do not have a credit line yet.', 404,
             )
 
+        raw_method = (args.get('payment_method') or 'UPI_INTENT').upper()
+        method = _METHOD_ALIASES.get(raw_method, raw_method)
+        if method not in BillPaymentMethod.CHOICES:
+            return failure(
+                ErrorCode.INSTRUMENT_NOT_PERMITTED,
+                'A card bill can be paid by UPI, net banking or a debit card.',
+                400,
+                recovery='Choose UPI, Net Banking or Debit Card.',
+            )
+
         try:
             key = validate_idempotency_key(idempotency_key())
             amount = validate_amount(
                 args['amount'], 'amount',
                 minimum=settings.get_decimal(Key.PAYMENT_MIN_AMOUNT),
-            )
-            method = validate_choice(
-                (args.get('payment_method') or 'UPI').upper(),
-                sorted(BILL_PAYMENT_METHODS), 'payment_method',
             )
         except ValidationError as exc:
             return failure(ErrorCode.VALIDATION_ERROR, exc.message, 400)
@@ -860,35 +1105,116 @@ class CreditBillPayment(Resource):
                 return failure(ErrorCode.NOT_FOUND, 'Statement not found.', 404)
 
         try:
-            record = credit_engine.pay_bill(
+            record = credit_engine.open_bill_payment(
                 account=account,
+                user=user,
                 amount=amount,
-                source_type=BILL_PAYMENT_METHODS[method],
-                source_ref=method,
+                method=method,
                 idempotency_key=key,
                 statement=statement,
+                sandbox_outcome=(
+                    args.get('sandbox_outcome')
+                    if credit_engine.simulator_allowed() else None
+                ),
             )
         except credit_engine.DuplicateSpend as exc:
-            return success(
-                {
-                    'transaction': transaction_dict(exc.transaction),
-                    'account': account_dict(
-                        credit_engine.account_for(user.user_id)
-                    ),
-                },
-                'This payment was already recorded.',
-            )
+            return _payment_response(exc.transaction, user)
         except credit_engine.CreditError as exc:
             return _engine_failure(exc)
 
-        fresh = credit_engine.account_for(user.user_id)
-        return success(
-            {
-                'transaction': transaction_dict(record),
-                'account': account_dict(fresh, detailed=True),
-                'credit_restored': to_float(record.amount),
-            },
-            f'Payment received. Rs. {to_float(record.amount):,.2f} of credit is '
-            f'available again.',
-            201,
-        )
+        return _payment_response(record, user, 201)
+
+
+@ns.route('/payments/<string:credit_transaction_id>/verify')
+class VerifyBillPayment(Resource):
+    @ns.doc('verify_credit_bill_payment', security='Bearer')
+    @jwt_required()
+    @active_user_required
+    def post(self, credit_transaction_id):
+        """
+        Settle a payment from the gateway's own record of it.
+
+        Called when the payer comes back from checkout, with whatever Checkout
+        handed the browser, or with nothing at all simply to ask again. None of
+        it is believed: the signature is verified, the payment is re-read from
+        the gateway, and only a captured payment restores credit. A client that
+        posts a made-up payment id gets an unpaid bill, not a cleared one.
+        """
+        args = verify_parser.parse_args()
+        user = current_user()
+
+        record = _payment_for(user, credit_transaction_id)
+        if not record:
+            return failure(ErrorCode.NOT_FOUND, 'Payment not found.', 404)
+
+        claimed_order = args.get('razorpay_order_id')
+        if (
+            claimed_order
+            and record.gateway_order_id
+            and claimed_order != record.gateway_order_id
+        ):
+            logger.error(
+                f'[credit] verify for {credit_transaction_id} carried order '
+                f'{claimed_order}, but the payment is against '
+                f'{record.gateway_order_id}'
+            )
+            return failure(
+                ErrorCode.VALIDATION_ERROR,
+                'That payment belongs to a different order.', 400,
+            )
+
+        if record.status == CreditTransactionStatus.PROCESSING:
+            try:
+                record = credit_engine.settle_bill_payment(
+                    record,
+                    gateway_payment_id=args.get('razorpay_payment_id'),
+                    signature=args.get('razorpay_signature'),
+                )
+            except Exception as exc:     # noqa: BLE001 - reported, and polled later
+                logger.exception(
+                    f'[credit] verify failed for {credit_transaction_id}: {exc}'
+                )
+                return failure(
+                    ErrorCode.INTERNAL_ERROR,
+                    'We could not confirm this payment yet. If money left your '
+                    'account it will be credited automatically - do not pay '
+                    'again.',
+                    500,
+                )
+
+        return _payment_response(record, user)
+
+
+@ns.route('/payments/<string:credit_transaction_id>/cancel')
+class CancelBillPayment(Resource):
+    @ns.doc('cancel_credit_bill_payment', security='Bearer')
+    @jwt_required()
+    @active_user_required
+    def post(self, credit_transaction_id):
+        """
+        Abandon a payment the payer backed out of.
+
+        Asks the gateway first. A payment that went through anyway - the sheet
+        closed after authorising - is settled rather than cancelled, and one
+        still live at the bank stays processing.
+        """
+        user = current_user()
+        record = _payment_for(user, credit_transaction_id)
+        if not record:
+            return failure(ErrorCode.NOT_FOUND, 'Payment not found.', 404)
+
+        if record.status == CreditTransactionStatus.PROCESSING:
+            try:
+                record = credit_engine.cancel_bill_payment(record)
+            except Exception as exc:     # noqa: BLE001
+                logger.exception(
+                    f'[credit] cancel failed for {credit_transaction_id}: {exc}'
+                )
+                return failure(
+                    ErrorCode.INTERNAL_ERROR,
+                    'We could not cancel this payment right now. Please try '
+                    'again in a moment.',
+                    500,
+                )
+
+        return _payment_response(record, user)

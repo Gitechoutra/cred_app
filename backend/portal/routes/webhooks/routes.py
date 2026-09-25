@@ -34,10 +34,13 @@ from flask import request
 from flask_restx import Resource
 
 from portal.helpers import (
-    audit, cashfree, emi_engine, qr_payment_engine, razorpay,
+    audit, cashfree, credit_engine, emi_engine, qr_payment_engine, razorpay,
 )
 from portal import db
 from portal.helpers.helpers import ErrorCode, failure, success
+from portal.models.credit_transactions import (
+    CreditTransactions, CreditTransactionStatus, CreditTransactionType,
+)
 from portal.models.emi_payments import EMIPaymentState, EMIPayments
 from portal.models.qr_payments import QRPayments, QRPaymentState
 
@@ -328,6 +331,51 @@ def _handle_razorpay_qr(event: str, order_id: str, rzp_payment_id: str):
     )
 
 
+def _handle_razorpay_credit_bill(event: str, bill, rzp_payment_id: str):
+    """
+    Resolve a delivery for a credit card bill payment.
+
+    What makes a bill payment survive the payer closing the browser straight
+    after paying: no verify call arrives then, and this is what restores their
+    credit. The body is still only a hint - settle_bill_payment re-reads the
+    payment from Razorpay, so a delivery claiming `captured` cannot restore
+    credit for a payment Razorpay's own API says failed.
+    """
+    logger.info(
+        f'[webhook] {event} for credit bill payment '
+        f'{bill.credit_transaction_id} (status {bill.status})'
+    )
+
+    if bill.status != CreditTransactionStatus.PROCESSING:
+        return _acknowledged(
+            'Payment already resolved.',
+            credit_transaction_id=bill.credit_transaction_id,
+            status=bill.status,
+        )
+
+    try:
+        bill = credit_engine.settle_bill_payment(
+            bill, gateway_payment_id=rzp_payment_id,
+        )
+    except Exception as exc:
+        # 200 anyway: a retry replays the same fault, and the bill-payment
+        # poller already owns recovery.
+        db.session.rollback()
+        logger.exception(
+            f'[webhook] settle failed for {bill.credit_transaction_id}: {exc}'
+        )
+        return _acknowledged(
+            'Received; the payment could not be advanced and has been logged.',
+            credit_transaction_id=bill.credit_transaction_id,
+        )
+
+    return _acknowledged(
+        'Credit bill payment callback processed.',
+        credit_transaction_id=bill.credit_transaction_id,
+        status=bill.status,
+    )
+
+
 @ns.route('/razorpay')
 class RazorpayWebhook(Resource):
     @ns.doc('razorpay_webhook')
@@ -369,7 +417,14 @@ class RazorpayWebhook(Resource):
 
         if not payment:
             # Several products collect through the same Razorpay account, so an
-            # order that is not an EMI payment may still be a scanned QR one.
+            # order that is not an EMI payment may be a credit card bill, or a
+            # scanned QR payment.
+            bill = CreditTransactions.query.filter_by(
+                gateway_order_id=order_id,
+                transaction_type=CreditTransactionType.PAYMENT,
+            ).first()
+            if bill:
+                return _handle_razorpay_credit_bill(event, bill, rzp_payment_id)
             return _handle_razorpay_qr(event, order_id, rzp_payment_id)
 
         logger.info(

@@ -11,7 +11,9 @@ weight:
 """
 
 import os
+import uuid
 from datetime import timedelta
+from decimal import Decimal
 
 from flask import current_app, send_file
 from flask_jwt_extended import jwt_required
@@ -23,7 +25,7 @@ from portal.helpers import (
     audit, credit_engine, error_recorder, ledger_engine, settings,
 )
 from portal.helpers.helpers import (
-    ErrorCode, failure, iso, paginated, success, to_float,
+    ErrorCode, failure, idempotency_key, iso, paginated, success, to_float,
 )
 from portal.helpers.jwt import admin_required, current_claims, current_user, roles_required
 from portal.helpers.settings import Key
@@ -78,6 +80,11 @@ credit_review_parser.add_argument('decision', type=str, required=True, location=
 # scientific notation that a float coercion would silently accept.
 credit_review_parser.add_argument('limit', required=False, location='json')
 credit_review_parser.add_argument('note', type=str, required=False, location='json')
+
+refund_parser = reqparse.RequestParser()
+refund_parser.add_argument('reason', type=str, required=True, location='json')
+# Optional: omitted means refund whatever of the purchase is still refundable.
+refund_parser.add_argument('amount', required=False, location='json')
 
 setting_parser = reqparse.RequestParser()
 setting_parser.add_argument('value', type=str, required=True, location='json')
@@ -1033,7 +1040,18 @@ class AdminCutStatement(Resource):
         if not account:
             return failure(ErrorCode.NOT_FOUND, 'Credit line not found.', 404)
 
-        statement = credit_engine.cut_statement(account)
+        try:
+            statement = credit_engine.cut_statement(account)
+        except Exception as exc:     # noqa: BLE001 - reported, nothing half-written
+            logger.exception(
+                f'[admin] statement cut failed for {credit_account_id}: {exc}'
+            )
+            return failure(
+                'STATEMENT_GENERATION_FAILED',
+                'The statement could not be generated. Nothing was billed; '
+                'the next scheduled run will try again.',
+                500,
+            )
 
         audit.record_admin(
             admin_user_id=str(actor.user_id),
@@ -1057,6 +1075,82 @@ class AdminCutStatement(Resource):
             'minimum_due': to_float(statement.minimum_due),
             'due_date': statement.due_date.isoformat(),
         }, 'Statement issued.')
+
+
+@ns.route('/credit/transactions/<string:credit_transaction_id>/refund')
+class AdminRefundCreditPurchase(Resource):
+    @ns.doc('admin_refund_credit_purchase', security='Bearer')
+    @jwt_required()
+    @roles_required(L2, L3)
+    def post(self, credit_transaction_id):
+        """
+        Refund a purchase, in full or in part, as a merchant would.
+
+        A refund is the merchant's decision, so the cardholder has no endpoint
+        for it; operations raises one on the merchant's confirmation. It is
+        written as a compensating row that restores credit, never as an edit to
+        the purchase, which may already sit on an issued statement.
+        """
+        args = refund_parser.parse_args()
+        actor, role = _actor()
+
+        purchase = CreditTransactions.query.filter_by(
+            credit_transaction_id=credit_transaction_id,
+        ).first()
+        if not purchase:
+            return failure(ErrorCode.NOT_FOUND, 'Transaction not found.', 404)
+
+        reason = sanitize_text(args.get('reason') or '', 200)
+        if not reason:
+            return failure(
+                ErrorCode.VALIDATION_ERROR, 'A reason is required for a refund.', 400,
+            )
+
+        try:
+            amount = (
+                validate_amount(args['amount'], 'amount', minimum=Decimal('1'))
+                if args.get('amount') not in (None, '') else None
+            )
+        except ValidationError as exc:
+            return failure(ErrorCode.VALIDATION_ERROR, exc.message, 400)
+
+        try:
+            refund = credit_engine.refund(
+                purchase_txn=purchase,
+                amount=amount,
+                idempotency_key=(
+                    idempotency_key() or f'refund-{uuid.uuid4().hex}'
+                )[:64],
+            )
+        except credit_engine.DuplicateSpend as exc:
+            refund = exc.transaction
+        except credit_engine.CreditError as exc:
+            return failure(
+                exc.code, exc.message,
+                409 if exc.code == ErrorCode.CONFLICT else 400,
+            )
+
+        audit.record_admin(
+            admin_user_id=str(actor.user_id),
+            admin_role=role,
+            module='CREDIT',
+            action='CREDIT_PURCHASE_REFUNDED',
+            target_type='CreditTransactions',
+            target_id=credit_transaction_id,
+            justification=reason,
+            payload={
+                'refund_id': refund.credit_transaction_id,
+                'amount': to_float(refund.amount),
+            },
+        )
+
+        return success({
+            'refund_id': refund.credit_transaction_id,
+            'amount': to_float(refund.amount),
+            'purchase_status': purchase.status,
+            'balance_after': to_float(refund.balance_after),
+            'available_after': to_float(refund.available_after),
+        }, 'Refund issued.')
 
 
 @ns.route('/reconciliation')

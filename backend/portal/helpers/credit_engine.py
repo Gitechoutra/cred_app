@@ -40,7 +40,9 @@ from flask import current_app
 from sqlalchemy.exc import IntegrityError
 
 from portal import db
-from portal.helpers import audit, ledger_engine, settings, test_cards
+from portal.helpers import (
+    adapters, audit, error_recorder, ledger_engine, settings, test_cards,
+)
 from portal.helpers.helpers import ErrorCode
 from portal.helpers.ledger_engine import money
 from portal.helpers.settings import Key
@@ -53,7 +55,8 @@ from portal.models.credit_applications import (
 )
 from portal.models.credit_statements import CreditStatements, StatementStatus
 from portal.models.credit_transactions import (
-    CreditTransactions, CreditTransactionStatus, CreditTransactionType,
+    BillPaymentMethod, CreditTransactions, CreditTransactionStatus,
+    CreditTransactionType,
 )
 from portal.models.master_transactions import (
     DestType, GatewayProvider, SourceType, TransactionStatus, TransactionType,
@@ -66,11 +69,16 @@ ZERO = Decimal('0.00')
 class CreditError(Exception):
     """A refusal the user should see, with a code the client can branch on."""
 
-    def __init__(self, code: str, message: str, recovery: str = None):
+    def __init__(self, code: str, message: str, recovery: str = None,
+                 transaction=None):
         super().__init__(message)
         self.code = code
         self.message = message
         self.recovery = recovery
+        #: The row that records this refusal, when there is one - a declined
+        #: purchase or a failed bill payment - so the client can show its
+        #: reference rather than an anonymous error.
+        self.transaction = transaction
 
 
 class DuplicateSpend(Exception):
@@ -675,6 +683,7 @@ def purchase(*, account: CreditAccounts, amount, merchant_name: str,
                 status=CreditTransactionStatus.SUCCEEDED,
                 amount=amount,
                 balance_after=outstanding,
+                available_after=available,
                 merchant_name=merchant_name[:120],
                 merchant_category=merchant_category,
                 description=(description or '')[:200] or None,
@@ -683,6 +692,24 @@ def purchase(*, account: CreditAccounts, amount, merchant_name: str,
                 settled_at=utcnow(),
             )
             db.session.add(record)
+    except CreditError as exc:
+        # A decline is a real event on the card, and the holder is entitled to
+        # see it in their history with the reason. The atomic block has already
+        # rolled back, so this is written in its own transaction; nothing about
+        # the balance changed. An invariant failure is ours, not a decline, and
+        # is not dressed up as one.
+        if exc.code != 'LIMIT_INVARIANT_VIOLATED':
+            exc.transaction = _record_decline(
+                credit_account_id=account.credit_account_id,
+                amount=amount,
+                merchant_name=merchant_name,
+                merchant_category=merchant_category,
+                description=description,
+                idempotency_key=idempotency_key,
+                is_test=is_test,
+                error=exc,
+            )
+        raise
     except IntegrityError:
         # Two concurrent taps: the loser of the UNIQUE index race. The winner's
         # row is the answer.
@@ -752,29 +779,153 @@ def _check_velocity(account: CreditAccounts, amount: Decimal):
         )
 
 
-# ── Bill payment ───────────────────────────────────────────────────────────
-
-def pay_bill(*, account: CreditAccounts, amount, source_type: str,
-             source_ref: str, idempotency_key: str,
-             statement: CreditStatements = None) -> CreditTransactions:
+def _record_decline(*, credit_account_id: str, amount: Decimal,
+                    merchant_name: str, merchant_category: str,
+                    description: str, idempotency_key: str, is_test: bool,
+                    error: CreditError):
     """
-    Settle some or all of what is owed, and restore the credit it frees.
+    Write a FAILED row for a refused purchase, and return it.
 
-    Same locking discipline as a purchase, and the same idempotency guarantee -
-    paying a bill twice by accident is worse than spending twice, because the
-    money has actually left the user's account.
+    It consumes the idempotency key on purpose. That key named one attempt, and
+    the attempt was declined: replaying it must answer "declined" again rather
+    than quietly trying a second time after the holder has paid down their
+    balance. A deliberate retry is a new attempt with a new key.
 
-    Refuses to accept more than is outstanding. An overpayment would create a
-    credit balance on the line, which this product has no concept of; taking the
-    money and leaving it unrepresented would be the worst of the options.
+    Never raises. Recording the decline is secondary to reporting it, and a
+    failure here must not turn a clear refusal into a 500.
+    """
+    try:
+        account = (
+            CreditAccounts.query
+            .filter_by(credit_account_id=credit_account_id)
+            .populate_existing()
+            .first()
+        )
+        if account is None:
+            return None
+
+        record = CreditTransactions(
+            credit_account_id=account.credit_account_id,
+            user_id=account.user_id,
+            transaction_type=CreditTransactionType.PURCHASE,
+            status=CreditTransactionStatus.FAILED,
+            amount=amount,
+            balance_after=money(account.current_outstanding),
+            available_after=money(account.available_credit),
+            merchant_name=(merchant_name or '')[:120] or None,
+            merchant_category=merchant_category,
+            description=(description or '')[:200] or None,
+            idempotency_key=idempotency_key,
+            is_test=is_test,
+            failure_code=error.code[:50],
+            failure_reason=error.message[:500],
+        )
+        db.session.add(record)
+        db.session.commit()
+        return record
+    except Exception as exc:     # noqa: BLE001 - see the docstring
+        db.session.rollback()
+        current_app.logger.warning(
+            f'[credit] could not record a declined purchase: {exc}'
+        )
+        return None
+
+
+# ── Bill payment ───────────────────────────────────────────────────────────
+#
+# A bill payment is money arriving from outside, so unlike a purchase it cannot
+# be decided here. It runs in two halves:
+#
+#   open_bill_payment    validates, records a PROCESSING row and opens a gateway
+#                        order. Touches no balance.
+#   settle_bill_payment  asks the gateway what happened. Only a payment the
+#                        gateway itself reports as captured restores credit.
+#
+# This replaced a single call that restored credit the moment the client said it
+# had paid. Nothing checked that it had, so any authenticated request could clear
+# its own balance.
+#
+# Three callers race to settle every payment - the browser returning from
+# checkout, the gateway's webhook and the poller - so settling re-reads the row
+# under a lock and does nothing if another caller got there first.
+
+#: How long a payment may sit in PROCESSING with nothing collected before it is
+#: treated as abandoned. Generous, because a UPI collect request legitimately
+#: waits on the payer, and failing one they are about to approve is worse than
+#: leaving it open a little long.
+BILL_PAYMENT_TIMEOUT = timedelta(minutes=30)
+
+#: Outcomes a development build may ask the simulated gateway for, mapped to the
+#: adapters' directives. Ignored unless the rail really is the simulator.
+SANDBOX_OUTCOMES = {
+    'APPROVE': None,
+    'DECLINE': adapters.Simulate.AUTH_DECLINE,
+    'ABANDON': adapters.Simulate.ABANDON,
+    'TIMEOUT': adapters.Simulate.TIMEOUT,
+}
+
+#: Gateway order states that mean the order can no longer be paid.
+_DEAD_ORDER_STATES = ('FAILED', 'EXPIRED', 'TERMINATED', 'CANCELLED')
+
+_SOURCE_BY_METHOD = {
+    BillPaymentMethod.UPI_INTENT: SourceType.UPI_VPA,
+    BillPaymentMethod.UPI_COLLECT: SourceType.UPI_VPA,
+    BillPaymentMethod.NETBANKING: SourceType.NETBANKING,
+    BillPaymentMethod.DEBIT_CARD: SourceType.DEBIT_CARD,
+}
+
+
+def bill_payment_provider(method: str) -> str:
+    """The rail a payment by `method` would be collected on right now."""
+    if method in BillPaymentMethod.UPI:
+        return adapters.upi_provider()
+    return adapters.card_gateway_provider()
+
+
+def simulator_allowed() -> bool:
+    """
+    Whether a simulated gateway may settle a bill payment here.
+
+    The simulator reports orders as paid. Behind a bill payment that means credit
+    restored for nothing, so it is refused in production however the adapters
+    are configured: USE_SANDBOX_ADAPTERS defaults on, and a deployment that
+    forgot to turn it off has to fail closed rather than give credit away.
+    """
+    return current_app.config.get('ENV_NAME', 'development') != 'production'
+
+
+def open_bill_payment(*, account: CreditAccounts, user, amount, method: str,
+                      idempotency_key: str, statement: CreditStatements = None,
+                      sandbox_outcome: str = None) -> CreditTransactions:
+    """
+    Start paying the bill: record the attempt and open a gateway order.
+
+    Refuses more than is outstanding. An overpayment would create a credit
+    balance on the line, which this product has no concept of, and taking money
+    into an unrepresented state is the worst of the options.
+
+    Refuses a second payment while one is still processing. The idempotency key
+    cannot catch that case - a payer who closes the UPI app and taps Pay again
+    sends a genuinely new request - and two captured payments against one bill
+    would collect it twice.
+
+    The returned row carries a transient `checkout` dict: what the client needs
+    to open the gateway's sheet. Never a status - opening an order is not
+    collecting money.
     """
     amount = money(amount)
     minimum = money(settings.get_decimal(Key.PAYMENT_MIN_AMOUNT))
-
     if amount < minimum:
         raise CreditError(
             ErrorCode.VALIDATION_ERROR,
             f'The smallest payment we can collect is Rs. {minimum:,.2f}.',
+        )
+
+    if method not in BillPaymentMethod.CHOICES:
+        raise CreditError(
+            ErrorCode.INSTRUMENT_NOT_PERMITTED,
+            'A card bill can be paid by UPI, net banking or a debit card.',
+            recovery='Choose UPI, Net Banking or Debit Card.',
         )
 
     existing = CreditTransactions.query.filter_by(
@@ -782,6 +933,18 @@ def pay_bill(*, account: CreditAccounts, amount, source_type: str,
     ).first()
     if existing:
         raise DuplicateSpend(existing)
+
+    provider = bill_payment_provider(method)
+    if provider == 'SANDBOX' and not simulator_allowed():
+        current_app.logger.error(
+            '[credit] bill payment refused: the payment rail is the simulator '
+            'in a production environment.'
+        )
+        raise CreditError(
+            ErrorCode.PROVIDER_ERROR,
+            'Bill payments are temporarily unavailable.',
+            recovery='Please try again later.',
+        )
 
     try:
         with ledger_engine.atomic():
@@ -792,69 +955,56 @@ def pay_bill(*, account: CreditAccounts, amount, source_type: str,
                     ErrorCode.CONFLICT, 'This credit line is closed.',
                 )
 
-            outstanding_before = money(locked.current_outstanding)
-
-            if outstanding_before <= ZERO:
+            outstanding = money(locked.current_outstanding)
+            if outstanding <= ZERO:
                 raise CreditError(
                     ErrorCode.CONFLICT,
                     'There is nothing outstanding on this credit line.',
                 )
-
-            if amount > outstanding_before:
+            if amount > outstanding:
                 raise CreditError(
                     ErrorCode.VALIDATION_ERROR,
-                    f'You owe Rs. {outstanding_before:,.2f}. Enter that or less.',
-                    recovery=f'Pay the full outstanding of '
-                             f'Rs. {outstanding_before:,.2f}.',
+                    f'You owe Rs. {outstanding:,.2f}. Enter that or less.',
+                    recovery=f'Pay the full outstanding of Rs. {outstanding:,.2f}.',
                 )
 
-            outstanding = outstanding_before - amount
-            available = money(locked.credit_limit) - outstanding
-            _assert_invariant(locked, available, outstanding)
-
-            txn = ledger_engine.post(
-                user_id=locked.user_id,
-                transaction_type=TransactionType.CREDIT_BILL_PAYMENT,
-                gross_amount=amount,
-                net_amount=amount,
-                source_type=source_type,
-                source_masked_ref=source_ref[:150],
-                dest_type=DestType.CREDIT_LINE,
-                dest_masked_ref=locked.masked_number,
-                gateway_provider=GatewayProvider.INTERNAL,
-                idempotency_key=idempotency_key,
-                status=TransactionStatus.SUCCEEDED,
-                entries=ledger_engine.entries_for_credit_bill_payment(
-                    amount, source_ref, locked.masked_number,
-                ),
-                commit=False,
+            # A locking read, not a plain one. Under REPEATABLE READ a plain
+            # SELECT answers from the snapshot this transaction took at its first
+            # read - before the account lock was granted - and would miss a
+            # payment another request opened while this one waited for it.
+            in_flight = (
+                CreditTransactions.query
+                .filter_by(
+                    credit_account_id=locked.credit_account_id,
+                    transaction_type=CreditTransactionType.PAYMENT,
+                    status=CreditTransactionStatus.PROCESSING,
+                )
+                .with_for_update()
+                .first()
             )
-
-            locked.current_outstanding = outstanding
-            locked.available_credit = available
+            if in_flight:
+                raise CreditError(
+                    ErrorCode.CONFLICT,
+                    'A payment on this card is already being processed.',
+                    recovery='Wait for it to finish, or cancel it and try again.',
+                    transaction=in_flight,
+                )
 
             record = CreditTransactions(
                 credit_account_id=locked.credit_account_id,
                 user_id=locked.user_id,
-                transaction_id=txn.transaction_id,
                 transaction_type=CreditTransactionType.PAYMENT,
-                status=CreditTransactionStatus.SUCCEEDED,
+                status=CreditTransactionStatus.PROCESSING,
                 amount=amount,
-                balance_after=outstanding,
                 description='Credit card bill payment',
                 idempotency_key=idempotency_key,
-                settled_at=utcnow(),
+                payment_method=method,
+                target_statement_id=(
+                    statement.statement_id if statement is not None else None
+                ),
             )
             db.session.add(record)
-
-            # Apply it to the statement it was meant for, or to the oldest one
-            # still owing. Oldest first is what stops a payment clearing this
-            # month's bill while last month's goes overdue.
-            target = statement or _oldest_outstanding_statement(
-                locked.credit_account_id
-            )
-            if target is not None:
-                _apply_to_statement(target, amount)
+            db.session.flush()
     except IntegrityError:
         db.session.rollback()
         original = CreditTransactions.query.filter_by(
@@ -864,6 +1014,352 @@ def pay_bill(*, account: CreditAccounts, amount, source_type: str,
             raise DuplicateSpend(original)
         raise
 
+    # The gateway is called after the commit, not inside the lock: a network
+    # round trip must not hold the account row while a purchase waits on it.
+    reference = f'CASHUBILL{record.credit_transaction_id.replace("-", "")[:20].upper()}'
+    if provider == 'SANDBOX':
+        directive = SANDBOX_OUTCOMES.get((sandbox_outcome or '').upper())
+        if directive:
+            reference += directive
+
+    collection = dict(
+        order_id=reference,
+        amount=amount,
+        customer_id=str(user.user_id),
+        customer_phone=user.phone,
+        customer_email=user.email,
+        customer_name=user.full_name,
+        note='CashU credit card bill',
+        tags={
+            'credit_transaction_id': record.credit_transaction_id,
+            'type': 'CREDIT_BILL_PAYMENT',
+        },
+    )
+    order = (
+        adapters.create_upi_order(**collection)
+        if method in BillPaymentMethod.UPI
+        else adapters.create_payment_order(**collection)
+    )
+
+    if not order.get('ok'):
+        timed_out = bool(order.get('timeout'))
+        _close_unpaid(
+            record,
+            CreditTransactionStatus.FAILED,
+            'GATEWAY_TIMEOUT' if timed_out else (order.get('error_code') or 'GATEWAY_ERROR'),
+            (
+                'The payment gateway took too long to respond. Nothing was charged.'
+                if timed_out else
+                'We could not reach the payment gateway. Nothing was charged.'
+            ),
+            gateway_response=order,
+        )
+        raise CreditError(
+            record.failure_code, record.failure_reason,
+            recovery='Please try again in a moment.', transaction=record,
+        )
+
+    record.gateway_provider = order.get('provider')
+    # Razorpay's own order id is what Checkout, the verify call and the webhook
+    # all speak. Everywhere else the merchant reference is the lookup key - and
+    # on the simulator it is the thing carrying the requested outcome.
+    record.gateway_order_id = (
+        order.get('gateway_order_id') if record.gateway_provider == 'RAZORPAY'
+        else reference
+    )
+    db.session.commit()
+
+    audit.record(
+        action='CREDIT_BILL_PAYMENT_INITIATED',
+        entity_type='CreditTransactions',
+        entity_id=record.credit_transaction_id,
+        actor_user_id=record.user_id,
+        after={
+            'amount': float(amount),
+            'method': method,
+            'provider': record.gateway_provider,
+        },
+    )
+
+    # Transient: derivable from config and the order, so storing it would only
+    # be duplicating state that can go stale.
+    record.checkout = {
+        'provider': record.gateway_provider,
+        'key': order.get('public_key') or None,
+        'order_id': (
+            record.gateway_order_id if record.gateway_provider == 'RAZORPAY'
+            else None
+        ),
+        'amount_paise': order.get('amount_paise'),
+        'currency': 'INR',
+        'payment_session_id': order.get('payment_session_id'),
+    }
+    return record
+
+
+def settle_bill_payment(record: CreditTransactions, *,
+                        gateway_payment_id: str = None,
+                        signature: str = None) -> CreditTransactions:
+    """
+    Ask the gateway what happened to a payment, and act on its answer alone.
+
+    `gateway_payment_id` and `signature` come from the browser when it has them.
+    The signature is verified before the id is trusted, and even a verified id
+    only selects which payment to read: whether money moved is decided by the
+    gateway's API, never by the caller. Safe to call any number of times, from
+    anywhere, concurrently.
+    """
+    locked = _lock_payment(record)
+    if locked is None:
+        return record
+    record = locked
+
+    status = _gateway_status(record, gateway_payment_id, signature)
+
+    if not status.get('ok'):
+        # Cannot tell. Leave it for the poller rather than guess in either
+        # direction - a guess of "failed" strands money that moved.
+        db.session.commit()
+        return record
+
+    if status.get('gateway_payment_id'):
+        record.gateway_payment_id = str(status['gateway_payment_id'])[:100]
+
+    if status.get('paid'):
+        return _apply_bill_payment(record, status)
+
+    if (status.get('status') or '').upper() in _DEAD_ORDER_STATES:
+        return _close_unpaid(
+            record,
+            CreditTransactionStatus.FAILED,
+            status.get('failure_code') or 'PAYMENT_FAILED',
+            status.get('failure_reason') or 'The payment was declined by your bank.',
+            gateway_response=status,
+        )
+
+    # Still with the payer. Not a failure, and emphatically not a success.
+    db.session.commit()
+    return record
+
+
+def cancel_bill_payment(record: CreditTransactions) -> CreditTransactions:
+    """
+    Abandon a payment the payer backed out of.
+
+    Never on their say-so alone. Closing the checkout sheet after authorising is
+    common, and the debit still lands - so the gateway is asked first, and a
+    payment that did go through is settled instead of cancelled.
+    """
+    return _abandon(
+        record,
+        CreditTransactionStatus.CANCELLED,
+        'USER_CANCELLED',
+        'You cancelled this payment. Nothing was charged.',
+    )
+
+
+def poll_processing_bill_payments(limit: int = 100):
+    """
+    Resolve payments nobody came back for.
+
+    The net under every interruption: a closed tab, a dropped connection, a
+    webhook that never arrived. Anything still unpaid after BILL_PAYMENT_TIMEOUT
+    with no live attempt at the gateway is closed as timed out.
+    """
+    now = utcnow()
+    rows = CreditTransactions.query.filter(
+        CreditTransactions.transaction_type == CreditTransactionType.PAYMENT,
+        CreditTransactions.status == CreditTransactionStatus.PROCESSING,
+        # Give the browser the first chance: it has the signed payload.
+        CreditTransactions.created_on < now - timedelta(minutes=1),
+    ).order_by(CreditTransactions.created_on.asc()).limit(limit).all()
+
+    tally = {'settled': 0, 'failed': 0, 'timed_out': 0}
+    for row in rows:
+        try:
+            result = settle_bill_payment(row)
+            if (
+                result.status == CreditTransactionStatus.PROCESSING
+                and result.created_on < now - BILL_PAYMENT_TIMEOUT
+            ):
+                result = _abandon(
+                    result,
+                    CreditTransactionStatus.FAILED,
+                    'PAYMENT_TIMEOUT',
+                    'The payment was not completed in time. Nothing was charged.',
+                )
+                if result.status == CreditTransactionStatus.FAILED:
+                    tally['timed_out'] += 1
+            elif result.status == CreditTransactionStatus.SUCCEEDED:
+                tally['settled'] += 1
+            elif result.status == CreditTransactionStatus.FAILED:
+                tally['failed'] += 1
+        except Exception as exc:     # noqa: BLE001 - one bad row must not stop the sweep
+            db.session.rollback()
+            current_app.logger.error(
+                f'[credit] bill payment poll failed for '
+                f'{row.credit_transaction_id}: {exc}'
+            )
+
+    # None on a quiet run, so the scheduler logs it at debug rather than
+    # filling the log with zeros.
+    return tally if any(tally.values()) else None
+
+
+def _lock_payment(record: CreditTransactions):
+    """
+    Re-read a PROCESSING payment under a row lock, or return None.
+
+    None means another caller already resolved it, and the lock has been
+    released. populate_existing() for the reason set out in `_lock`.
+    """
+    locked = (
+        CreditTransactions.query
+        .filter_by(credit_transaction_id=record.credit_transaction_id)
+        .populate_existing()
+        .with_for_update()
+        .first()
+    )
+    if locked is None or locked.status != CreditTransactionStatus.PROCESSING:
+        db.session.commit()   # release the lock; nothing to do
+        return None
+    return locked
+
+
+def _gateway_status(record: CreditTransactions, gateway_payment_id: str = None,
+                    signature: str = None) -> dict:
+    """The gateway's authoritative answer for this payment's order."""
+    if record.gateway_provider == 'SANDBOX' and not simulator_allowed():
+        return {
+            'ok': True, 'paid': False, 'status': 'FAILED',
+            'failure_code': 'SIMULATOR_REFUSED',
+            'failure_reason': 'This payment could not be verified.',
+        }
+
+    if record.payment_method in BillPaymentMethod.UPI:
+        if gateway_payment_id and signature and not \
+                adapters.verify_upi_checkout_signature(
+                    order_id=record.gateway_order_id,
+                    payment_id=gateway_payment_id,
+                    signature=signature,
+                ):
+            # A correct-looking payload with the wrong signature is a replay or
+            # a guess. Drop the id and let the order-level lookup decide.
+            current_app.logger.error(
+                f'[credit] bad checkout signature for bill payment '
+                f'{record.credit_transaction_id}; ignoring the supplied id.'
+            )
+            gateway_payment_id = None
+        return adapters.get_upi_payment_status(
+            order_id=record.gateway_order_id, payment_id=gateway_payment_id,
+        )
+
+    return adapters.get_payment_status(record.gateway_order_id)
+
+
+def _apply_bill_payment(record: CreditTransactions,
+                        status: dict) -> CreditTransactions:
+    """
+    The gateway says the money arrived. Restore the credit it frees.
+
+    Same locking discipline as a purchase. The caller holds the payment row's
+    lock; this takes the account's, in that order everywhere, so the two cannot
+    deadlock against each other.
+
+    The money has already moved, so this cannot refuse. If the balance fell
+    while the payment was in flight - a refund landed - the part that no longer
+    has anything to settle is recorded for operations to return, rather than
+    written as a credit balance the product cannot represent.
+    """
+    amount = money(record.amount)
+
+    with ledger_engine.atomic():
+        account = _lock(record.credit_account_id)
+
+        outstanding_before = money(account.current_outstanding)
+        applied = min(amount, outstanding_before)
+        excess = amount - applied
+        outstanding = outstanding_before - applied
+        available = money(account.credit_limit) - outstanding
+        if available < ZERO:
+            # Fees took the balance past the limit; nothing is spendable yet.
+            available = ZERO
+        else:
+            _assert_invariant(account, available, outstanding)
+
+        method_label = BillPaymentMethod.LABELS.get(
+            record.payment_method, record.payment_method or 'Payment',
+        )
+        try:
+            txn = ledger_engine.post(
+                user_id=account.user_id,
+                transaction_type=TransactionType.CREDIT_BILL_PAYMENT,
+                gross_amount=amount,
+                net_amount=amount,
+                source_type=_SOURCE_BY_METHOD.get(
+                    record.payment_method, SourceType.UPI_VPA,
+                ),
+                source_masked_ref=method_label,
+                dest_type=DestType.CREDIT_LINE,
+                dest_masked_ref=account.masked_number,
+                gateway_provider=record.gateway_provider or GatewayProvider.SANDBOX,
+                gateway_ref_no=record.gateway_order_id,
+                bank_rrn_utr=status.get('rrn'),
+                idempotency_key=record.idempotency_key,
+                status=TransactionStatus.SUCCEEDED,
+                entries=ledger_engine.entries_for_credit_bill_payment(
+                    amount, method_label, account.masked_number,
+                ),
+                commit=False,
+            )
+            transaction_id = txn.transaction_id
+        except ledger_engine.DuplicateTransaction as dup:
+            # Posted by an earlier attempt that died before marking the row.
+            transaction_id = dup.transaction.transaction_id
+
+        account.current_outstanding = outstanding
+        account.available_credit = available
+
+        record.status = CreditTransactionStatus.SUCCEEDED
+        record.transaction_id = transaction_id
+        record.balance_after = outstanding
+        record.available_after = available
+        record.gateway_reference = (str(status.get('rrn') or '')[:64]) or None
+        record.failure_code = None
+        record.failure_reason = None
+        record.settled_at = utcnow()
+
+        # Applied to the statement the payer chose if it still owes, otherwise
+        # the oldest that does. Oldest first is what stops a payment clearing
+        # this month's bill while last month's goes overdue.
+        target = None
+        if record.target_statement_id:
+            target = CreditStatements.query.filter(
+                CreditStatements.statement_id == record.target_statement_id,
+                CreditStatements.status.in_(StatementStatus.OUTSTANDING),
+            ).first()
+        target = target or _oldest_outstanding_statement(record.credit_account_id)
+        if target is not None and applied > ZERO:
+            _apply_to_statement(target, applied)
+
+    if excess > ZERO:
+        current_app.logger.error(
+            f'[credit] bill payment {record.credit_transaction_id} collected '
+            f'Rs. {excess} more than was owed; queued for return.'
+        )
+        error_recorder.record(
+            user_id=record.user_id,
+            code='BILL_OVERPAYMENT',
+            reason=f'Collected Rs. {excess} above the outstanding balance.',
+            reference_type='CreditTransactions',
+            reference_id=record.credit_transaction_id,
+            transaction_id=record.transaction_id,
+            payment_method=record.payment_method,
+            gateway=record.gateway_provider,
+            amount=excess,
+            transaction_status=record.status,
+        )
+
     audit.record(
         action='CREDIT_BILL_PAYMENT',
         entity_type='CreditTransactions',
@@ -872,8 +1368,76 @@ def pay_bill(*, account: CreditAccounts, amount, source_type: str,
         after={
             'amount': float(amount),
             'outstanding_before': float(outstanding_before),
-            'outstanding_after': float(record.balance_after),
+            'outstanding_after': float(outstanding),
+            'gateway': record.gateway_provider,
         },
+    )
+    return record
+
+
+def _abandon(record: CreditTransactions, final_status: str, code: str,
+             reason: str) -> CreditTransactions:
+    """
+    Close an unpaid payment - but only once the gateway confirms it is unpaid.
+
+    A payment that did go through is settled instead. One whose attempt is still
+    live at the bank is left processing: closing it would orphan a debit that
+    may yet land.
+    """
+    locked = _lock_payment(record)
+    if locked is None:
+        return CreditTransactions.query.filter_by(
+            credit_transaction_id=record.credit_transaction_id,
+        ).populate_existing().first() or record
+    record = locked
+
+    status = _gateway_status(record)
+
+    if not status.get('ok'):
+        db.session.commit()
+        return record
+
+    if status.get('paid'):
+        if status.get('gateway_payment_id'):
+            record.gateway_payment_id = str(status['gateway_payment_id'])[:100]
+        return _apply_bill_payment(record, status)
+
+    if status.get('gateway_payment_id') and \
+            (status.get('status') or '').upper() == 'PENDING':
+        db.session.commit()
+        return record
+
+    return _close_unpaid(record, final_status, code, reason)
+
+
+def _close_unpaid(record: CreditTransactions, final_status: str, code: str,
+                  reason: str, gateway_response: dict = None):
+    """Mark a payment that collected nothing, and log a failure for support."""
+    record.status = final_status
+    record.failure_code = (code or 'PAYMENT_FAILED')[:50]
+    record.failure_reason = (reason or '')[:500]
+    db.session.commit()
+
+    if final_status == CreditTransactionStatus.FAILED:
+        error_recorder.record(
+            user_id=record.user_id,
+            code=record.failure_code,
+            reason=record.failure_reason,
+            reference_type='CreditTransactions',
+            reference_id=record.credit_transaction_id,
+            payment_method=record.payment_method,
+            gateway=record.gateway_provider,
+            amount=record.amount,
+            transaction_status=record.status,
+            gateway_response=gateway_response,
+        )
+
+    audit.record(
+        action=f'CREDIT_BILL_PAYMENT_{final_status}',
+        entity_type='CreditTransactions',
+        entity_id=record.credit_transaction_id,
+        actor_user_id=record.user_id,
+        after={'code': record.failure_code},
     )
     return record
 
@@ -952,6 +1516,13 @@ def cut_statement(account: CreditAccounts, *, as_of: date = None
          if t.transaction_type == CreditTransactionType.FEE), ZERO,
     )
 
+    fresh = (
+        CreditAccounts.query
+        .filter_by(credit_account_id=account.credit_account_id)
+        .populate_existing()
+        .first()
+    )
+
     previous = CreditStatements.query.filter(
         CreditStatements.credit_account_id == account.credit_account_id,
     ).order_by(CreditStatements.period_end.desc()).first()
@@ -993,6 +1564,10 @@ def cut_statement(account: CreditAccounts, *, as_of: date = None
         closing_balance=closing,
         minimum_due=minimum,
         minimum_due_percent=percent,
+        # As the account stood at the close of the cycle. Read fresh, because the
+        # instance passed in may have been loaded before the last spend landed.
+        credit_limit=money(fresh.credit_limit),
+        available_credit=money(fresh.available_credit),
         status=StatementStatus.PAID if closing <= ZERO else StatementStatus.UNPAID,
     )
     if closing <= ZERO:
@@ -1174,6 +1749,7 @@ def charge_fee(*, account: CreditAccounts, amount, description: str,
                 status=CreditTransactionStatus.SUCCEEDED,
                 amount=amount,
                 balance_after=outstanding,
+                available_after=available,
                 description=description[:200],
                 idempotency_key=idempotency_key,
                 settled_at=utcnow(),
@@ -1279,6 +1855,7 @@ def refund(*, purchase_txn: CreditTransactions, amount=None,
                 status=CreditTransactionStatus.SUCCEEDED,
                 amount=amount,
                 balance_after=outstanding,
+                available_after=available,
                 merchant_name=purchase_txn.merchant_name,
                 merchant_category=purchase_txn.merchant_category,
                 description=f'Refund of {purchase_txn.merchant_name}',
