@@ -6,6 +6,9 @@ import { PageHeader } from '../../components/layout/AppShell';
 import {
   Badge, Button, Card, EmptyState, Row, Skeleton, Tabs, cx,
 } from '../../components/ui';
+import {
+  CREDIT_TYPE_LABEL, CreditTransactionRow,
+} from '../../components/credit/CreditTransactionRow';
 import { useFetch } from '../../hooks/useProfile';
 import { date, money } from '../../utils/format';
 
@@ -32,12 +35,9 @@ const FILTERS = [
   { value: 'FEE', label: 'Fees' },
 ];
 
-const TYPE_LABEL = {
-  PURCHASE: 'Purchase',
-  PAYMENT: 'Bill payment',
-  REFUND: 'Refund',
-  FEE: 'Fee',
-};
+// One label map, shared with the row component, so a type cannot read
+// differently on the list and in the detail.
+const TYPE_LABEL = CREDIT_TYPE_LABEL;
 
 export function CreditTransactionList() {
   const navigate = useNavigate();
@@ -74,43 +74,13 @@ export function CreditTransactionList() {
       ) : (
         <Card className="py-1">
           <div className="divide-y divide-line">
-            {transactions.map((txn) => {
-              const debit = txn.direction === 'DEBIT';
-              return (
-                <button
-                  key={txn.credit_transaction_id}
-                  type="button"
-                  onClick={() => navigate(`/credit/transactions/${txn.credit_transaction_id}`)}
-                  className="flex w-full items-center justify-between gap-3 py-3.5 text-left transition hover:bg-mist/40"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-ink">
-                      {txn.merchant_name || TYPE_LABEL[txn.type] || txn.type}
-                    </p>
-                    <p className="mt-0.5 text-2xs text-slate">
-                      {TYPE_LABEL[txn.type] || txn.type} · {date(txn.created_on)}
-                      {txn.is_test && ' · TEST'}
-                    </p>
-                  </div>
-
-                  <div className="shrink-0 text-right">
-                    <p
-                      className={cx(
-                        'money text-sm font-semibold',
-                        debit ? 'text-ink' : 'text-mint-700',
-                      )}
-                    >
-                      {debit ? '−' : '+'}{money(txn.amount)}
-                    </p>
-                    {txn.balance_after != null && (
-                      <p className="money mt-0.5 text-2xs text-slate">
-                        bal {money(txn.balance_after)}
-                      </p>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
+            {transactions.map((txn) => (
+              <CreditTransactionRow
+                key={txn.credit_transaction_id}
+                transaction={txn}
+                onClick={() => navigate(`/credit/transactions/${txn.credit_transaction_id}`)}
+              />
+            ))}
           </div>
         </Card>
       )}

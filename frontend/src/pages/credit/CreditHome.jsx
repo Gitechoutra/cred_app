@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
 import { PageHeader } from '../../components/layout/AppShell';
-import { ListLink, TransactionRow } from '../../components/domain';
+import { ListLink } from '../../components/domain';
 import {
   Badge, Button, Card, EmptyState, Meter, Row, Section, Sheet, Skeleton,
 } from '../../components/ui';
 import { CreditCardFace } from '../../components/credit/CreditCardFace';
+import { CreditTransactionRow } from '../../components/credit/CreditTransactionRow';
 import { useToast } from '../../context/ToastContext';
 import { useFetch } from '../../hooks/useProfile';
 import { date, money } from '../../utils/format';
@@ -331,16 +332,10 @@ export default function CreditHome() {
           <Card className="py-1">
             <div className="divide-y divide-line">
               {transactions.slice(0, 5).map((txn) => (
-                <TransactionRow
+                <CreditTransactionRow
                   key={txn.credit_transaction_id}
-                  transaction={{
-                    transaction_id: txn.credit_transaction_id,
-                    type: txn.type,
-                    amount: txn.amount,
-                    status: txn.status,
-                    source: txn.merchant_name || txn.description,
-                    created_on: txn.created_on,
-                  }}
+                  transaction={txn}
+                  showBalance={false}
                   onClick={() => navigate(`/credit/transactions/${txn.credit_transaction_id}`)}
                 />
               ))}
