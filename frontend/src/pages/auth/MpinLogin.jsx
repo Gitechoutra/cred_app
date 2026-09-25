@@ -55,7 +55,7 @@ export default function MpinLogin() {
     return (
       <div className="min-h-screen bg-canvas">
         <div className="mx-auto w-full max-w-md">
-          <PageHeader title="" back="/" sticky={false} />
+          <PageHeader title="" back={true} sticky={false} />
 
           {/* Each line arrives just behind the one above it. 60ms is enough to
               read as a sequence without making anyone wait to type - the input
@@ -123,7 +123,7 @@ export default function MpinLogin() {
       <div className="mx-auto flex w-full max-w-md flex-1 flex-col">
         <PageHeader
           title=""
-          back={undefined}
+          back={true}
           sticky={false}
           action={
             <button

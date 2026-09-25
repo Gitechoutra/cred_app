@@ -329,9 +329,16 @@ function SearchModal({ onClose }) {
               Clear
             </button>
           )}
-          <span className="hidden sm:inline-block rounded bg-mist px-1.5 py-0.5 text-[10px] font-semibold text-slate">
-            ESC
-          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close search"
+            className="hidden sm:inline-flex items-center justify-center rounded p-1 text-slate hover:bg-mist hover:text-ink transition-colors"
+          >
+            <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5">
+              <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+            </svg>
+          </button>
         </div>
 
         <div className="mt-3 max-h-80 overflow-y-auto space-y-1">

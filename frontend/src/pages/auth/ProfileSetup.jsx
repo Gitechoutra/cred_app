@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
+import { PageHeader } from '../../components/layout/AppShell';
 import { Button, Input } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
 import { useProfile } from '../../hooks/useProfile';
@@ -53,6 +54,7 @@ export default function ProfileSetup() {
   return (
     <div className="min-h-screen bg-canvas">
       <div className="mx-auto w-full max-w-md px-6 py-8">
+        <PageHeader title="" back={true} sticky={false} />
         <StepDots current={1} total={2} />
 
         <h1 className="mt-6 text-2xl font-bold tracking-tight text-ink">

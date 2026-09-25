@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
+import { PageHeader } from '../../components/layout/AppShell';
 import { Button } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
 import { useProfile } from '../../hooks/useProfile';
@@ -99,6 +100,7 @@ export default function MpinSetup() {
   return (
     <div className="flex min-h-screen flex-col bg-canvas">
       <div className="mx-auto flex w-full max-w-md flex-1 flex-col px-6 py-8">
+        <PageHeader title="" back={true} sticky={false} />
         <StepDots current={2} total={2} />
 
         <div className="flex flex-1 flex-col items-center justify-center py-8">
