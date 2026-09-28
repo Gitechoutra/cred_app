@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
 import { CardTile } from '../../components/domain';
-import { IconCard, IconPlus } from '../../components/layout/AppShell';
+import { IconCard, IconPlus, PageHeader } from '../../components/layout/AppShell';
 import { Button, EmptyState, Skeleton } from '../../components/ui';
 import { useFetch } from '../../hooks/useProfile';
 import { money } from '../../utils/format';
@@ -14,7 +14,7 @@ export default function Cards() {
   if (loading) {
     return (
       <div className="space-y-4 px-4 pt-5">
-        <Skeleton className="h-6 w-32" />
+        <PageHeader title="Your cards" back="/home" />
         <Skeleton className="h-24 w-full rounded-2xl" />
         <Skeleton className="h-[156px] w-full rounded-2xl" />
         <Skeleton className="h-[156px] w-full rounded-2xl" />
@@ -26,24 +26,23 @@ export default function Cards() {
 
   return (
     <div className="animate-fade-up pb-6">
-      <header className="flex items-center justify-between px-4 pt-5 pb-3">
-        <div>
-          <h1 className="text-xl font-bold text-ink">Your cards</h1>
-          <p className="text-xs text-slate">
-            {cards.length} {cards.length === 1 ? 'card' : 'cards'} linked
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => navigate(-1)}>
-            Back
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => navigate('/cards/add')}>
-            <IconPlus className="h-4 w-4" />
-            Add
-          </Button>
-        </div>
-      </header>
+      {/* The shared header, so Back looks and behaves as on every other page:
+          a chevron on the left that returns to the real previous screen. The
+          text button this replaces used navigate(-1), which leaves the app when
+          Cards was opened from a link. */}
+      <div className="px-4 pt-5">
+        <PageHeader
+          title="Your cards"
+          subtitle={`${cards.length} ${cards.length === 1 ? 'card' : 'cards'} linked`}
+          back="/home"
+          action={
+            <Button variant="outline" size="sm" onClick={() => navigate('/cards/add')}>
+              <IconPlus className="h-4 w-4" />
+              Add
+            </Button>
+          }
+        />
+      </div>
 
       {cards.length === 0 ? (
         <div className="px-4 pt-10">

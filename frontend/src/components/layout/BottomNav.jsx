@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 
 import { cx } from '../ui';
 import { IconChevron, IconSearch, IconUser } from './AppShell';
@@ -18,7 +18,24 @@ import { IconChevron, IconSearch, IconUser } from './AppShell';
  */
 
 export function BottomNav({ items, children }) {
-  const [searchOpen, setSearchOpen] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  /* Search is a screen of its own as far as Back is concerned. Opening it adds
+     one history entry for the page underneath, so the back chevron, the device
+     back button and the browser's back button all simply close it and leave
+     you where you were - rather than leaving the page behind it. */
+  const searchOpen = Boolean(location.state?.searchOpen);
+  const openSearch = () => {
+    if (searchOpen) return;
+    navigate(`${location.pathname}${location.search}`, {
+      state: { ...(location.state || {}), searchOpen: true },
+    });
+  };
+  const closeSearch = () => navigate(-1);
+  // A result replaces the search entry, so Back from where it leads returns to
+  // the page search was opened on, not to a search box that reopens.
+  const goFromSearch = (to) => navigate(to, { replace: true });
 
   return (
     <>
@@ -46,7 +63,7 @@ export function BottomNav({ items, children }) {
               <SearchNavItem
                 key="search"
                 {...item}
-                onClick={() => setSearchOpen(true)}
+                onClick={openSearch}
               />
             ) : (
               <BottomNavItem key={item.to} {...item} />
@@ -56,7 +73,7 @@ export function BottomNav({ items, children }) {
         </div>
       </nav>
 
-      {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} />}
+      {searchOpen && <SearchModal onClose={closeSearch} onGo={goFromSearch} />}
     </>
   );
 }
@@ -261,8 +278,7 @@ export function ProfileMenu({ name, detail, avatar, items, placement = 'top' }) 
 /**
  * Universal quick-search modal for CashU.
  */
-function SearchModal({ onClose }) {
-  const navigate = useNavigate();
+function SearchModal({ onClose, onGo }) {
   const [query, setQuery] = useState('');
   const inputRef = useRef(null);
 
@@ -312,6 +328,16 @@ function SearchModal({ onClose }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 border-b border-line pb-3.5">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Go back"
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-line bg-canvas text-ink shadow-sm transition-all duration-base ease-glide hover:-translate-x-0.5 hover:bg-mist active:scale-95"
+          >
+            <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" aria-hidden="true">
+              <path d="M12 4l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
           <IconSearch className="h-5 w-5 text-mint-700 shrink-0" />
           <input
             ref={inputRef}
@@ -348,10 +374,7 @@ function SearchModal({ onClose }) {
               <button
                 key={item.to}
                 type="button"
-                onClick={() => {
-                  onClose();
-                  navigate(item.to);
-                }}
+                onClick={() => onGo(item.to)}
                 className="group flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left hover:bg-mist/70 transition-colors"
               >
                 <div>
