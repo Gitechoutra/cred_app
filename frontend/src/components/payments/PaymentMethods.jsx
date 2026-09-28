@@ -1,6 +1,21 @@
 import { Button, Card, cx } from '../ui';
 import { IconLock } from '../layout/AppShell';
+import { BankLogo } from '../domain/BankLogo';
 import { money } from '../../utils/format';
+
+/* Popular net banking banks, with their Razorpay bank codes so Checkout can
+   open straight on the chosen bank. Logos are the official ones already
+   shipped in public/banks. */
+export const NETBANKING_BANKS = [
+  { id: 'sbi', name: 'SBI', code: 'SBIN' },
+  { id: 'hdfc', name: 'HDFC', code: 'HDFC' },
+  { id: 'icici', name: 'ICICI', code: 'ICIC' },
+  { id: 'axis', name: 'Axis', code: 'UTIB' },
+  { id: 'kotak', name: 'Kotak', code: 'KKBK' },
+  { id: 'yes', name: 'Yes Bank', code: 'YESB' },
+  { id: 'pnb', name: 'PNB', code: 'PUNB' },
+  { id: 'canara', name: 'Canara', code: 'CNRB' },
+];
 
 /**
  * The payment-method step, shared by every payment this platform collects.
@@ -32,6 +47,9 @@ export function PaymentMethodPicker({
   disabled,
   error,
   payLabel,
+  // Opt-in: screens that pass onBank get a bank grid under Net Banking.
+  bank,
+  onBank,
 }) {
   const upiSelected = mode && String(mode).startsWith('UPI');
 
@@ -105,6 +123,34 @@ export function PaymentMethodPicker({
           <p className="mt-2 text-2xs leading-relaxed text-slate">
             On a phone, your UPI app opens with the amount filled in. On a
             desktop you will get a QR code to scan.
+          </p>
+        </div>
+      )}
+
+      {mode === 'NETBANKING' && onBank && (
+        <div className="animate-slide-down">
+          <p className="mb-2 text-sm font-medium text-ink">Choose your bank</p>
+          <div className="grid grid-cols-4 gap-2">
+            {NETBANKING_BANKS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                aria-pressed={bank === option.code}
+                onClick={() => onBank(bank === option.code ? '' : option.code)}
+                className={cx(
+                  'flex min-w-0 flex-col items-center gap-1.5 rounded-xl border px-1 py-2.5 transition active:scale-95',
+                  bank === option.code
+                    ? 'border-mint bg-mint-50 ring-2 ring-mint/25'
+                    : 'border-line hover:border-ink/20',
+                )}
+              >
+                <BankLogo bankId={option.id} bankName={option.name} size="sm" />
+                <span className="w-full truncate text-center text-2xs font-medium text-ink">{option.name}</span>
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-2xs text-slate">
+            Other banks are listed on the next screen.
           </p>
         </div>
       )}

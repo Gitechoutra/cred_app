@@ -33,6 +33,7 @@ SUITES = [
     'validation_audit',
     'credit_lifecycle',
     'credit_concurrency',
+    'credit_statement_cycles',
     'upi_payment_flow',
     'upi_webhook',
     'smoke_flow',

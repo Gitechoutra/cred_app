@@ -961,7 +961,13 @@ def open_bill_payment(*, account: CreditAccounts, user, amount, method: str,
                     ErrorCode.CONFLICT,
                     'There is nothing outstanding on this credit line.',
                 )
-            if amount > outstanding:
+            # Normally no more than is owed. The exception is a balance smaller
+            # than the smallest collectable payment - 0.50 left after a partial
+            # payment - which could otherwise never be cleared. Paying the
+            # minimum is allowed then, and the few paise over become a credit
+            # balance on the card rather than being refused or lost.
+            payable = max(outstanding, minimum)
+            if amount > payable:
                 raise CreditError(
                     ErrorCode.VALIDATION_ERROR,
                     f'You owe Rs. {outstanding:,.2f}. Enter that or less.',
@@ -1267,9 +1273,10 @@ def _apply_bill_payment(record: CreditTransactions,
     deadlock against each other.
 
     The money has already moved, so this cannot refuse. If the balance fell
-    while the payment was in flight - a refund landed - the part that no longer
-    has anything to settle is recorded for operations to return, rather than
-    written as a credit balance the product cannot represent.
+    while the payment was in flight - a refund landed - the payment still
+    counts in full and the balance goes below zero: a credit balance, owed to
+    the holder and spent first, as on a real card. It used to be clamped at
+    zero and the difference only logged, which quietly kept the holder's money.
     """
     amount = money(record.amount)
 
@@ -1277,9 +1284,9 @@ def _apply_bill_payment(record: CreditTransactions,
         account = _lock(record.credit_account_id)
 
         outstanding_before = money(account.current_outstanding)
-        applied = min(amount, outstanding_before)
-        excess = amount - applied
-        outstanding = outstanding_before - applied
+        # The part that settles billed debt; anything beyond it is credit.
+        applied = max(ZERO, min(amount, outstanding_before))
+        outstanding = outstanding_before - amount
         available = money(account.credit_limit) - outstanding
         if available < ZERO:
             # Fees took the balance past the limit; nothing is spendable yet.
@@ -1341,24 +1348,6 @@ def _apply_bill_payment(record: CreditTransactions,
         target = target or _oldest_outstanding_statement(record.credit_account_id)
         if target is not None and applied > ZERO:
             _apply_to_statement(target, applied)
-
-    if excess > ZERO:
-        current_app.logger.error(
-            f'[credit] bill payment {record.credit_transaction_id} collected '
-            f'Rs. {excess} more than was owed; queued for return.'
-        )
-        error_recorder.record(
-            user_id=record.user_id,
-            code='BILL_OVERPAYMENT',
-            reason=f'Collected Rs. {excess} above the outstanding balance.',
-            reference_type='CreditTransactions',
-            reference_id=record.credit_transaction_id,
-            transaction_id=record.transaction_id,
-            payment_method=record.payment_method,
-            gateway=record.gateway_provider,
-            amount=excess,
-            transaction_status=record.status,
-        )
 
     audit.record(
         action='CREDIT_BILL_PAYMENT',
@@ -1493,10 +1482,16 @@ def cut_statement(account: CreditAccounts, *, as_of: date = None
     if existing:
         return existing
 
+    # REVERSED as well as SUCCEEDED. A fully refunded purchase moves to REVERSED,
+    # but it still happened, and its REFUND row is swept in and subtracted. With
+    # SUCCEEDED alone the purchase was dropped and the refund still counted, so
+    # the statement came out short by the purchase's amount.
     unbilled = CreditTransactions.query.filter(
         CreditTransactions.credit_account_id == account.credit_account_id,
         CreditTransactions.statement_id.is_(None),
-        CreditTransactions.status == CreditTransactionStatus.SUCCEEDED,
+        CreditTransactions.status.in_([
+            CreditTransactionStatus.SUCCEEDED, CreditTransactionStatus.REVERSED,
+        ]),
     ).all()
 
     purchases = sum(
@@ -1527,26 +1522,44 @@ def cut_statement(account: CreditAccounts, *, as_of: date = None
         CreditStatements.credit_account_id == account.credit_account_id,
     ).order_by(CreditStatements.period_end.desc()).first()
 
-    # The opening balance is the previous statement's unpaid remainder, not its
-    # closing balance: anything paid since then is already gone.
-    opening = (
-        money(previous.closing_balance) - money(previous.amount_paid)
-        if previous else ZERO
-    )
-    if opening < ZERO:
-        opening = ZERO
+    # The opening balance is the previous statement's closing balance, in full.
+    # Payments made since that statement are among the unbilled rows swept in
+    # below, so they are subtracted here exactly once.
+    #
+    # This used to open at closing *minus amount_paid*. A payment made after a
+    # statement is recorded in its amount_paid and is also an unbilled row, so it
+    # was subtracted twice: pay an 8,000 bill, spend 5,000, and the next
+    # statement read 0.00 due and PAID while the account owed 5,000.
+    opening = money(previous.closing_balance) if previous else ZERO
 
+    # Negative means a credit balance - a refund or a payment that crossed with
+    # one. It is carried as money owed to the holder, never discarded.
     closing = opening + purchases + fees - payments - refunds
-    if closing < ZERO:
-        closing = ZERO
+
+    # Every settled row up to now has been swept in, so the closing balance
+    # must be what the account itself says is owed. Checked, not assumed: a
+    # disagreement means a balance was written outside this module.
+    if closing != money(fresh.current_outstanding):
+        current_app.logger.error(
+            f'[credit] statement for {account.credit_account_id} closes at '
+            f'{closing} but the account owes {fresh.current_outstanding}'
+        )
 
     percent = money(settings.get_decimal(Key.MINIMUM_DUE_PERCENT))
-    minimum = money(closing * percent / 100)
-    # A minimum due below the collectable floor is pointless, so a small balance
-    # is simply due in full.
     floor = money(settings.get_decimal(Key.PAYMENT_MIN_AMOUNT))
-    if closing <= floor or minimum < floor:
-        minimum = closing
+    if closing <= ZERO:
+        minimum = ZERO
+    else:
+        minimum = money(closing * percent / 100)
+        # Anything past due on the statement being carried forward is added to
+        # this one's minimum, as on a real card: missing a minimum does not
+        # make the next month's minimum smaller.
+        if previous is not None and previous.status == StatementStatus.OVERDUE:
+            minimum += money(previous.minimum_outstanding)
+        # A minimum due below the collectable floor is pointless, so a small
+        # balance is simply due in full.
+        if closing <= floor or minimum < floor or minimum > closing:
+            minimum = closing
 
     statement = CreditStatements(
         credit_account_id=account.credit_account_id,
@@ -1579,6 +1592,17 @@ def cut_statement(account: CreditAccounts, *, as_of: date = None
             db.session.flush()
             for transaction in unbilled:
                 transaction.statement_id = statement.statement_id
+            # Older statements still owing are superseded: their balance is in
+            # this one's opening figure, so it is paid - and late-fee'd - here,
+            # once, rather than on two statements at the same time.
+            CreditStatements.query.filter(
+                CreditStatements.credit_account_id == account.credit_account_id,
+                CreditStatements.statement_id != statement.statement_id,
+                CreditStatements.status.in_(StatementStatus.OUTSTANDING),
+            ).update(
+                {'status': StatementStatus.CARRIED_FORWARD},
+                synchronize_session=False,
+            )
     except IntegrityError:
         # Another run cut this cycle first. Its statement is the right answer.
         db.session.rollback()
@@ -1819,9 +1843,11 @@ def refund(*, purchase_txn: CreditTransactions, amount=None,
         with ledger_engine.atomic():
             locked = _lock(purchase_txn.credit_account_id)
 
+            # Below zero is a credit balance: a refund for something already
+            # paid for. It used to be floored at zero, which swallowed the
+            # refund - pay a 3,000 bill, get 3,000 refunded, and the holder
+            # ended with nothing to show for it.
             outstanding = money(locked.current_outstanding) - amount
-            if outstanding < ZERO:
-                outstanding = ZERO
             available = money(locked.credit_limit) - outstanding
 
             txn = ledger_engine.post(

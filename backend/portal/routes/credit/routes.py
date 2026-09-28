@@ -159,6 +159,10 @@ def account_dict(account, detailed: bool = False) -> dict:
         'credit_limit': to_float(account.credit_limit),
         'available_credit': to_float(account.available_credit),
         'current_outstanding': to_float(account.current_outstanding),
+        # Money owed *to* the holder - a refund after the bill was paid. Sent
+        # as its own positive figure so no screen has to interpret a negative
+        # outstanding balance.
+        'credit_balance': to_float(account.credit_balance),
         'utilization_percent': account.utilization_percent,
         'currency': account.currency,
         'purpose': account.purpose,

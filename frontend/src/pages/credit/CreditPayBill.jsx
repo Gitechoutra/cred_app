@@ -62,6 +62,7 @@ export default function CreditPayBill() {
   const [amount, setAmount] = useState('');
   const [mode, setMode] = useState('UPI_INTENT');
   const [upiApp, setUpiApp] = useState('google_pay');
+  const [bank, setBank] = useState('');
   const [error, setError] = useState('');
   const [failure, setFailure] = useState(null);
   const [stage, setStage] = useState(null); // null | 'opening' | 'awaiting' | 'verifying'
@@ -97,8 +98,15 @@ export default function CreditPayBill() {
   const simulated = Boolean(methods?.sandbox) && chosen?.provider === 'SANDBOX';
 
   const presets = [
+    // A balance smaller than the smallest collectable payment is cleared by
+    // paying that minimum; the few paise over stay on the card as credit.
     outstanding > 0 && {
-      key: 'full', label: 'Total outstanding', hint: 'Clears everything you owe', value: outstanding,
+      key: 'full',
+      label: 'Total outstanding',
+      hint: outstanding < minimumAmount
+        ? `Minimum payment is ${money(minimumAmount)} - the rest stays as credit`
+        : 'Clears everything you owe',
+      value: Math.max(outstanding, minimumAmount),
     },
     minimum > 0 && minimum < outstanding && {
       key: 'minimum',
@@ -112,7 +120,9 @@ export default function CreditPayBill() {
     if (!amount) return 'Enter an amount to pay.';
     if (!Number.isFinite(payable) || payable <= 0) return 'Enter a valid amount.';
     if (payable < minimumAmount) return `The smallest payment is ${money(minimumAmount)}.`;
-    if (payable > outstanding) return `You owe ${money(outstanding)}. Enter that or less.`;
+    if (payable > Math.max(outstanding, minimumAmount)) {
+      return `You owe ${money(outstanding)}. Enter that or less.`;
+    }
     return '';
   }
 
@@ -203,6 +213,8 @@ export default function CreditPayBill() {
             prefill: {
               ...(methods?.prefill || {}),
               ...(UPI.includes(mode) ? { method: 'upi' } : {}),
+              ...(mode === 'NETBANKING' ? { method: 'netbanking', ...(bank ? { bank } : {}) } : {}),
+              ...(mode === 'DEBIT_CARD' ? { method: 'card' } : {}),
             },
             notes: { credit_transaction_id: txn.credit_transaction_id },
             theme: { color: '#00F5B8' },
@@ -383,7 +395,9 @@ export default function CreditPayBill() {
           <Badge tone="good" dot>All clear</Badge>
           <p className="mt-3 text-base font-semibold text-ink">Nothing outstanding</p>
           <p className="mt-1 text-sm text-slate">
-            Your full {money(account?.credit_limit)} limit is available.
+            {Number(account?.credit_balance) > 0
+              ? `You have ${money(account.credit_balance)} in credit on your card. It is used first on your next payment.`
+              : `Your full ${money(account?.credit_limit)} limit is available.`}
           </p>
           <Button variant="outline" size="lg" full className="mt-5" onClick={() => returnTo('/credit')}>
             Back to my card
@@ -420,6 +434,8 @@ export default function CreditPayBill() {
           onMode={(value) => { setMode(value); setFailure(null); }}
           upiApp={upiApp}
           onUpiApp={setUpiApp}
+          bank={bank}
+          onBank={setBank}
           onPay={onPay}
           busy={false}
           disabled={!methods}
@@ -539,7 +555,7 @@ export default function CreditPayBill() {
           value={amount}
           onChange={(event) => { setAmount(sanitizeAmount(event.target.value)); setError(''); }}
           error={error}
-          hint={`Anything from ${money(minimumAmount)} up to ${money(outstanding)}.`}
+          hint={`Anything from ${money(minimumAmount)} up to ${money(Math.max(outstanding, minimumAmount))}.`}
         />
 
         <Button variant="mint" size="lg" full onClick={toMethodStep}>

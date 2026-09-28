@@ -29,6 +29,7 @@ const TONE = {
   PARTIALLY_PAID: 'warn',
   UNPAID: 'warn',
   OVERDUE: 'alert',
+  CARRIED_FORWARD: 'neutral',
 };
 
 const STATUS_LABEL = {
@@ -36,6 +37,8 @@ const STATUS_LABEL = {
   PARTIALLY_PAID: 'Partly paid',
   UNPAID: 'Unpaid',
   OVERDUE: 'Overdue',
+  // Its unpaid balance opened the next statement, and is owed there now.
+  CARRIED_FORWARD: 'Carried forward',
 };
 
 export function CreditStatementList() {
@@ -173,12 +176,14 @@ export function CreditStatementDetail() {
             {owing ? 'Amount due' : 'Total billed'}
           </p>
           <p className="money mt-1 text-4xl font-bold tracking-tight">
-            {money(owing ? statement.amount_outstanding : statement.total_amount_due)}
+            {money(owing ? statement.amount_outstanding : Math.max(0, statement.total_amount_due))}
           </p>
           <p className="mt-2 text-sm text-white/70">
             {owing
               ? `Due by ${date(statement.due_date)}`
-              : statement.amount_paid > 0 ? 'Paid in full - thank you' : 'Nothing was owed this cycle'}
+              : statement.closing_balance < 0
+                ? `You have ${money(-statement.closing_balance)} in credit`
+                : statement.amount_paid > 0 ? 'Paid in full - thank you' : 'Nothing was owed this cycle'}
           </p>
         </div>
 
@@ -223,8 +228,14 @@ export function CreditStatementDetail() {
         <Row label="Refunds" value={`− ${money(statement.total_refunds)}`} mono />
 
         <div className="mt-2 flex items-baseline justify-between gap-4 border-t border-line pt-3">
-          <span className="text-sm font-semibold text-ink">Closing balance</span>
-          <span className="money text-base font-bold text-ink">{money(statement.closing_balance)}</span>
+          <span className="text-sm font-semibold text-ink">
+            {statement.closing_balance < 0 ? 'Closing balance (in your favour)' : 'Closing balance'}
+          </span>
+          <span className={cx('money text-base font-bold', statement.closing_balance < 0 ? 'text-mint-700' : 'text-ink')}>
+            {statement.closing_balance < 0
+              ? `${money(-statement.closing_balance)} credit`
+              : money(statement.closing_balance)}
+          </span>
         </div>
 
         <Row label="Total amount due" value={money(statement.total_amount_due)} mono className="mt-1" />

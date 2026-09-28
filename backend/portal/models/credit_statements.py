@@ -15,8 +15,12 @@ class StatementStatus:
     PAID = 'PAID'
     #: Past the due date with the minimum due unmet.
     OVERDUE = 'OVERDUE'
+    #: Superseded by a later statement that opened with this one's closing
+    #: balance. What was left unpaid here is owed on that statement now, so it
+    #: is no longer chased - or late-fee'd - on this one as well.
+    CARRIED_FORWARD = 'CARRIED_FORWARD'
 
-    CHOICES = [UNPAID, PARTIALLY_PAID, PAID, OVERDUE]
+    CHOICES = [UNPAID, PARTIALLY_PAID, PAID, OVERDUE, CARRIED_FORWARD]
     #: A statement in one of these still owes money.
     OUTSTANDING = [UNPAID, PARTIALLY_PAID, OVERDUE]
 

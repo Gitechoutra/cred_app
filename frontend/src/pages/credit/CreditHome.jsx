@@ -285,7 +285,11 @@ export default function CreditHome() {
             <ActionTile
               icon={<Glyph d={GLYPHS.bill} />}
               label="Pay bill"
-              hint={outstanding > 0 ? `${money(outstanding, { decimals: 0 })} owed` : 'Nothing owed'}
+              hint={
+                outstanding > 0 ? `${money(outstanding, { decimals: 0 })} owed`
+                  : Number(account.credit_balance) > 0 ? `${money(account.credit_balance, { decimals: 0 })} in credit`
+                    : 'Nothing owed'
+              }
               onClick={() => navigate('/credit/pay')}
             />
             <ActionTile

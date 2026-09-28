@@ -162,9 +162,24 @@ class CreditAccounts(db.Model, TimestampMixin, CRUDMixin):
     def utilization_percent(self):
         if not self.credit_limit:
             return None
-        return round(
+        # Floored at zero: a credit balance is not negative utilisation.
+        return max(0.0, round(
             float(self.current_outstanding) / float(self.credit_limit) * 100, 2
-        )
+        ))
+
+    @property
+    def credit_balance(self):
+        """
+        Money the bank owes the holder, as a positive number, or zero.
+
+        A refund that lands after the bill was paid - or a payment that crossed
+        with one - leaves the balance below zero, exactly as on a real card. It
+        stays on the card, adds to available credit, and is used up by the next
+        spend. current_outstanding carries it as a negative number, so the
+        invariant available + outstanding == limit holds unchanged.
+        """
+        outstanding = self.current_outstanding or 0
+        return -outstanding if outstanding < 0 else 0
 
     def __repr__(self):
         return (

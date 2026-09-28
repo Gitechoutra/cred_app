@@ -81,7 +81,11 @@ export function CreditBalances({ account, className }) {
   const stats = [
     { label: 'Credit limit', value: account.credit_limit },
     { label: 'Available', value: account.available_credit, emphasis: true },
-    { label: 'Used', value: account.current_outstanding },
+    // A credit balance - a refund after the bill was paid - replaces "Used",
+    // shown as the positive amount it is rather than as a negative spend.
+    Number(account.credit_balance) > 0
+      ? { label: 'Credit', value: account.credit_balance, credit: true }
+      : { label: 'Used', value: account.current_outstanding },
   ];
 
   return (
@@ -95,7 +99,8 @@ export function CreditBalances({ account, className }) {
             <p
               className={cx(
                 'money mt-1 truncate font-bold tracking-tight',
-                stat.emphasis ? 'text-base text-mint-700 sm:text-xl' : 'text-sm text-ink sm:text-lg',
+                stat.emphasis ? 'text-base text-mint-700 sm:text-xl'
+                  : stat.credit ? 'text-sm text-mint-700 sm:text-lg' : 'text-sm text-ink sm:text-lg',
               )}
               title={money(stat.value)}
             >
@@ -106,9 +111,11 @@ export function CreditBalances({ account, className }) {
       </div>
       <Meter value={utilization} tone={tone} className="mt-4" />
       <p className="mt-2 text-2xs text-slate">
-        {utilization > 80
-          ? 'You are close to your limit. Paying your bill frees it up again.'
-          : `${utilization}% of your limit is in use.`}
+        {Number(account.credit_balance) > 0
+          ? `${money(account.credit_balance)} is owed to you and is used first on your next payment.`
+          : utilization > 80
+            ? 'You are close to your limit. Paying your bill frees it up again.'
+            : `${utilization}% of your limit is in use.`}
       </p>
     </Card>
   );
