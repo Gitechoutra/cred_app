@@ -56,7 +56,9 @@ import AdminLayout from '../pages/admin/AdminLayout';
 import AdminDashboard from '../pages/admin/AdminDashboard';
 import AdminUsers from '../pages/admin/AdminUsers';
 import AdminKycQueue from '../pages/admin/AdminKycQueue';
-import AdminCreditApplications from '../pages/admin/AdminCreditApplications';
+import AdminCreditApplications, {
+  AdminCreditApplicationReview,
+} from '../pages/admin/AdminCreditApplications';
 import AdminReconciliation from '../pages/admin/AdminReconciliation';
 import AdminSettings from '../pages/admin/AdminSettings';
 
@@ -204,6 +206,7 @@ export default function App() {
         <Route path="users" element={<AdminUsers />} />
         <Route path="kyc" element={<AdminKycQueue />} />
         <Route path="credit" element={<AdminCreditApplications />} />
+        <Route path="credit/:applicationId" element={<AdminCreditApplicationReview />} />
         <Route path="reconciliation" element={<AdminReconciliation />} />
         <Route path="settings" element={<AdminSettings />} />
       </Route>

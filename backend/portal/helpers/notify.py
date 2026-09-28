@@ -87,6 +87,14 @@ _MATRIX = {
         [NotificationChannel.IN_APP, NotificationChannel.PUSH],
         NotificationPriority.MEDIUM,
     ),
+    NotificationEvent.CREDIT_APPROVED: (
+        [NotificationChannel.IN_APP, NotificationChannel.PUSH, NotificationChannel.SMS],
+        NotificationPriority.HIGH,
+    ),
+    NotificationEvent.CREDIT_REJECTED: (
+        [NotificationChannel.IN_APP, NotificationChannel.PUSH],
+        NotificationPriority.MEDIUM,
+    ),
 }
 
 #: Default copy, mirroring the PRD 14.1 template column.
@@ -154,6 +162,15 @@ _COPY = {
         'Bank account verified',
         'Your bank account ending {account} has been verified and is ready for '
         'transfers.',
+    ),
+    NotificationEvent.CREDIT_APPROVED: (
+        'Credit line approved',
+        'Your CashU credit line of Rs. {limit} is approved. Choose what it is '
+        'for and activate it to start using it.',
+    ),
+    NotificationEvent.CREDIT_REJECTED: (
+        'Credit application update',
+        'We could not approve your credit application this time: {reason}',
     ),
 }
 

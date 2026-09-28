@@ -43,9 +43,11 @@ from portal import db
 from portal.helpers import (
     adapters, audit, error_recorder, ledger_engine, settings, test_cards,
 )
+from portal.helpers.encryption import decrypt
 from portal.helpers.helpers import ErrorCode
 from portal.helpers.ledger_engine import money
 from portal.helpers.settings import Key
+from portal.models.bank_accounts import BankAccounts, PennyDropStatus
 from portal.models.base import utcnow
 from portal.models.credit_accounts import (
     CreditAccounts, CreditAccountStatus, CreditPurpose,
@@ -61,6 +63,7 @@ from portal.models.credit_transactions import (
 from portal.models.master_transactions import (
     DestType, GatewayProvider, SourceType, TransactionStatus, TransactionType,
 )
+from portal.models.kyc_verifications import KYCStatus
 from portal.models.users import KYCTier
 
 ZERO = Decimal('0.00')
@@ -111,6 +114,8 @@ class DecisionReason:
     OBLIGATIONS_TOO_HIGH = 'OBLIGATIONS_TOO_HIGH'
     FULL_KYC_REQUIRED = 'FULL_KYC_REQUIRED'
     MANUAL_DECLINE = 'MANUAL_DECLINE'
+    CREDIT_SCORE_TOO_LOW = 'CREDIT_SCORE_TOO_LOW'
+    CREDIT_SCORE_UNAVAILABLE = 'CREDIT_SCORE_UNAVAILABLE'
 
     MESSAGES = {
         APPROVED: 'Your credit line has been approved.',
@@ -127,102 +132,194 @@ class DecisionReason:
             'Complete full KYC to be considered for a limit this size.'
         ),
         MANUAL_DECLINE: 'We are unable to offer a credit line at this time.',
+        CREDIT_SCORE_TOO_LOW: (
+            'Your credit score is below what we need for a credit line right '
+            'now. Paying existing loans and cards on time raises it.'
+        ),
+        CREDIT_SCORE_UNAVAILABLE: (
+            'We could not get your credit score yet, so your limit has not '
+            'been worked out.'
+        ),
     }
 
 
-#: Share of declared monthly income, net of existing EMI outflow, that may be
-#: extended as a credit limit. A multiple of *disposable* income rather than of
-#: gross, so an applicant already servicing debt is not offered a limit their
-#: cash flow cannot carry.
+#: How many months of disposable income - declared salary less existing EMIs -
+#: may be extended as a limit, by credit score band. Disposable rather than gross,
+#: so an applicant already servicing debt is not offered a limit their cash flow
+#: cannot carry; scaled by score, because the score is the evidence of how that
+#: applicant has handled credit before.
 #:
-#: Three months of disposable income is deliberately conservative for a first
-#: line. It is a constant rather than a setting because changing it changes who
-#: gets credit, which is a decision that should arrive as a reviewed commit
-#: rather than as an edit in an admin console at 2am.
-DISPOSABLE_INCOME_MULTIPLE = Decimal('3')
+#: Constants rather than settings, because changing them changes who gets credit
+#: and how much - a decision that should arrive as a reviewed commit rather than
+#: as an edit in an admin console at 2am.
+SCORE_BANDS = (
+    # (lowest score in band, income multiple, label)
+    (800, Decimal('4'), 'Excellent'),
+    (750, Decimal('3'), 'Very good'),
+    (700, Decimal('2'), 'Good'),
+    (650, Decimal('1'), 'Fair'),
+)
 
-#: Applicants in these categories have no assessable regular income here, so the
-#: offer is capped regardless of what they declare.
+#: Below this, no credit line is offered at all.
+MINIMUM_CREDIT_SCORE = 650
+
+#: Applicants the bureau has no history on are assessed on salary alone, at the
+#: lowest multiple, and capped - new to credit is not a bad score, but it is no
+#: evidence either.
+NO_HISTORY_MULTIPLE = Decimal('1')
+
+#: Applicants in these categories have no assessable regular income here, and
+#: neither does anyone new to credit, so their offer is capped regardless of
+#: what they declare.
 THIN_FILE_CAP = Decimal('20000.00')
 THIN_FILE_EMPLOYMENT = (EmploymentType.STUDENT, EmploymentType.OTHER)
 
 
+def score_band(score) -> str:
+    """The label for a credit score, for people rather than for the rules."""
+    if score is None:
+        return None
+    for floor, _, label in SCORE_BANDS:
+        if score >= floor:
+            return label
+    return 'Poor'
+
+
+#: Fixed obligations to income ratio: the share of monthly income already going
+#: to EMIs. Above this, a lender does not add more debt however good the score
+#: is - the applicant's cash flow is already committed.
+MAX_FOIR = Decimal('60')
+
+
 def assess(application: CreditApplications, user) -> dict:
     """
-    Compute an offer from the application. Pure: reads, decides, writes nothing.
+    Work out the eligible limit. Pure: reads, decides, writes nothing.
+
+    The limit comes from two things and nothing else: declared salary net of
+    existing EMIs, and the credit score from the bureau. The applicant does not
+    name a limit and an administrator does not set one - both used to be
+    possible, and both were a way for the number to drift from the evidence.
 
     Separate from `decide()` so the arithmetic can be tested without a database
-    write, and so the same numbers can be shown as an indicative offer before
-    anyone commits to them.
-    """
-    if user.kyc_tier == KYCTier.NONE:
-        return {
-            'approved': False,
-            'reason': DecisionReason.KYC_INCOMPLETE,
-            'limit': ZERO,
-            'score': ZERO,
-        }
+    write, and so the same numbers can be shown before anyone commits to them.
 
+    Also returns `breakdown` (every figure the limit was built from) and
+    `checks` (each rule, passed or not), so a reviewer can follow the number
+    rather than take it on trust.
+    """
     income = money(application.monthly_income)
     outflow = money(application.existing_emi_outflow)
     disposable = income - outflow
+    foir = money(outflow / income * 100) if income > ZERO else ZERO
+    score = application.credit_score
+    no_history = bool(application.credit_no_history)
+    floor = money(settings.get_decimal(Key.CREDIT_LIMIT_MIN))
 
-    if disposable <= ZERO:
+    breakdown = {
+        'monthly_income': income,
+        'existing_emis': outflow,
+        'disposable_income': disposable,
+        'foir_percent': foir,
+        'max_foir_percent': MAX_FOIR,
+        'credit_score': score,
+        'score_band': score_band(score),
+        'no_credit_history': no_history,
+        'minimum_score': MINIMUM_CREDIT_SCORE,
+        'kyc_tier': user.kyc_tier,
+        'minimum_limit': floor,
+        'income_multiple': None,
+        'base_limit': None,
+        'thin_file_cap': None,
+        'kyc_cap': None,
+        'eligible_limit': None,
+    }
+    checks = []
+
+    def check(key, label, passed, detail):
+        checks.append({'key': key, 'label': label, 'passed': bool(passed), 'detail': detail})
+        return passed
+
+    def refuse(reason, score=ZERO):
         return {
-            'approved': False,
-            'reason': DecisionReason.OBLIGATIONS_TOO_HIGH,
-            'limit': ZERO,
-            'score': ZERO,
+            'approved': False, 'reason': reason, 'limit': ZERO, 'score': score,
+            'full_kyc_limit': None, 'breakdown': breakdown, 'checks': checks,
         }
 
-    offer = money(disposable * DISPOSABLE_INCOME_MULTIPLE)
+    if not check('kyc', 'KYC verified', user.kyc_tier != KYCTier.NONE,
+                 f'{user.kyc_tier} tier' if user.kyc_tier != KYCTier.NONE
+                 else 'Not verified yet'):
+        return refuse(DecisionReason.KYC_INCOMPLETE)
 
-    if application.employment_type in THIN_FILE_EMPLOYMENT:
+    if not check('foir', f'Existing EMIs within {MAX_FOIR:.0f}% of income',
+                 disposable > ZERO and foir <= MAX_FOIR,
+                 f'{foir:.1f}% of income already goes to EMIs'):
+        return refuse(DecisionReason.OBLIGATIONS_TOO_HIGH)
+
+    affordability = _score(disposable, income)
+    thin_file = application.employment_type in THIN_FILE_EMPLOYMENT
+
+    if no_history:
+        check('score', 'Credit history', True,
+              'New to credit - assessed on income alone, and capped')
+        multiple = NO_HISTORY_MULTIPLE
+        thin_file = True
+    elif score is None:
+        check('score', 'Credit score available', False, 'Not fetched from the bureau yet')
+        return refuse(DecisionReason.CREDIT_SCORE_UNAVAILABLE, score=affordability)
+    elif not check('score', f'Credit score at least {MINIMUM_CREDIT_SCORE}',
+                   score >= MINIMUM_CREDIT_SCORE, f'{score} ({score_band(score)})'):
+        return refuse(DecisionReason.CREDIT_SCORE_TOO_LOW, score=affordability)
+    else:
+        multiple = next(m for floor_, m, _ in SCORE_BANDS if score >= floor_)
+
+    offer = money(disposable * multiple)
+    breakdown['income_multiple'] = multiple
+    breakdown['base_limit'] = offer
+    if thin_file:
+        breakdown['thin_file_cap'] = THIN_FILE_CAP
         offer = min(offer, THIN_FILE_CAP)
-
-    # The applicant may ask for less than they qualify for, and that is honoured.
-    # They may not ask for more.
-    if application.requested_limit:
-        offer = min(offer, money(application.requested_limit))
 
     tier_cap = money(settings.get_decimal(
         Key.CREDIT_LIMIT_MAX_FULL_KYC if user.kyc_tier == KYCTier.FULL
         else Key.CREDIT_LIMIT_MAX_STANDARD_KYC
     ))
     full_kyc_above = money(settings.get_decimal(Key.FULL_KYC_REQUIRED_ABOVE))
-    floor = money(settings.get_decimal(Key.CREDIT_LIMIT_MIN))
 
-    # A minimum-KYC applicant whose offer exceeds the full-KYC threshold is told
-    # to upgrade rather than silently handed the lower capped amount: the useful
-    # answer is "verify further and we can offer more", not a number they did
-    # not ask for.
+    # A limit above the full-KYC threshold needs full KYC. A minimum-KYC
+    # applicant who qualifies for more is offered the threshold, and told what
+    # full KYC would unlock. This used to decline them outright and rely on an
+    # administrator typing in a smaller limit by hand; with limits no longer set
+    # by hand, declining would turn away almost every minimum-KYC applicant.
+    full_kyc_limit = None
     if user.kyc_tier != KYCTier.FULL and offer > full_kyc_above:
-        return {
-            'approved': False,
-            'reason': DecisionReason.FULL_KYC_REQUIRED,
-            'limit': money(min(offer, tier_cap)),
-            'score': _score(disposable, income),
-        }
+        full_kyc_limit = _round_down_to(
+            min(offer, money(settings.get_decimal(Key.CREDIT_LIMIT_MAX_FULL_KYC))),
+            Decimal('500'),
+        )
+        offer = full_kyc_above
+        tier_cap = min(tier_cap, full_kyc_above)
 
+    breakdown['kyc_cap'] = tier_cap
     offer = min(offer, tier_cap)
 
-    if offer < floor:
-        return {
-            'approved': False,
-            'reason': DecisionReason.INCOME_BELOW_FLOOR,
-            'limit': ZERO,
-            'score': _score(disposable, income),
-        }
+    if not check('floor', f'Limit at least Rs. {floor:,.0f}', offer >= floor,
+                 f'Works out to Rs. {offer:,.0f}'):
+        return refuse(DecisionReason.INCOME_BELOW_FLOOR, score=affordability)
 
     # Rounded down to a round number, the way a limit is actually granted. Down,
     # never up: rounding up would hand out credit the rule above did not.
-    offer = _round_down_to(offer, Decimal('500'))
-
+    limit = _round_down_to(offer, Decimal('500'))
+    breakdown['eligible_limit'] = limit
     return {
         'approved': True,
         'reason': DecisionReason.APPROVED,
-        'limit': offer,
-        'score': _score(disposable, income),
+        'limit': limit,
+        'score': affordability,
+        # What the same application would be eligible for with full KYC, when
+        # that is more. None when full KYC would change nothing.
+        'full_kyc_limit': full_kyc_limit,
+        'breakdown': breakdown,
+        'checks': checks,
     }
 
 
@@ -245,15 +342,24 @@ def _round_down_to(value: Decimal, step: Decimal) -> Decimal:
 
 # ── Application ────────────────────────────────────────────────────────────
 
-def apply(*, user, employment_type: str, monthly_income, existing_emi_outflow=0,
-          requested_limit=None) -> CreditApplications:
+def check_can_apply(*, user, bureau_consent: bool, employment_type: str,
+                    employer_name: str = None, bank_account_id: str = None,
+                    has_income_proof: bool = False) -> BankAccounts:
     """
-    Open a credit application.
+    Every refusal an application can meet before it is opened, in the order an
+    applicant would want to hear them. Raises CreditError; returns the verified
+    bank account the application will carry.
 
-    Refuses a second open application, and refuses one from a user who already
-    holds a live credit line - two live lines is a product decision nobody has
-    made, and allowing it here by omission is how it would happen.
+    Separate from `apply()` so a route can run it before saving an uploaded
+    document - a refused application must not leave a file behind.
     """
+    if not bureau_consent:
+        raise CreditError(
+            ErrorCode.VALIDATION_ERROR,
+            'We need your permission to check your credit score.',
+            recovery='Tick the consent box to continue.',
+        )
+
     if _open_application_for(user.user_id):
         raise CreditError(
             ErrorCode.CONFLICT,
@@ -268,29 +374,102 @@ def apply(*, user, employment_type: str, monthly_income, existing_emi_outflow=0,
             recovery='Close it before applying for another.',
         )
 
+    # KYC is part of the application. It may still be in review - the
+    # application then waits in KYC_PENDING - but it must have been submitted:
+    # the credit score is pulled by the PAN it carries.
+    kyc = user.kyc_verification
+    if user.kyc_tier == KYCTier.NONE and not (
+        kyc and kyc.kyc_status in (KYCStatus.PENDING, KYCStatus.UNDER_REVIEW)
+    ):
+        raise CreditError(
+            ErrorCode.VALIDATION_ERROR,
+            'Submit your KYC - PAN and Aadhaar - as part of your application.',
+            recovery='Complete the identity step first.',
+        )
+
+    if employment_type in EmploymentType.WITH_EMPLOYER and not employer_name:
+        raise CreditError(
+            ErrorCode.VALIDATION_ERROR,
+            'Enter your employer, or your business name if self-employed.',
+        )
+
+    account = None
+    if bank_account_id:
+        account = BankAccounts.query.filter_by(
+            bank_account_id=bank_account_id, user_id=user.user_id,
+            deleted_at=None, is_active=True,
+        ).first()
+    if not account:
+        raise CreditError(
+            ErrorCode.VALIDATION_ERROR,
+            'Choose the bank account your salary is paid into.',
+            recovery='Link and verify a bank account first.',
+        )
+    if account.penny_drop_status != PennyDropStatus.VERIFIED:
+        raise CreditError(
+            ErrorCode.VALIDATION_ERROR,
+            'That bank account is not verified yet. Choose a verified account.',
+        )
+
+    if not has_income_proof:
+        raise CreditError(
+            ErrorCode.VALIDATION_ERROR,
+            'Upload a salary slip, bank statement or ITR as proof of income.',
+        )
+
+    return account
+
+
+def apply(*, user, employment_type: str, monthly_income, existing_emi_outflow=0,
+          bureau_consent: bool = False, employer_name: str = None,
+          designation: str = None, months_in_current_job: int = None,
+          income_proof_type: str = None, income_proof_path: str = None,
+          bank_account_id: str = None) -> CreditApplications:
+    """
+    Open a credit application.
+
+    The applicant gives their identity (KYC), employment, income with a proof
+    document, the verified bank account their salary lands in, and consent to a
+    credit bureau enquiry. They do not name a limit: the eligible limit is
+    worked out from salary and credit score, and that is what goes to review.
+
+    Refuses a second open application, and refuses one from a user who already
+    holds a live credit line - two live lines is a product decision nobody has
+    made, and allowing it here by omission is how it would happen.
+    """
+    account = check_can_apply(
+        user=user, bureau_consent=bureau_consent, employment_type=employment_type,
+        employer_name=employer_name, bank_account_id=bank_account_id,
+        has_income_proof=bool(income_proof_path),
+    )
+
     application = CreditApplications(
         user_id=user.user_id,
         employment_type=employment_type,
+        employer_name=employer_name,
+        designation=designation,
+        months_in_current_job=months_in_current_job,
         monthly_income=money(monthly_income),
         existing_emi_outflow=money(existing_emi_outflow),
-        requested_limit=money(requested_limit) if requested_limit else None,
+        income_proof_type=income_proof_type,
+        income_proof_path=income_proof_path,
+        bank_account_id=account.bank_account_id,
+        bureau_consent_at=utcnow(),
         submitted_at=utcnow(),
     )
 
     # KYC decides which queue this lands in. A verified applicant goes straight
-    # to review; an unverified one waits, and is told why.
+    # to review; an unverified one waits, and is told why. Both are visible to
+    # administrators - an application waiting on KYC is still an application.
     if user.kyc_tier == KYCTier.NONE:
         application.status = ApplicationStatus.KYC_PENDING
     else:
         application.status = ApplicationStatus.UNDER_REVIEW
         application.kyc_verified_at = utcnow()
+        # The score needs the PAN, which only a verified applicant has given.
+        _fetch_credit_score(application, user)
 
-    # The indicative offer is computed now and stored, so the applicant sees a
-    # number immediately and a reviewer sees what the engine thought before any
-    # human touched it.
-    assessment = assess(application, user)
-    application.offered_limit = assessment['limit'] or None
-    application.eligibility_score = assessment['score']
+    _reassess(application, user)
 
     db.session.add(application)
     db.session.commit()
@@ -302,7 +481,8 @@ def apply(*, user, employment_type: str, monthly_income, existing_emi_outflow=0,
         actor_user_id=user.user_id,
         after={
             'status': application.status,
-            'offered_limit': float(application.offered_limit or 0),
+            'credit_score': application.credit_score,
+            'eligible_limit': float(application.offered_limit or 0),
         },
     )
     return application
@@ -314,7 +494,8 @@ def kyc_completed(user) -> CreditApplications:
 
     Called from the KYC review path rather than polled, so an applicant who was
     blocked on verification moves the moment they are verified rather than on
-    their next visit.
+    their next visit. This is also when the credit score is first fetched: it
+    needs the PAN that KYC has just verified.
 
     Returns the application it advanced, or None.
     """
@@ -326,14 +507,59 @@ def kyc_completed(user) -> CreditApplications:
 
     application.status = ApplicationStatus.UNDER_REVIEW
     application.kyc_verified_at = utcnow()
-
-    # Re-assessed, because the tier caps depend on the tier that was granted.
-    assessment = assess(application, user)
-    application.offered_limit = assessment['limit'] or None
-    application.eligibility_score = assessment['score']
+    _fetch_credit_score(application, user)
+    _reassess(application, user)
 
     db.session.commit()
     return application
+
+
+def _reassess(application: CreditApplications, user) -> dict:
+    """Store the eligible limit the rules give right now, and return the assessment."""
+    assessment = assess(application, user)
+    application.offered_limit = assessment['limit'] if assessment['approved'] else None
+    application.eligibility_score = assessment['score']
+    return assessment
+
+
+def _fetch_credit_score(application: CreditApplications, user) -> bool:
+    """
+    Ask the bureau for the applicant's score, and record it.
+
+    Never raises: a bureau that is down leaves the score empty, the application
+    stays in review showing that, and approval waits until a score exists. An
+    application must not be lost because a third party was unreachable.
+    """
+    if not application.bureau_consent_at:
+        return False
+
+    profile = getattr(user, 'profile', None)
+    pan = None
+    if profile is not None and profile.pan_number_enc:
+        try:
+            pan = decrypt(profile.pan_number_enc)
+        except Exception:     # noqa: BLE001 - an unreadable PAN is a missing one
+            pan = None
+    if not pan:
+        return False
+
+    result = adapters.fetch_credit_score(
+        reference=f'CASHUAPP{(application.application_id or "").replace("-", "")[:16]}',
+        pan=pan,
+        full_name=user.full_name,
+        phone=user.phone,
+    )
+    if not result.get('ok'):
+        current_app.logger.warning(
+            f'[credit] credit score unavailable: {result.get("error")}'
+        )
+        return False
+
+    application.credit_score = result.get('score')
+    application.credit_no_history = bool(result.get('no_history'))
+    application.credit_score_fetched_at = utcnow()
+    application.bureau_reference = (result.get('reference') or '')[:64] or None
+    return True
 
 
 def withdraw(application: CreditApplications) -> CreditApplications:
@@ -349,21 +575,18 @@ def withdraw(application: CreditApplications) -> CreditApplications:
     return application
 
 
-def decide(application: CreditApplications, *, user, approve: bool = None,
-           limit=None, note: str = None, actor_id: str = None):
+def decide(application: CreditApplications, *, user, approve: bool,
+           note: str = None, actor_id: str = None):
     """
-    Decide an application, and issue the account when it is approved.
+    An administrator approves or rejects an application.
 
-    `approve` and `limit` are the override path, for an administrator. Left as
-    None, the engine's own assessment decides - which is the normal case, and
-    the one the applicant experiences.
+    Approval grants exactly the eligible limit the rules give - worked out from
+    salary and credit score, re-checked at this moment. There is no limit to
+    type in: an administrator decides *whether*, not *how much*, and cannot
+    approve an application the rules say is ineligible. Any application can be
+    rejected.
 
-    An override limit is still bounded by the applicant's tier cap. An admin may
-    decline someone the engine would approve, and may grant less than it offered,
-    but may not hand out more credit than the tier allows: that bound exists for
-    compliance reasons rather than as a suggestion.
-
-    Returns (application, account). account is None on a decline.
+    Returns (application, account). account is None on a rejection.
     """
     if not application.can_transition_to(ApplicationStatus.APPROVED) and \
             not application.can_transition_to(ApplicationStatus.REJECTED):
@@ -372,35 +595,32 @@ def decide(application: CreditApplications, *, user, approve: bool = None,
             'This application has already been decided.',
         )
 
-    assessment = assess(application, user)
+    # A score that could not be fetched earlier is tried again now, so a bureau
+    # outage at submission does not strand the application.
+    if approve and application.credit_score is None and not application.credit_no_history:
+        _fetch_credit_score(application, user)
 
-    if approve is None:
-        approve = assessment['approved']
+    assessment = _reassess(application, user)
+
+    if approve:
+        if application.status != ApplicationStatus.UNDER_REVIEW:
+            raise CreditError(
+                ErrorCode.CONFLICT,
+                'This application is waiting for the applicant to complete KYC.',
+            )
+        if not assessment['approved']:
+            raise CreditError(
+                ErrorCode.VALIDATION_ERROR,
+                'This application is not eligible for a credit line. '
+                + DecisionReason.MESSAGES.get(assessment['reason'], assessment['reason']),
+                recovery='Reject it with a reason instead.',
+            )
         granted = assessment['limit']
-        reason = assessment['reason']
-    elif approve:
-        granted = money(limit) if limit is not None else assessment['limit']
-        tier_cap = money(settings.get_decimal(
-            Key.CREDIT_LIMIT_MAX_FULL_KYC if user.kyc_tier == KYCTier.FULL
-            else Key.CREDIT_LIMIT_MAX_STANDARD_KYC
-        ))
-        if granted > tier_cap:
-            raise CreditError(
-                ErrorCode.VALIDATION_ERROR,
-                f'A {user.kyc_tier} KYC customer cannot be granted more than '
-                f'Rs. {tier_cap:,.2f}.',
-            )
-        if granted <= ZERO:
-            raise CreditError(
-                ErrorCode.VALIDATION_ERROR,
-                'An approved limit must be greater than zero.',
-            )
         reason = DecisionReason.APPROVED
     else:
         granted = ZERO
         reason = DecisionReason.MANUAL_DECLINE
 
-    application.eligibility_score = assessment['score']
     application.decision_reason = reason
     application.decision_note = note
     application.decided_at = utcnow()
@@ -416,6 +636,10 @@ def decide(application: CreditApplications, *, user, approve: bool = None,
             actor_user_id=application.user_id,
             after={'reason': reason},
         )
+        _tell_applicant(user, 'CREDIT_REJECTED', {
+            'reason': note or DecisionReason.MESSAGES[reason],
+            'deep_link': f'/credit/status/{application.application_id}',
+        })
         return application, None
 
     application.status = ApplicationStatus.APPROVED
@@ -431,11 +655,30 @@ def decide(application: CreditApplications, *, user, approve: bool = None,
         actor_user_id=application.user_id,
         after={
             'approved_limit': float(granted),
+            'credit_score': application.credit_score,
             'credit_account_id': account.credit_account_id,
-            'decided_by': actor_id or 'AUTOMATIC',
+            'decided_by': actor_id,
         },
     )
+    _tell_applicant(user, 'CREDIT_APPROVED', {
+        'limit': f'{granted:,.0f}',
+        'deep_link': f'/credit/status/{application.application_id}',
+    })
     return application, account
+
+
+def _tell_applicant(user, event: str, context: dict) -> None:
+    """
+    Notify the applicant of a decision. Best effort: the decision is already
+    committed, and a notification channel being down must not look like the
+    decision failed.
+    """
+    try:
+        from portal.helpers import notify
+        notify.dispatch(user, event, context)
+    except Exception as exc:     # noqa: BLE001
+        db.session.rollback()
+        current_app.logger.warning(f'[credit] could not notify {event}: {exc}')
 
 
 def _issue(application: CreditApplications, user, limit: Decimal) -> CreditAccounts:

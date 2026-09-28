@@ -34,6 +34,7 @@ import requests
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from throttle import throttled  # noqa: E402
+from credit_apply import apply_for_credit  # noqa: E402
 
 BASE = os.getenv('CASHU_API', 'http://127.0.0.1:5050/v1')
 TIMEOUT = 60
@@ -110,27 +111,39 @@ def spendable_account(token, admin, name, limit):
     user_id = data_of(get('/users/me', token)).get('user_id')
 
     png = b'\x89PNG\r\n\x1a\n' + b'0' * 400
+    # Full KYC, so limits above the minimum-KYC threshold are allowed.
     post('/kyc/submit', form={
         'pan_number': 'ABCDE1234F', 'full_name': name,
-        'requested_tier': 'MINIMUM',
-    }, files={'pan_document': ('pan.png', png, 'image/png')}, token=token)
+        'requested_tier': 'FULL',
+        'aadhaar_number': f'{random.randint(100000000000, 999999999999)}',
+    }, files={
+        'pan_document': ('pan.png', png, 'image/png'),
+        'aadhaar_document': ('aadhaar.png', png, 'image/png'),
+    }, token=token)
 
-    queue = data_of(get('/admin/kyc/queue', admin))
-    rows = queue if isinstance(queue, list) else (queue.get('items') or [])
-    kyc_id = next((r['kyc_id'] for r in rows if r.get('user_id') == user_id), None)
+    kyc_id = None
+    for page in range(1, 60):
+        queue = data_of(get(f'/admin/kyc/queue?page={page}&per_page=100', admin))
+        rows = queue if isinstance(queue, list) else (queue.get('items') or [])
+        kyc_id = next((r['kyc_id'] for r in rows if r.get('user_id') == user_id), None)
+        if kyc_id or not rows:
+            break
     if not kyc_id:
         return None
     post(f'/admin/kyc/{kyc_id}/review',
-         {'decision': 'APPROVE', 'tier': 'MINIMUM'}, token=admin)
+         {'decision': 'APPROVE', 'tier': 'FULL'}, token=admin)
 
-    application = data_of(post('/credit/applications', {
-        'employment_type': 'SALARIED', 'monthly_income': 200000,
-    }, token=token))
+    # The limit is worked out, not set: salary x 3 at the sandbox score of
+    # 760, rounded down to 500. A salary of limit/3 + 1 lands on the limit.
+    application = data_of(apply_for_credit(post, token, {
+        'employment_type': 'SALARIED', 'monthly_income': limit // 3 + 1,
+        'bureau_consent': True,
+    }))
     if not application.get('application_id'):
         return None
 
     post(f"/admin/credit/applications/{application['application_id']}/review",
-         {'decision': 'APPROVE', 'limit': limit}, token=admin)
+         {'decision': 'APPROVE'}, token=admin)
 
     post('/credit/account/purpose', {'purpose': 'SHOPPING'}, token=token)
     post('/credit/account/activate', token=token)

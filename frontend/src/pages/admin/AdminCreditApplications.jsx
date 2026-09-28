@@ -1,340 +1,582 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
-import { Badge, Button, Row, Sheet, Skeleton, cx } from '../../components/ui';
+import { Badge, Button, Card, Row, Skeleton, Tabs, cx } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
-import { useProfile } from '../../hooks/useProfile';
+import { useBack } from '../../hooks/useNavHistory';
+import { useFetch, useProfile } from '../../hooks/useProfile';
 import { dateTime, money } from '../../utils/format';
 import { AdminHeader, DataTable } from './AdminLayout';
+import KycDocumentViewer, { AuthenticityGate } from './KycDocumentViewer';
 
 /**
- * Credit applications, for review.
+ * Credit applications: the queue, and the full review of one application.
  *
- * Applications used to reach the database and stop there: the approve and
- * reject endpoints existed, but no screen in the admin portal called them, so
- * nobody could see an application, let alone decide it.
- *
- * The limit is not a field here. It is worked out from the applicant's salary
- * and credit score, and approval grants exactly that. The reviewer decides
- * whether to lend, not how much - and cannot approve an application the rules
- * found ineligible, only reject it with a reason.
- *
- * L1 support can read the queue; deciding needs L2 risk or L3.
+ * The reviewer decides *whether*, never *how much*. The eligible limit is
+ * worked out on the server from verified income and the credit bureau score,
+ * and approving grants exactly that; there is no amount to type. What this
+ * screen owes the reviewer is everything behind that number - identity and its
+ * documents, employment, the income proof, the bank account and how it was
+ * verified, the bureau result, and each eligibility rule with its outcome - so
+ * the decision is made on evidence rather than on a figure taken on trust.
  */
 
-const TABS = [
-  { value: 'OPEN', label: 'Open', count: 'open' },
-  { value: 'APPROVED', label: 'Approved', count: 'APPROVED' },
-  { value: 'REJECTED', label: 'Rejected', count: 'REJECTED' },
-  { value: 'WITHDRAWN', label: 'Withdrawn', count: 'WITHDRAWN' },
-];
+const DECIDERS = ['L2_RISK_RECON', 'L3_SUPER_ADMIN'];
 
-const STATUS = {
-  UNDER_REVIEW: { label: 'Under review', tone: 'warn' },
-  KYC_PENDING: { label: 'Waiting for KYC', tone: 'neutral' },
-  APPROVED: { label: 'Approved', tone: 'good' },
-  REJECTED: { label: 'Rejected', tone: 'alert' },
-  WITHDRAWN: { label: 'Withdrawn', tone: 'neutral' },
+const STATUS_TONE = {
+  KYC_PENDING: 'warn',
+  UNDER_REVIEW: 'warn',
+  APPROVED: 'good',
+  REJECTED: 'alert',
+  WITHDRAWN: 'neutral',
 };
 
-function scoreTone(score) {
-  if (score == null) return 'neutral';
-  if (score >= 750) return 'good';
-  if (score >= 650) return 'warn';
-  return 'alert';
+const STATUS_LABEL = {
+  KYC_PENDING: 'Awaiting KYC',
+  UNDER_REVIEW: 'Ready for review',
+  APPROVED: 'Approved',
+  REJECTED: 'Rejected',
+  WITHDRAWN: 'Withdrawn',
+};
+
+function StatusBadge({ status }) {
+  return <Badge tone={STATUS_TONE[status] || 'neutral'} dot>{STATUS_LABEL[status] || status}</Badge>;
 }
 
-function Score({ row }) {
-  if (row.credit_no_history) return <Badge tone="neutral">No history</Badge>;
-  if (row.credit_score == null) {
-    return <span className="text-2xs text-slate">{row.status === 'KYC_PENDING' ? 'After KYC' : 'Unavailable'}</span>;
-  }
-  return (
-    <div className="flex items-center gap-2">
-      <span className="money text-sm font-bold text-ink">{row.credit_score}</span>
-      <Badge tone={scoreTone(row.credit_score)}>{row.credit_score_band}</Badge>
-    </div>
-  );
+function titleCase(value) {
+  return (value || '').replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
 }
+
+/* ── Queue ──────────────────────────────────────────────────────────────── */
 
 export default function AdminCreditApplications() {
-  const toast = useToast();
-  const { role } = useProfile();
-  const canDecide = ['L2_RISK_RECON', 'L3_SUPER_ADMIN'].includes(role);
-
+  const navigate = useNavigate();
   const [tab, setTab] = useState('OPEN');
-  const [page, setPage] = useState(1);
-  const [data, setData] = useState({ rows: [], counts: {}, pagination: null });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  const [selected, setSelected] = useState(null);
-  const [rejecting, setRejecting] = useState(false);
-  const [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [state, setState] = useState({ rows: null, counts: {}, error: null });
 
   const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
     try {
-      const response = await endpoints.admin.creditApplications(
-        `?status=${tab}&page=${page}&per_page=20`,
-      );
-      setData({
-        rows: response.data || [],
-        counts: response.counts || {},
-        pagination: response.pagination,
-      });
+      const response = await endpoints.admin.creditApplications(`?status=${tab}&per_page=100`);
+      setState({ rows: response.data || [], counts: response.counts || {}, error: null });
     } catch (err) {
-      setError(err);
-    } finally {
-      setLoading(false);
+      setState((current) => ({ ...current, rows: [], error: err }));
     }
-  }, [tab, page]);
+  }, [tab]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    setState((current) => ({ ...current, rows: null }));
+    load();
+  }, [load]);
 
-  function close() {
-    setSelected(null);
-    setRejecting(false);
-    setNote('');
-  }
-
-  async function decide(decision) {
-    if (decision === 'REJECT' && !note.trim()) {
-      toast.error('Give a reason for the rejection. The applicant sees it.');
-      return;
-    }
-    setBusy(true);
-    try {
-      const response = await endpoints.admin.reviewCreditApplication(
-        selected.application_id,
-        { decision, note: note.trim() || undefined },
-      );
-      toast.success(response.message);
-      close();
-      load();
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setBusy(false);
-    }
-  }
+  const { rows, counts } = state;
 
   const columns = [
     {
       key: 'applicant',
       label: 'Applicant',
       render: (row) => (
-        <div className="min-w-0">
-          <p className="truncate font-medium text-ink">{row.full_name || '—'}</p>
-          <p className="money text-2xs text-slate">{row.phone} · {row.kyc_tier} KYC</p>
+        <div>
+          <p className="font-medium text-ink">{row.full_name || '—'}</p>
+          <p className="money text-2xs text-slate">{row.phone}</p>
         </div>
       ),
     },
     {
-      key: 'salary',
-      label: 'Monthly salary',
+      key: 'employment',
+      label: 'Employment',
       render: (row) => (
         <div>
-          <p className="money font-medium text-ink">{money(row.monthly_income, { decimals: 0 })}</p>
-          {row.existing_emi_outflow > 0 && (
-            <p className="money text-2xs text-slate">EMIs {money(row.existing_emi_outflow, { decimals: 0 })}</p>
-          )}
+          <p className="text-ink">{titleCase(row.employment_type)}</p>
+          {row.employer_name && <p className="max-w-[180px] truncate text-2xs text-slate">{row.employer_name}</p>}
         </div>
       ),
     },
-    { key: 'score', label: 'CIBIL score', render: (row) => <Score row={row} /> },
+    {
+      key: 'income',
+      label: 'Income / EMIs',
+      render: (row) => (
+        <div className="money">
+          <p className="text-ink">{money(row.monthly_income, { decimals: 0 })}</p>
+          <p className="text-2xs text-slate">{money(row.existing_emi_outflow, { decimals: 0 })} EMIs</p>
+        </div>
+      ),
+    },
+    {
+      key: 'score',
+      label: 'Credit score',
+      render: (row) => (
+        row.credit_no_history ? <Badge tone="neutral">New to credit</Badge>
+          : row.credit_score ? (
+            <div>
+              <p className="money font-semibold text-ink">{row.credit_score}</p>
+              <p className="text-2xs text-slate">{row.credit_score_band}</p>
+            </div>
+          ) : <span className="text-slate">—</span>
+      ),
+    },
     {
       key: 'limit',
       label: tab === 'APPROVED' ? 'Approved limit' : 'Eligible limit',
       render: (row) => {
-        const value = tab === 'APPROVED' ? row.approved_limit : row.eligible_limit;
-        if (value) return <span className="money font-semibold text-ink">{money(value, { decimals: 0 })}</span>;
-        if (row.assessment_message) return <span className="text-2xs text-alert">Not eligible</span>;
-        return <span className="text-2xs text-slate">—</span>;
-      },
-    },
-    {
-      key: 'status',
-      label: 'Status',
-      render: (row) => {
-        const meta = STATUS[row.status] || { label: row.status, tone: 'neutral' };
-        return <Badge tone={meta.tone} dot>{meta.label}</Badge>;
+        const amount = tab === 'APPROVED' ? row.approved_limit : row.eligible_limit;
+        if (amount) return <span className="money font-semibold text-ink">{money(amount, { decimals: 0 })}</span>;
+        if (row.status === 'KYC_PENDING') return <span className="text-2xs text-slate">After KYC</span>;
+        if (row.assessment_reason) return <Badge tone="alert">Not eligible</Badge>;
+        return <span className="text-slate">—</span>;
       },
     },
     {
       key: 'when',
-      label: tab === 'OPEN' ? 'Waiting' : 'Decided',
+      label: rows && tab !== 'OPEN' && tab !== 'UNDER_REVIEW' && tab !== 'KYC_PENDING' ? 'Decided' : 'Waiting',
       render: (row) => (
-        <span className="whitespace-nowrap text-2xs text-slate">
-          {tab === 'OPEN'
-            ? (row.waiting_hours != null ? `${row.waiting_hours} h` : '—')
-            : dateTime(row.decided_at)}
-        </span>
+        row.waiting_hours != null ? (
+          <span className={cx('money text-sm', row.waiting_hours > 24 ? 'font-semibold text-alert' : 'text-slate')}>
+            {row.waiting_hours}h
+          </span>
+        ) : <span className="text-2xs text-slate">{row.decided_at ? dateTime(row.decided_at) : '—'}</span>
       ),
     },
+    { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status} /> },
   ];
-
-  const pagination = data.pagination;
 
   return (
     <div>
       <AdminHeader
         title="Credit applications"
-        subtitle="Limits are worked out from salary and CIBIL score. Approve or reject each one."
-        action={<Button variant="outline" size="sm" onClick={load}>Refresh</Button>}
+        subtitle="Review the complete application, then approve or reject the eligible limit."
       />
 
-      <div className="mb-4 flex flex-wrap gap-2" role="tablist">
-        {TABS.map((item) => (
-          <button
-            key={item.value}
-            type="button"
-            role="tab"
-            aria-selected={tab === item.value}
-            onClick={() => { setTab(item.value); setPage(1); }}
-            className={cx(
-              'rounded-full border px-3.5 py-1.5 text-xs font-semibold transition',
-              tab === item.value
-                ? 'border-ink bg-ink text-white'
-                : 'border-line bg-canvas text-slate hover:text-ink',
-            )}
-          >
-            {item.label}
-            <span className="money ml-1.5 opacity-70">{data.counts[item.count] ?? 0}</span>
-          </button>
-        ))}
-      </div>
+      <Tabs
+        className="mb-4 max-w-3xl overflow-x-auto"
+        active={tab}
+        onChange={setTab}
+        tabs={[
+          { value: 'OPEN', label: 'Open', count: counts.open },
+          { value: 'UNDER_REVIEW', label: 'Ready', count: counts.UNDER_REVIEW },
+          { value: 'KYC_PENDING', label: 'Awaiting KYC', count: counts.KYC_PENDING },
+          { value: 'APPROVED', label: 'Approved', count: counts.APPROVED },
+          { value: 'REJECTED', label: 'Rejected', count: counts.REJECTED },
+          { value: 'WITHDRAWN', label: 'Withdrawn', count: counts.WITHDRAWN },
+        ]}
+      />
 
-      {loading ? (
-        <div className="space-y-2">
-          {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-14 w-full" />)}
-        </div>
-      ) : error ? (
-        <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
-          <p className="text-sm font-medium text-alert">{error.message}</p>
-          <Button variant="outline" size="sm" className="mt-3" onClick={load}>Try again</Button>
-        </div>
+      {rows === null ? (
+        <Skeleton className="h-64 w-full rounded-2xl" />
       ) : (
-        <>
-          <DataTable
-            columns={columns}
-            rows={data.rows}
-            empty={tab === 'OPEN' ? 'No applications waiting. New ones appear here as soon as they are submitted.' : 'Nothing here yet.'}
-            onRowClick={(row) => setSelected(row)}
-          />
-          {pagination && pagination.pages > 1 && (
-            <div className="mt-4 flex items-center justify-between text-xs text-slate">
-              <span>Page {pagination.page} of {pagination.pages} · {pagination.total} applications</span>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" disabled={!pagination.has_prev} onClick={() => setPage((p) => p - 1)}>Previous</Button>
-                <Button variant="outline" size="sm" disabled={!pagination.has_next} onClick={() => setPage((p) => p + 1)}>Next</Button>
-              </div>
-            </div>
-          )}
-        </>
+        <DataTable
+          columns={columns}
+          rows={rows.map((row) => ({ ...row, id: row.application_id }))}
+          empty={tab === 'OPEN' ? 'No applications are waiting. Nice.' : 'Nothing here yet.'}
+          onRowClick={(row) => navigate(`/admin/credit/${row.application_id}`)}
+        />
       )}
+    </div>
+  );
+}
 
-      <Sheet
-        open={Boolean(selected)}
-        onClose={close}
-        title={selected?.full_name || 'Application'}
-        footer={selected && canDecide && selected.status === 'UNDER_REVIEW' && (
-          rejecting ? (
-            <div className="flex gap-2">
-              <Button variant="outline" size="lg" full onClick={() => setRejecting(false)}>Back</Button>
-              <Button variant="danger" size="lg" full loading={busy} onClick={() => decide('REJECT')}>Reject</Button>
-            </div>
-          ) : (
-            <div className="flex gap-2">
-              <Button variant="outline" size="lg" full onClick={() => setRejecting(true)}>Reject</Button>
-              <Button
-                variant="mint"
-                size="lg"
-                full
-                loading={busy}
-                disabled={!selected.eligible}
-                onClick={() => decide('APPROVE')}
-              >
-                {selected.eligible ? `Approve ${money(selected.eligible_limit, { decimals: 0 })}` : 'Not eligible'}
-              </Button>
-            </div>
-          )
-        )}
-      >
-        {selected && (
-          <div className="space-y-4 pb-2">
-            <div className="rounded-2xl bg-gradient-to-br from-ink to-[#0f1a1f] p-4 text-white">
-              <p className="text-2xs font-semibold uppercase tracking-wider text-white/60">
-                {selected.status === 'APPROVED' ? 'Approved limit' : 'Eligible limit'}
-              </p>
-              <p className="money mt-1 text-3xl font-bold">
-                {(selected.status === 'APPROVED' ? selected.approved_limit : selected.eligible_limit)
-                  ? money(selected.status === 'APPROVED' ? selected.approved_limit : selected.eligible_limit, { decimals: 0 })
-                  : 'Not eligible'}
-              </p>
-              <p className="mt-1 text-2xs text-white/60">
-                Worked out from salary and CIBIL score. It cannot be changed here.
-              </p>
-            </div>
+/* ── One application ────────────────────────────────────────────────────── */
 
-            {selected.assessment_message && (
-              <p className="rounded-xl bg-red-50 px-3.5 py-3 text-xs text-alert">{selected.assessment_message}</p>
-            )}
-            {selected.full_kyc_limit > 0 && (
-              <p className="rounded-xl bg-amber-50 px-3.5 py-3 text-xs text-amber-800">
-                Capped by minimum KYC. With full KYC this applicant would be eligible for
-                {' '}<span className="money font-semibold">{money(selected.full_kyc_limit, { decimals: 0 })}</span>.
-              </p>
-            )}
+export function AdminCreditApplicationReview() {
+  const { applicationId } = useParams();
+  const back = useBack('/admin/credit');
+  const toast = useToast();
+  const { role } = useProfile();
 
-            <div className="divide-y divide-line">
-              <Row label="Status" value={(STATUS[selected.status] || {}).label || selected.status} />
-              <Row label="CIBIL score" value={<Score row={selected} />} />
-              <Row label="Monthly salary" value={money(selected.monthly_income)} mono />
-              <Row label="Existing EMIs" value={money(selected.existing_emi_outflow)} mono />
-              <Row label="Employment" value={selected.employment_type?.replace(/_/g, ' ').toLowerCase()} />
-              <Row label="KYC" value={selected.kyc_tier} />
-              <Row label="Phone" value={selected.phone} mono />
-              <Row label="Submitted" value={dateTime(selected.submitted_at)} />
-              {selected.decided_at && <Row label="Decided" value={dateTime(selected.decided_at)} />}
-              {selected.decision_note && <Row label="Reason given" value={selected.decision_note} />}
-            </div>
+  const { data: app, loading, error, refetch } = useFetch(
+    () => endpoints.admin.creditApplication(applicationId), [applicationId],
+  );
 
-            {selected.status === 'KYC_PENDING' && (
-              <p className="rounded-xl bg-mist px-3.5 py-3 text-xs text-slate">
-                Waiting for the applicant&rsquo;s KYC. The credit score is fetched and the
-                limit worked out as soon as it is approved, and the application moves to
-                Under review by itself.
-              </p>
-            )}
-            {!canDecide && selected.status === 'UNDER_REVIEW' && (
-              <p className="rounded-xl bg-mist px-3.5 py-3 text-xs text-slate">
-                Deciding needs the Risk or Super Admin role.
-              </p>
-            )}
+  const [note, setNote] = useState('');
+  const [checked, setChecked] = useState(false);
+  const [busy, setBusy] = useState('');
 
-            {rejecting && (
-              <div className="animate-slide-down">
-                <label htmlFor="reject-note" className="mb-1.5 block text-sm font-medium text-ink">
-                  Reason for rejecting
-                </label>
-                <textarea
-                  id="reject-note"
-                  rows={3}
-                  value={note}
-                  maxLength={500}
-                  onChange={(event) => setNote(event.target.value)}
-                  placeholder="The applicant sees this."
-                  className="w-full rounded-xl border border-line px-3.5 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-2 focus:ring-mint/20"
-                  autoFocus
-                />
-              </div>
-            )}
+  const [kycVerified, setKycVerified] = useState(false);
+  const [kycReason, setKycReason] = useState('');
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-10 w-72" />
+        <Skeleton className="h-96 w-full rounded-2xl" />
+      </div>
+    );
+  }
+
+  if (!app) {
+    return (
+      <Card className="p-8 text-center">
+        <p className="font-semibold text-ink">{error?.status === 404 ? 'Application not found' : 'Could not load this application'}</p>
+        <p className="mt-1 text-sm text-slate">{error?.message}</p>
+        <Button variant="outline" className="mt-4" onClick={back}>Back to the queue</Button>
+      </Card>
+    );
+  }
+
+  const canDecide = app.can_decide && DECIDERS.includes(role);
+  const kyc = app.kyc || {};
+  const kycOpen = ['PENDING', 'UNDER_REVIEW'].includes(kyc.kyc_status);
+  // The server sets an eligible limit only when every rule passes.
+  const eligible = Boolean(app.eligible_limit);
+  const ready = app.status === 'UNDER_REVIEW';
+  const breakdown = app.eligibility_breakdown;
+
+  async function decide(decision) {
+    if (decision === 'REJECT' && !note.trim()) {
+      toast.error('Give the applicant a reason when rejecting.');
+      return;
+    }
+    setBusy(decision);
+    try {
+      const response = await endpoints.admin.reviewCreditApplication(applicationId, {
+        decision, note: note.trim() || undefined,
+      });
+      toast.success(response.message);
+      setNote('');
+      setChecked(false);
+      refetch();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function reviewKyc(decision) {
+    if (decision === 'REJECT' && !kycReason.trim()) {
+      toast.error('A reason is required to reject KYC.');
+      return;
+    }
+    setBusy(`KYC_${decision}`);
+    try {
+      const response = await endpoints.admin.reviewKyc(kyc.kyc_id, {
+        decision,
+        tier: decision === 'APPROVE'
+          ? (kyc.requested_tier === 'FULL' && kyc.aadhaar_masked ? 'FULL' : 'MINIMUM')
+          : undefined,
+        reason: kycReason.trim() || undefined,
+      });
+      toast.success(response.message);
+      setKycReason('');
+      setKycVerified(false);
+      refetch();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy('');
+    }
+  }
+
+  return (
+    <div>
+      <AdminHeader
+        title={app.applicant?.full_name || 'Credit application'}
+        subtitle={`Application ${app.application_id.slice(0, 8).toUpperCase()} · submitted ${dateTime(app.submitted_at)}`}
+        action={(
+          <div className="flex items-center gap-2">
+            <StatusBadge status={app.status} />
+            <Button variant="outline" size="sm" onClick={back}>Back</Button>
           </div>
         )}
-      </Sheet>
+      />
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+        {/* ── Evidence ─────────────────────────────────────────────── */}
+        <div className="space-y-4">
+          <Panel title="Applicant">
+            <div className="grid gap-x-6 sm:grid-cols-2">
+              <Row label="Name" value={app.applicant?.full_name} />
+              <Row label="Phone" value={app.applicant?.phone} mono />
+              <Row label="Account status" value={titleCase(app.applicant?.status)} />
+              <Row label="Member since" value={dateTime(app.applicant?.member_since)} />
+            </div>
+          </Panel>
+
+          <Panel
+            title="Identity (KYC)"
+            badge={<Badge tone={kyc.kyc_status === 'APPROVED' ? 'good' : kycOpen ? 'warn' : 'alert'} dot>
+              {kyc.kyc_status === 'APPROVED' ? `${app.applicant?.kyc_tier} verified` : titleCase(kyc.kyc_status)}
+            </Badge>}
+          >
+            <div className="grid gap-x-6 sm:grid-cols-2">
+              <Row label="Legal name" value={kyc.verified_legal_name || '—'} />
+              <Row label="PAN" value={kyc.pan_masked || '—'} mono />
+              <Row label="Aadhaar" value={kyc.aadhaar_masked || 'Not given'} mono />
+              <Row label="Requested level" value={kyc.requested_tier || '—'} />
+            </div>
+            {kyc.rejection_reason && (
+              <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-alert">Rejected: {kyc.rejection_reason}</p>
+            )}
+            {app.can_view_documents ? (
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                {(kyc.documents || []).map((doc) => (
+                  <KycDocumentViewer
+                    key={doc.slot}
+                    kycId={kyc.kyc_id}
+                    slot={doc.slot}
+                    label={doc.label}
+                    available={doc.available}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="mt-3 text-xs text-slate">Documents are visible to L2 Risk and L3 Super Admin only.</p>
+            )}
+
+            {kycOpen && canDecideKyc(role) && (
+              <div className="mt-4 space-y-3 rounded-2xl border border-amber-200 bg-amber-50/40 p-4">
+                <p className="text-sm font-semibold text-ink">KYC is waiting for verification</p>
+                <p className="text-xs text-slate">
+                  Verifying it here moves the application to review and fetches the
+                  credit score from the bureau.
+                </p>
+                <AuthenticityGate checked={kycVerified} onChange={setKycVerified} />
+                <textarea
+                  rows={2}
+                  value={kycReason}
+                  onChange={(event) => setKycReason(event.target.value)}
+                  placeholder="Reason, if rejecting KYC - shown to the applicant."
+                  className="w-full rounded-xl border border-line bg-canvas p-3 text-sm outline-none focus:border-ink/40"
+                />
+                <div className="flex gap-2">
+                  <Button variant="danger" full loading={busy === 'KYC_REJECT'} onClick={() => reviewKyc('REJECT')}>
+                    Reject KYC
+                  </Button>
+                  <Button variant="mint" full disabled={!kycVerified} loading={busy === 'KYC_APPROVE'} onClick={() => reviewKyc('APPROVE')}>
+                    Verify KYC
+                  </Button>
+                </div>
+              </div>
+            )}
+          </Panel>
+
+          <Panel title="Employment and income">
+            <div className="grid gap-x-6 sm:grid-cols-2">
+              <Row label="Employment" value={titleCase(app.employment_type)} />
+              <Row label={app.employment_type === 'SELF_EMPLOYED' ? 'Business' : 'Employer'} value={app.employer_name || '—'} />
+              <Row label="Designation" value={app.designation || '—'} />
+              <Row label="In current job" value={app.months_in_current_job != null ? `${app.months_in_current_job} months` : '—'} />
+              <Row label="Monthly income" value={money(app.monthly_income)} mono />
+              <Row label="Existing EMIs" value={money(app.existing_emi_outflow)} mono />
+            </div>
+            <div className="mt-4">
+              <p className="mb-2 text-2xs font-bold uppercase tracking-[0.12em] text-slate">
+                Income proof · {app.income_proof?.label || 'Not given'}
+              </p>
+              {app.can_view_documents ? (
+                <KycDocumentViewer
+                  label={app.income_proof?.label || 'Income proof'}
+                  available={Boolean(app.income_proof?.available)}
+                  load={() => endpoints.admin.incomeProofUrl(app.application_id)}
+                  docKey={app.application_id}
+                />
+              ) : (
+                <p className="text-xs text-slate">Documents are visible to L2 Risk and L3 Super Admin only.</p>
+              )}
+            </div>
+          </Panel>
+
+          <Panel
+            title="Salary bank account"
+            badge={app.bank_account && (
+              <Badge tone={app.bank_account.penny_drop_status === 'VERIFIED' ? 'good' : 'warn'} dot>
+                {app.bank_account.penny_drop_status === 'VERIFIED' ? 'Penny drop verified' : titleCase(app.bank_account.penny_drop_status)}
+              </Badge>
+            )}
+          >
+            {app.bank_account ? (
+              <div className="grid gap-x-6 sm:grid-cols-2">
+                <Row label="Bank" value={app.bank_account.bank_name || '—'} />
+                <Row label="Account" value={app.bank_account.masked_account} mono />
+                <Row label="IFSC" value={app.bank_account.ifsc_code} mono />
+                <Row label="Type" value={titleCase(app.bank_account.account_type)} />
+                <Row label="Name at bank" value={app.bank_account.verified_cbs_name || '—'} />
+                <Row
+                  label="Name match"
+                  value={app.bank_account.name_match_score != null ? `${app.bank_account.name_match_score}%` : '—'}
+                  mono
+                />
+              </div>
+            ) : <p className="text-sm text-slate">No bank account on this application.</p>}
+          </Panel>
+        </div>
+
+        {/* ── Decision ─────────────────────────────────────────────── */}
+        <div className="space-y-4 xl:sticky xl:top-20 xl:self-start">
+          <Panel title="Credit bureau">
+            <div className="flex items-end justify-between">
+              <div>
+                <p className="money text-4xl font-bold text-ink">
+                  {app.bureau?.no_history ? 'NTC' : app.bureau?.credit_score ?? '—'}
+                </p>
+                <p className="mt-1 text-xs text-slate">
+                  {app.bureau?.no_history ? 'New to credit - no bureau history'
+                    : app.bureau?.score_band || (app.status === 'KYC_PENDING' ? 'Fetched once KYC is verified' : 'Not fetched')}
+                </p>
+              </div>
+              {app.bureau?.credit_score != null && <ScoreBar score={app.bureau.credit_score} />}
+            </div>
+            <div className="mt-3 border-t border-line pt-1">
+              <Row label="Consent given" value={dateTime(app.bureau?.consented_at) || '—'} />
+              <Row label="Fetched" value={dateTime(app.bureau?.fetched_at) || '—'} />
+              {app.bureau?.reference && <Row label="Reference" value={app.bureau.reference} mono />}
+            </div>
+          </Panel>
+
+          {app.is_open ? (
+            <Panel title="Eligibility">
+              <div className={cx('rounded-2xl p-4', app.eligible_limit ? 'bg-ink text-white' : 'bg-mist')}>
+                <p className={cx('text-2xs uppercase tracking-wider', app.eligible_limit ? 'text-white/60' : 'text-slate')}>
+                  Eligible limit
+                </p>
+                <p className={cx('money mt-1 text-3xl font-bold', app.eligible_limit ? 'text-mint' : 'text-ink')}>
+                  {app.eligible_limit ? money(app.eligible_limit, { decimals: 0 }) : 'Not eligible'}
+                </p>
+                {app.assessment_message && <p className="mt-1 text-xs text-slate">{app.assessment_message}</p>}
+              </div>
+
+              {app.eligibility_checks?.length > 0 && (
+                <ul className="mt-3 space-y-2">
+                  {app.eligibility_checks.map((item) => (
+                    <li key={item.key} className="flex items-start gap-2 text-xs">
+                      <span className={cx('mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full text-[10px] font-bold',
+                        item.passed ? 'bg-mint text-ink' : 'bg-alert text-white')}
+                      >
+                        {item.passed ? '✓' : '✕'}
+                      </span>
+                      <span>
+                        <span className="font-medium text-ink">{item.label}</span>
+                        <span className="block text-slate">{item.detail}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {breakdown && (
+                <div className="mt-3 border-t border-line pt-1">
+                  <Row label="Disposable income" value={money(breakdown.disposable_income)} mono />
+                  <Row label="EMIs / income (FOIR)" value={`${breakdown.foir_percent}% of ${breakdown.max_foir_percent}%`} mono />
+                  {breakdown.income_multiple != null && (
+                    <Row label="Score multiple" value={`${breakdown.income_multiple}× monthly`} mono />
+                  )}
+                  {breakdown.base_limit != null && <Row label="Before caps" value={money(breakdown.base_limit, { decimals: 0 })} mono />}
+                  {breakdown.thin_file_cap != null && <Row label="Thin-file cap" value={money(breakdown.thin_file_cap, { decimals: 0 })} mono />}
+                  {breakdown.kyc_cap != null && <Row label={`${breakdown.kyc_tier} KYC cap`} value={money(breakdown.kyc_cap, { decimals: 0 })} mono />}
+                </div>
+              )}
+              {app.full_kyc_limit > 0 && (
+                <p className="mt-2 text-2xs text-slate">
+                  With full KYC this applicant would be eligible for {money(app.full_kyc_limit, { decimals: 0 })}.
+                </p>
+              )}
+            </Panel>
+          ) : (
+            <Panel title="Decision">
+              <div className={cx('rounded-2xl p-4', app.status === 'APPROVED' ? 'bg-mint-50' : 'bg-red-50')}>
+                <p className="text-sm font-semibold text-ink">{STATUS_LABEL[app.status]}</p>
+                {app.approved_limit > 0 && (
+                  <p className="money mt-1 text-2xl font-bold text-ink">{money(app.approved_limit, { decimals: 0 })}</p>
+                )}
+                <p className="mt-1 text-xs text-slate">{app.decision_note || app.decision_message}</p>
+              </div>
+              <Row label="Decided" value={dateTime(app.decided_at) || '—'} />
+            </Panel>
+          )}
+
+          {app.is_open && (
+            <Panel title="Decision">
+              {!canDecide ? (
+                <p className="text-xs text-slate">Approving or rejecting needs L2 Risk or L3 Super Admin access.</p>
+              ) : (
+                <div className="space-y-3">
+                  {!ready && (
+                    <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      Verify the applicant's KYC before this can be approved. It can be rejected now.
+                    </p>
+                  )}
+                  {ready && eligible && (
+                    <label className={cx('flex cursor-pointer items-start gap-3 rounded-xl border p-3',
+                      checked ? 'border-mint bg-mint-50' : 'border-line')}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(event) => setChecked(event.target.checked)}
+                        className="mt-0.5 h-4 w-4 accent-mint"
+                      />
+                      <span className="text-xs leading-relaxed text-slate">
+                        I have checked the income proof against the declared income and
+                        the bank account, and approve a limit of{' '}
+                        <span className="money font-semibold text-ink">{money(app.eligible_limit, { decimals: 0 })}</span>.
+                      </span>
+                    </label>
+                  )}
+                  <textarea
+                    rows={3}
+                    value={note}
+                    onChange={(event) => setNote(event.target.value)}
+                    placeholder="Note - required to reject, and shown to the applicant."
+                    className="w-full rounded-xl border border-line bg-canvas p-3 text-sm outline-none focus:border-ink/40"
+                  />
+                  <div className="flex gap-2">
+                    <Button variant="danger" full loading={busy === 'REJECT'} onClick={() => decide('REJECT')}>
+                      Reject
+                    </Button>
+                    <Button
+                      variant="mint"
+                      full
+                      disabled={!ready || !eligible || !checked}
+                      loading={busy === 'APPROVE'}
+                      onClick={() => decide('APPROVE')}
+                    >
+                      Approve
+                    </Button>
+                  </div>
+                  <p className="text-2xs leading-relaxed text-slate">
+                    Approval issues the credit line at the eligible limit. The applicant
+                    then chooses a purpose and activates it. Recorded against your account.
+                  </p>
+                </div>
+              )}
+            </Panel>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function canDecideKyc(role) {
+  return DECIDERS.includes(role);
+}
+
+function Panel({ title, badge, children }) {
+  return (
+    <Card className="p-5">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h2 className="text-2xs font-bold uppercase tracking-[0.12em] text-slate">{title}</h2>
+        {badge}
+      </div>
+      {children}
+    </Card>
+  );
+}
+
+/** Where a score sits on the 300-900 bureau scale. */
+function ScoreBar({ score }) {
+  const at = Math.max(0, Math.min(100, ((score - 300) / 600) * 100));
+  return (
+    <div className="w-32">
+      <div className="relative h-2 rounded-full bg-gradient-to-r from-red-400 via-amber-300 to-mint">
+        <span
+          className="absolute -top-1 h-4 w-1 -translate-x-1/2 rounded bg-ink"
+          style={{ left: `${at}%` }}
+        />
+      </div>
+      <div className="money mt-1 flex justify-between text-[10px] text-slate">
+        <span>300</span><span>900</span>
+      </div>
     </div>
   );
 }

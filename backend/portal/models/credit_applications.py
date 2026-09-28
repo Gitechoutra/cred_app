@@ -46,6 +46,21 @@ class EmploymentType:
     OTHER = 'OTHER'
 
     CHOICES = [SALARIED, SELF_EMPLOYED, STUDENT, RETIRED, OTHER]
+    #: Those who must name an employer or business.
+    WITH_EMPLOYER = [SALARIED, SELF_EMPLOYED]
+
+
+class IncomeProofType:
+    SALARY_SLIP = 'SALARY_SLIP'
+    BANK_STATEMENT = 'BANK_STATEMENT'
+    ITR = 'ITR'
+
+    CHOICES = [SALARY_SLIP, BANK_STATEMENT, ITR]
+    LABELS = {
+        SALARY_SLIP: 'Latest salary slip',
+        BANK_STATEMENT: 'Bank statement (3 months)',
+        ITR: 'Income tax return',
+    }
 
 
 class CreditApplications(db.Model, TimestampMixin, CRUDMixin):
@@ -81,7 +96,46 @@ class CreditApplications(db.Model, TimestampMixin, CRUDMixin):
     employment_type = db.Column(db.String(20), nullable=False)
     monthly_income = db.Column(db.Numeric(12, 2), nullable=False)
     existing_emi_outflow = db.Column(db.Numeric(12, 2), default=0, nullable=False)
+    #: Retired. Applicants used to name the limit they wanted; the limit is now
+    #: decided entirely from salary and credit score. Kept only so older
+    #: applications still read back as they were made. Nothing writes it.
     requested_limit = db.Column(db.Numeric(12, 2), nullable=True)
+
+    # -- Employment -------------------------------------------------------
+    #: Employer, or the business name for the self-employed. Required for both;
+    #: optional for students, retirees and "other", who have no employer.
+    employer_name = db.Column(db.String(150), nullable=True)
+    designation = db.Column(db.String(100), nullable=True)
+    #: How long in the current job or business. Stability is evidence a
+    #: reviewer weighs; it does not move the eligible limit by itself.
+    months_in_current_job = db.Column(db.Integer, nullable=True)
+
+    # -- Income evidence --------------------------------------------------
+    #: SALARY_SLIP, BANK_STATEMENT or ITR. The declared income is what the
+    #: limit is computed from; this is what a reviewer checks it against.
+    income_proof_type = db.Column(db.String(20), nullable=True)
+    #: Relative to UPLOAD_FOLDER. Never served statically - only through the
+    #: audited admin document route.
+    income_proof_path = db.Column(db.String(500), nullable=True)
+
+    # -- Bank -------------------------------------------------------------
+    #: The applicant's own account, penny-drop verified against their KYC
+    #: name at the time of applying. It is where their salary lands and where
+    #: repayments come from; the credit line itself is never paid out to it.
+    bank_account_id = uuid_fk('bank_accounts.bank_account_id', nullable=True)
+
+    # -- From the credit bureau -------------------------------------------
+    #: The CIBIL-style score, 300-900. Null until fetched, and also null when
+    #: the bureau has no file on the applicant (see credit_no_history).
+    credit_score = db.Column(db.Integer, nullable=True)
+    #: The bureau has no credit history for this person - new to credit, which
+    #: is assessed differently from a low score rather than as one.
+    credit_no_history = db.Column(db.Boolean, default=False, nullable=False)
+    credit_score_fetched_at = db.Column(db.DateTime, nullable=True)
+    bureau_reference = db.Column(db.String(64), nullable=True)
+    #: When the applicant agreed to the bureau enquiry. A report is never pulled
+    #: without it.
+    bureau_consent_at = db.Column(db.DateTime, nullable=True)
 
     # -- What the backend decided -----------------------------------------
     # Computed server-side, always. A client-supplied limit is a request, never
@@ -106,6 +160,7 @@ class CreditApplications(db.Model, TimestampMixin, CRUDMixin):
     user = db.relationship('Users', backref=db.backref(
         'credit_applications', lazy='dynamic',
     ))
+    bank_account = db.relationship('BankAccounts', foreign_keys=[bank_account_id])
 
     def can_transition_to(self, new_status: str) -> bool:
         return new_status in ApplicationStatus.ALLOWED.get(self.status, [])

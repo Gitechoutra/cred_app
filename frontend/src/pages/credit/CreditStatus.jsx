@@ -4,7 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { endpoints } from '../../api/client';
 import { PageHeader } from '../../components/layout/AppShell';
 import { Timeline } from '../../components/domain';
-import { Badge, Button, Card, Row, Sheet, Skeleton } from '../../components/ui';
+import { Badge, Button, Card, Row, Sheet, Skeleton, cx } from '../../components/ui';
 import {
   ErrorCard, JourneySteps, StatusHero, friendlyError,
 } from '../../components/credit/CreditUI';
@@ -53,11 +53,14 @@ function kycDetail(kyc) {
   }
 }
 
-function buildTimeline(application, kyc) {
+function buildTimeline(application, kyc, account) {
   const status = application.status;
   const rejected = status === 'REJECTED';
   const withdrawn = status === 'WITHDRAWN';
+  const approved = status === 'APPROVED';
   const kycState = kycDetail(kyc);
+  const scored = application.credit_score != null || application.credit_no_history;
+  const active = account?.status === 'ACTIVE';
 
   return [
     {
@@ -73,22 +76,42 @@ function buildTimeline(application, kyc) {
       failed: status === 'KYC_PENDING' && kycState.tone === 'alert',
     },
     {
-      label: 'Under review',
+      label: 'Credit check and eligibility',
+      detail: scored
+        ? [
+          application.credit_no_history
+            ? 'No credit history yet'
+            : `Credit score ${application.credit_score} (${application.credit_score_band})`,
+          application.eligible_limit ? `eligible for ${money(application.eligible_limit, { decimals: 0 })}` : null,
+        ].filter(Boolean).join(' · ')
+        : (application.kyc_verified_at ? 'Fetching your credit score' : 'After identity is verified'),
+      done: scored || approved || rejected,
+    },
+    {
+      label: 'Reviewed by our credit team',
       detail: status === 'UNDER_REVIEW'
         ? 'Usually within one working day'
         : (application.decided_at ? date(application.decided_at) : null),
-      done: status === 'APPROVED' || rejected,
+      done: approved || rejected,
       current: status === 'UNDER_REVIEW',
     },
     {
       label: rejected ? 'Not approved' : withdrawn ? 'Withdrawn' : 'Approved',
       detail: rejected
-        ? application.decision_message
+        ? (application.decision_note || application.decision_message)
         : (application.approved_limit ? `${money(application.approved_limit)} credit limit` : null),
-      done: status === 'APPROVED' || rejected,
-      current: status === 'APPROVED',
+      done: approved || rejected,
+      current: approved && !active,
       failed: rejected || withdrawn,
     },
+    ...(rejected || withdrawn ? [] : [{
+      label: 'Credit line active',
+      detail: active
+        ? `${money(account.available_credit)} available to spend`
+        : approved ? 'Choose a purpose and activate to start using it' : null,
+      done: active,
+      current: approved && !active,
+    }]),
   ];
 }
 
@@ -107,6 +130,10 @@ export default function CreditStatus() {
     () => endpoints.credit.application(applicationId), [applicationId],
   );
   const { data: kyc } = useFetch(() => endpoints.kyc.status(), [application?.status]);
+  const { data: account } = useFetch(
+    () => endpoints.credit.account(), [application?.status],
+    { skip: application?.status !== 'APPROVED' },
+  );
 
   const [confirmWithdraw, setConfirmWithdraw] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
@@ -204,8 +231,14 @@ export default function CreditStatus() {
               title="Approved"
               subtitle="Your credit limit is assigned. Choose what you will use it for, then activate your card."
             />
-            <Button variant="mint" size="lg" full className="mt-6" onClick={() => navigate('/credit/purpose')}>
-              Continue
+            <Button
+              variant="mint"
+              size="lg"
+              full
+              className="mt-6"
+              onClick={() => navigate(account?.status === 'ACTIVE' ? '/credit' : '/credit/purpose')}
+            >
+              {account?.status === 'ACTIVE' ? 'Go to my credit line' : 'Continue'}
             </Button>
           </>
         )}
@@ -262,6 +295,21 @@ export default function CreditStatus() {
                 <p className="text-2xs text-slate">Final once approved</p>
               </div>
             </div>
+            {application.eligibility_checks?.length > 0 && (
+              <ul className="mt-4 space-y-1.5 rounded-2xl border border-line p-3.5">
+                {application.eligibility_checks.map((item) => (
+                  <li key={item.key} className="flex items-start gap-2 text-xs">
+                    <span className={cx('mt-0.5 font-bold', item.passed ? 'text-mint-700' : 'text-alert')}>
+                      {item.passed ? '✓' : '✕'}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="font-medium text-ink">{item.label}</span>
+                      <span className="text-slate"> - {item.detail}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
             {application.assessment_message && (
               <p className="mt-3 rounded-xl bg-amber-50 px-3.5 py-3 text-center text-xs text-amber-800">
                 {application.assessment_message}
@@ -281,7 +329,7 @@ export default function CreditStatus() {
             <StatusHero
               kind="failure"
               title="Not approved"
-              subtitle={application.decision_message || 'We are unable to offer a credit card at this time.'}
+              subtitle={application.decision_note || application.decision_message || 'We are unable to offer a credit line at this time.'}
             />
             <Button
               variant={application.decision_reason === 'FULL_KYC_REQUIRED' ? 'mint' : 'outline'}
@@ -311,15 +359,27 @@ export default function CreditStatus() {
 
       <Card className="mb-4 p-5 sm:p-6">
         <p className="mb-4 text-2xs font-semibold uppercase tracking-wider text-slate">Progress</p>
-        <Timeline steps={buildTimeline(application, kyc)} />
+        <Timeline steps={buildTimeline(application, kyc, account)} />
       </Card>
 
       <Card className="divide-y divide-line py-1">
         <p className="py-2.5 text-2xs font-semibold uppercase tracking-wider text-slate">What you told us</p>
         <Row label="Employment" value={application.employment_type.replace(/_/g, ' ').toLowerCase()} />
-        <Row label="Monthly salary" value={money(application.monthly_income)} mono />
-        {application.existing_emi_outflow > 0 && (
-          <Row label="Existing EMIs" value={money(application.existing_emi_outflow)} mono />
+        {application.employer_name && <Row label="Employer" value={application.employer_name} />}
+        {application.designation && <Row label="Designation" value={application.designation} />}
+        {application.months_in_current_job != null && (
+          <Row label="In this job" value={`${application.months_in_current_job} months`} />
+        )}
+        <Row label="Monthly income" value={money(application.monthly_income)} mono />
+        <Row label="Existing EMIs" value={money(application.existing_emi_outflow || 0)} mono />
+        {application.income_proof_label && (
+          <Row label="Income proof" value={application.income_proof_label} />
+        )}
+        {application.bank_account && (
+          <Row
+            label="Salary account"
+            value={`${application.bank_account.bank_name || 'Bank'} ${application.bank_account.masked_account}`}
+          />
         )}
         <Row label="Submitted" value={date(application.submitted_at)} />
       </Card>

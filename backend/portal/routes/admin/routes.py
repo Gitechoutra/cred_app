@@ -22,7 +22,7 @@ from sqlalchemy import func
 
 from portal import db
 from portal.helpers import (
-    audit, credit_engine, error_recorder, ledger_engine, settings,
+    audit, credit_engine, error_recorder, ledger_engine, settings, uploads,
 )
 from portal.helpers.helpers import (
     ErrorCode, failure, idempotency_key, iso, paginated, success, to_float,
@@ -40,7 +40,9 @@ from portal.models.bank_accounts import BankAccounts
 from portal.models.base import utcnow
 from portal.models.cards import Cards, CardStatus
 from portal.models.credit_accounts import CreditAccounts
-from portal.models.credit_applications import ApplicationStatus, CreditApplications
+from portal.models.credit_applications import (
+    ApplicationStatus, CreditApplications, IncomeProofType,
+)
 from portal.models.credit_transactions import CreditTransactions
 from portal.models.emi_obligations import EMIObligations
 from portal.models.emi_payments import EMIPayments
@@ -53,6 +55,11 @@ from portal.models.reconciliation import (
 )
 from portal.models.roles import RoleTypes
 from portal.models.users import KYCTier, UserStatus, Users
+
+from portal.routes.credit.routes import (
+    application_dict as credit_application_dict,
+    bank_summary as credit_bank_summary,
+)
 
 from . import logger, ns
 
@@ -76,9 +83,8 @@ action_parser.add_argument('reason', type=str, required=True, location='json')
 
 credit_review_parser = reqparse.RequestParser()
 credit_review_parser.add_argument('decision', type=str, required=True, location='json')
-# Not type=float: the raw text has to reach validate_amount, which rejects
-# scientific notation that a float coercion would silently accept.
-credit_review_parser.add_argument('limit', required=False, location='json')
+# No limit argument. Approval grants the eligible limit the rules work out from
+# salary and credit score; an administrator decides whether, not how much.
 credit_review_parser.add_argument('note', type=str, required=False, location='json')
 
 refund_parser = reqparse.RequestParser()
@@ -750,28 +756,48 @@ class AdminCreditApplicationQueue(Resource):
         page, per_page = validate_pagination(args['page'], args['per_page'])
         _, role = _actor()
 
-        query = CreditApplications.query
-        if args.get('status'):
-            requested = args['status'].upper()
+        # Open applications by default: both those under review and those
+        # waiting on the applicant's KYC. The queue used to show UNDER_REVIEW
+        # only, so an application from an unverified applicant was invisible
+        # to administrators until KYC cleared.
+        open_statuses = [ApplicationStatus.UNDER_REVIEW, ApplicationStatus.KYC_PENDING]
+        requested = (args.get('status') or '').upper()
+        if requested and requested != 'OPEN':
             if requested not in ApplicationStatus.CHOICES:
                 return failure(
                     ErrorCode.VALIDATION_ERROR,
                     f'Unknown application status: {requested}.', 400,
                 )
-            query = query.filter(CreditApplications.status == requested)
+            statuses = [requested]
         else:
-            query = query.filter(
-                CreditApplications.status == ApplicationStatus.UNDER_REVIEW
-            )
+            statuses = open_statuses
 
-        pagination = query.order_by(
-            CreditApplications.submitted_at.asc()
-        ).paginate(page=page, per_page=per_page, error_out=False)
+        query = CreditApplications.query.filter(
+            CreditApplications.status.in_(statuses)
+        )
+        # A queue is worked oldest first; a history is read newest first.
+        order = (
+            CreditApplications.submitted_at.asc() if statuses == open_statuses
+            or requested in open_statuses
+            else CreditApplications.decided_at.desc()
+        )
+        pagination = query.order_by(order).paginate(
+            page=page, per_page=per_page, error_out=False,
+        )
+
+        counts = dict(
+            db.session.query(CreditApplications.status, func.count())
+            .group_by(CreditApplications.status).all()
+        )
 
         can_see_pii = role in (L2, L3)
         rows = []
         for application in pagination.items:
             applicant = application.user
+            assessment = (
+                credit_engine.assess(application, applicant)
+                if applicant and application.is_open else None
+            )
             rows.append({
                 'application_id': application.application_id,
                 'user_id': application.user_id,
@@ -783,23 +809,192 @@ class AdminCreditApplicationQueue(Resource):
                 'kyc_tier': applicant.kyc_tier if applicant else None,
                 'status': application.status,
                 'employment_type': application.employment_type,
+                'employer_name': application.employer_name,
                 'monthly_income': to_float(application.monthly_income),
                 'existing_emi_outflow': to_float(application.existing_emi_outflow),
-                'requested_limit': to_float(application.requested_limit),
-                # What the engine would grant, shown next to the request so a
-                # reviewer can see the difference at a glance rather than having
-                # to work it out.
-                'offered_limit': to_float(application.offered_limit),
-                'eligibility_score': to_float(application.eligibility_score),
+                'kyc_status': (
+                    applicant.kyc_verification.kyc_status
+                    if applicant and applicant.kyc_verification else None
+                ),
+                'credit_score': application.credit_score,
+                'credit_score_band': credit_engine.score_band(application.credit_score),
+                'credit_no_history': application.credit_no_history,
+                # The limit approval would grant, worked out from salary and
+                # score. Null when the application is not eligible.
+                'eligible_limit': to_float(application.offered_limit),
+                'eligible': bool(assessment and assessment['approved']),
+                'assessment_reason': assessment['reason'] if assessment else None,
+                'assessment_message': (
+                    credit_engine.DecisionReason.MESSAGES.get(assessment['reason'])
+                    if assessment and not assessment['approved'] else None
+                ),
+                'full_kyc_limit': (
+                    to_float(assessment.get('full_kyc_limit')) if assessment else None
+                ),
+                'approved_limit': to_float(application.approved_limit),
+                'decision_reason': application.decision_reason,
+                'decision_note': application.decision_note,
+                'decided_at': iso(application.decided_at),
                 'submitted_at': iso(application.submitted_at),
                 'waiting_hours': (
                     round(
                         (utcnow() - application.submitted_at).total_seconds() / 3600, 1
-                    ) if application.submitted_at else None
+                    ) if application.submitted_at and application.is_open else None
                 ),
             })
 
-        return paginated(rows, page, per_page, pagination.total)
+        return paginated(rows, page, per_page, pagination.total, counts={
+            'open': sum(counts.get(s, 0) for s in open_statuses),
+            **{status: counts.get(status, 0) for status in ApplicationStatus.CHOICES},
+        })
+
+
+def _application_or_404(application_id):
+    return CreditApplications.query.filter_by(application_id=application_id).first()
+
+
+@ns.route('/credit/applications/<string:application_id>')
+class AdminCreditApplicationDetail(Resource):
+    @ns.doc('admin_credit_application_detail', security='Bearer')
+    @jwt_required()
+    @roles_required(L1, L2, L3)
+    def get(self, application_id):
+        """
+        One application, complete: the applicant, their KYC and its documents,
+        employment and income with the income proof, the bank account and how it
+        was verified, the credit bureau result, the eligible limit with every
+        figure it was built from, and the decision once there is one.
+
+        Everything a reviewer needs to approve or reject without opening another
+        screen. Documents themselves are streamed by their own audited routes
+        (L2/L3), so only whether each exists is returned here.
+        """
+        _, role = _actor()
+        application = _application_or_404(application_id)
+        if not application:
+            return failure(ErrorCode.NOT_FOUND, 'Application not found.', 404)
+
+        applicant = application.user
+        if not applicant:
+            return failure(ErrorCode.NOT_FOUND, 'Applicant not found.', 404)
+
+        can_see_pii = role in (L2, L3)
+        kyc = applicant.kyc_verification
+        profile = applicant.profile
+        bank = application.bank_account
+
+        data = credit_application_dict(application)
+        data.update({
+            'applicant': {
+                'user_id': applicant.user_id,
+                'full_name': applicant.full_name,
+                'phone': applicant.phone if can_see_pii else applicant.masked_phone(),
+                'email': getattr(applicant, 'email', None) if can_see_pii else None,
+                'status': applicant.status,
+                'kyc_tier': applicant.kyc_tier,
+                'member_since': iso(applicant.created_on),
+            },
+            'kyc': {
+                'kyc_id': kyc.kyc_id if kyc else None,
+                'kyc_status': kyc.kyc_status if kyc else KYCStatus.NOT_STARTED,
+                'requested_tier': kyc.requested_tier if kyc else None,
+                'verified_legal_name': kyc.verified_legal_name if kyc else None,
+                'pan_masked': (
+                    f'XXXXXX{profile.pan_last4}' if profile and profile.pan_last4 else None
+                ),
+                'aadhaar_masked': (
+                    f'XXXX XXXX {profile.aadhaar_last4}'
+                    if profile and profile.aadhaar_last4 else None
+                ),
+                'submitted_at': iso(kyc.submitted_at) if kyc else None,
+                'reviewed_at': iso(kyc.reviewed_at) if kyc else None,
+                'rejection_reason': kyc.rejection_reason if kyc else None,
+                'documents': [
+                    {
+                        'slot': slot,
+                        'label': {'pan': 'PAN card', 'aadhaar': 'Aadhaar',
+                                  'selfie': 'Selfie'}[slot],
+                        'available': bool(kyc and getattr(kyc, column, None)),
+                    }
+                    for slot, column in _KYC_DOCUMENT_SLOTS.items()
+                ],
+            },
+            'bank_account': {
+                **(credit_bank_summary(bank) or {}),
+                'account_holder_name': bank.account_holder_name,
+                'verified_cbs_name': bank.verified_cbs_name,
+                'name_match_score': to_float(bank.name_match_score),
+                'verified_at': iso(bank.verified_at),
+            } if bank else None,
+            'bureau': {
+                'credit_score': application.credit_score,
+                'score_band': credit_engine.score_band(application.credit_score),
+                'no_history': application.credit_no_history,
+                'fetched_at': iso(application.credit_score_fetched_at),
+                'reference': application.bureau_reference,
+                'consented_at': iso(application.bureau_consent_at),
+            },
+            'income_proof': {
+                'type': application.income_proof_type,
+                'label': IncomeProofType.LABELS.get(application.income_proof_type),
+                'available': bool(application.income_proof_path),
+            },
+            'decided_by': application.decided_by,
+            # What an L1 may not do is shown rather than discovered by a 403.
+            'can_decide': role in (L2, L3) and application.is_open,
+            'can_view_documents': can_see_pii,
+        })
+
+        # The eligibility shown to a reviewer of a decided application is what
+        # it was at decision; for an open one it is what approval would grant now.
+        if not application.is_open:
+            data['eligibility_checks'] = None
+            data['eligibility_breakdown'] = None
+
+        return success(data)
+
+
+@ns.route('/credit/applications/<string:application_id>/income-proof')
+class AdminCreditIncomeProof(Resource):
+    @ns.doc('admin_credit_income_proof', security='Bearer')
+    @jwt_required()
+    @roles_required(L2, L3)
+    def get(self, application_id):
+        """
+        Stream the applicant's income proof. L2/L3 only, and audited - it is a
+        customer's salary slip or bank statement.
+        """
+        actor, role = _actor()
+        application = _application_or_404(application_id)
+        if not application or not application.income_proof_path:
+            return failure(ErrorCode.NOT_FOUND, 'No income proof was uploaded.', 404)
+
+        found, problem = uploads.resolve(application.income_proof_path)
+        if not found:
+            if problem == 'outside':
+                logger.error(f'Blocked out-of-root income proof read: {application_id}')
+                return failure(ErrorCode.FORBIDDEN, 'This document cannot be served.', 403)
+            if problem == 'type':
+                return failure(ErrorCode.FORBIDDEN, 'This file type cannot be displayed.', 403)
+            return failure(ErrorCode.NOT_FOUND,
+                           'The uploaded file is no longer available on disk.', 404)
+        resolved, mimetype = found
+
+        audit.record(
+            action='ADMIN_VIEWED_INCOME_PROOF',
+            entity_type='CreditApplications',
+            entity_id=application_id,
+            actor_user_id=str(actor.user_id),
+            actor_role=role,
+            on_behalf_of=str(application.user_id),
+            notes='Opened the income proof for credit review.',
+        )
+
+        response = send_file(resolved, mimetype=mimetype, conditional=False)
+        response.headers['Cache-Control'] = 'no-store, private, max-age=0'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['Content-Disposition'] = 'inline; filename="income_proof"'
+        return response
 
 
 @ns.route('/credit/applications/<string:application_id>/review')
@@ -818,10 +1013,10 @@ class AdminReviewCreditApplication(Resource):
         anything - the applicant still has to declare a purpose and activate,
         and an administrator cannot do either on their behalf.
 
-        `limit` overrides what the engine offered. It is still bounded by the
-        applicant's KYC tier cap in the engine, so this is a discretion to grant
-        less, or to grant a different amount within the rules, rather than a way
-        around them.
+        There is no limit to type in. Approval grants the eligible limit the
+        rules work out from income and credit score, re-checked at the moment of
+        approval; an application the rules find ineligible cannot be approved,
+        only rejected.
         """
         args = credit_review_parser.parse_args()
         actor, role = _actor()
@@ -846,13 +1041,6 @@ class AdminReviewCreditApplication(Resource):
                 'A reason is required when rejecting an application.', 400,
             )
 
-        limit = None
-        if decision == 'APPROVE' and args.get('limit') not in (None, ''):
-            try:
-                limit = validate_amount(args['limit'], 'limit', minimum=1)
-            except ValidationError as exc:
-                return failure(ErrorCode.VALIDATION_ERROR, exc.message, 400)
-
         applicant = application.user
         if not applicant:
             return failure(ErrorCode.NOT_FOUND, 'Applicant not found.', 404)
@@ -864,7 +1052,6 @@ class AdminReviewCreditApplication(Resource):
                 application,
                 user=applicant,
                 approve=(decision == 'APPROVE'),
-                limit=limit,
                 note=note or None,
                 actor_id=str(actor.user_id),
             )
@@ -887,13 +1074,8 @@ class AdminReviewCreditApplication(Resource):
             payload={
                 'previous_status': previous,
                 'approved_limit': to_float(application.approved_limit),
-                'offered_limit': to_float(application.offered_limit),
-                # Recorded explicitly so an override is searchable rather than
-                # something a reader has to infer by comparing two numbers.
-                'overrode_engine_offer': (
-                    limit is not None
-                    and to_float(limit) != to_float(application.offered_limit)
-                ),
+                'eligible_limit': to_float(application.offered_limit),
+                'credit_score': application.credit_score,
             },
         )
 

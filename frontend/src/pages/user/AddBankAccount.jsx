@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
 import { PageHeader } from '../../components/layout/AppShell';
 import { Button, Input, Loader3D } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
+import { useReturnTo } from '../../hooks/useNavHistory';
 import { useProfile } from '../../hooks/useProfile';
 import { money } from '../../utils/format';
 
@@ -17,8 +18,14 @@ import { money } from '../../utils/format';
  */
 export default function AddBankAccount() {
   const navigate = useNavigate();
+  const location = useLocation();
   const toast = useToast();
   const { profile } = useProfile();
+
+  // Sent here from another flow - the credit application's bank step - which
+  // wants the applicant back where they left off, not on the accounts list.
+  const returnTo = location.state?.returnTo;
+  const goBackTo = useReturnTo();
 
   const [form, setForm] = useState({
     account_number: '',
@@ -129,7 +136,8 @@ export default function AddBankAccount() {
         toast.info(response.message, { duration: 7000 });
       }
 
-      navigate('/banks', { replace: true });
+      if (returnTo) goBackTo(returnTo);
+      else navigate('/banks', { replace: true });
     } catch (err) {
       if (err.details?.field) setErrors({ [err.details.field]: err.message });
       else toast.error(err.message);

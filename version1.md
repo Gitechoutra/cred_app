@@ -141,7 +141,7 @@
   |---|---|---|
   | **Multi-Card Maximizer** *(primary)* | 26–42, salaried, 3–6 cards, ₹8L–₹30L p.a. | Aggregate limit, utilization warning, unified due calendar, a CashU card alongside the rest |
   | **Consumer EMI Repayer** *(primary)* | 22–48, consumer-durable / two-wheeler loans via Bajaj, HDB, IDFC | Biller discovery, one-tap UPI payment, auto-pay scheduling |
-  | **First-Line Credit Seeker** *(secondary, replaces "Emergency Liquidity Seeker")* | Salaried or self-employed, wants a transparent credit line with a declared purpose | Instant indicative offer, clear decision reasons, statements with minimum due |
+  | **First-Line Credit Seeker** *(secondary, replaces "Emergency Liquidity Seeker")* | Salaried or self-employed, wants a transparent credit line with a declared purpose | Eligible limit worked out from income and credit score, clear decision reasons, statements with minimum due |
   | **Ops & Compliance Staff** *(internal)* | Risk analysts, support, settlement accountants | RBAC console, credit application queue, KYC queue, immutable audit trail, recon dashboard |
 
   ---
@@ -337,7 +337,7 @@
 
   | Model | Notes |
   |---|---|
-  | `CreditApplications` | employment type, monthly income, existing EMI outflow, requested / offered / approved limit, eligibility score, `decision_reason`, `ApplicationStatus` |
+  | `CreditApplications` | employment type, employer, designation, months in job, monthly income, existing EMI outflow, income proof (type + stored file), salary bank account, bureau consent, credit score / no-history / bureau reference, eligible (`offered_limit`) and approved limit, `decision_reason`, `ApplicationStatus`. `requested_limit` is retired and never written. |
   | `CreditAccounts` | card BIN + last 4 only (RuPay), name on card, expiry, `credit_limit`, `available_credit`, `current_outstanding`, `purpose` (+ note for OTHER), `statement_day`, `grace_days`, `CreditAccountStatus` |
   | `CreditTransactions` | **Append-only.** PURCHASE / PAYMENT / REFUND / FEE; amount, `balance_after`, `available_after`, merchant + category, `idempotency_key` (UNIQUE), `statement_id`, payment method + gateway ids, `failure_code/reason`, `is_test` |
   | `CreditStatements` | **Append-only.** period, opening / purchases / payments / refunds / fees / closing, `minimum_due`, `total_amount_due`, limit + available at close, `amount_paid`, `StatementStatus`, `late_fee_charged_at`. UNIQUE (`credit_account_id`, `period_end`) |
@@ -426,9 +426,9 @@
 
   | Step | Screen | What happens |
   |---|---|---|
-  | 1. Apply | `/credit/apply` | Employment type, monthly income, existing EMI outflow (zero allowed), optional requested limit. A running **estimate** is shown, labelled as such and never sent. |
-  | 2. KYC gate | `/credit/status/:id` | KYC tier NONE → `KYC_PENDING`. When an admin approves KYC, the application moves to `UNDER_REVIEW` immediately (not on next visit) and is re-assessed. |
-  | 3. Review | `/credit/status/:id` | L2/L3 approves or rejects. Status polls for the decision and shows the real KYC sub-state and a timeline. |
+  | 1. Apply | `/credit/apply` | Four steps: **Identity** (PAN + Aadhaar with documents, submitted to KYC in place; skipped when already verified or in review) → **Bank** (a penny-drop verified account in the applicant's name; "Link a bank account" returns here) → **Employment & income** (type, employer, designation, months in job, monthly income, existing EMIs, income proof: salary slip / bank statement / ITR) → **Credit check** (review + bureau consent) → submit (multipart). There is **no limit field and no estimate**: the applicant never names or sees a number before the server works one out. |
+  | 2. Verification | `/credit/status/:id` | KYC not yet approved → `KYC_PENDING`. When an admin approves KYC (from the KYC queue or the application's review page), the application moves to `UNDER_REVIEW` immediately, the credit score is fetched by PAN, and the eligible limit is computed. |
+  | 3. Eligibility + review | `/credit/status/:id`, `/admin/credit/:id` | The applicant sees score, band, eligible limit and each rule's outcome. L2/L3 review the complete application - KYC documents, income proof, bank + name match, bureau result, eligibility breakdown - and approve (grants exactly the eligible limit) or reject (reason required, shown to the applicant). Both notify the applicant. |
   | 4. Issue | — | Approval issues a `CreditAccount` in `PENDING_PURPOSE`: RuPay BIN + random last 4, expiry +5 years. The middle digits are never composed. |
   | 5. Purpose | `/credit/purpose` | Accessible dropdown: Education, Medical, Shopping, Travel, Business, Bills, Emergency, Other. **Other requires a note; every other option refuses one.** Mandatory gate. |
   | 6. Activate | `/credit/activate` | `PENDING_ACTIVATION → ACTIVE`. Refused without a purpose. |
@@ -460,15 +460,16 @@
   | Rule | Value |
   |---|---|
   | KYC tier NONE | Not decided — `KYC_INCOMPLETE` |
-  | Disposable income | monthly income − existing EMI outflow; ≤ 0 → `OBLIGATIONS_TOO_HIGH` |
-  | Offer | 3 × disposable income |
-  | Thin file (Student / Other) | capped at ₹20,000 |
-  | Requested limit | honoured if lower; never raises the offer |
-  | Tier cap | ₹50,000 (Minimum KYC) / ₹2,00,000 (Full KYC) |
-  | Offer above ₹50,000 on Minimum KYC | `FULL_KYC_REQUIRED` — told to upgrade, not silently capped |
+  | Disposable income | monthly income − existing EMI outflow |
+  | FOIR | existing EMIs above 60% of income (or disposable ≤ 0) → `OBLIGATIONS_TOO_HIGH` |
+  | Credit score | fetched from the bureau by PAN, with consent. Below 650 → `CREDIT_SCORE_TOO_LOW`; not yet fetched → `CREDIT_SCORE_UNAVAILABLE` |
+  | Offer | disposable income × 4 (score 800+), 3 (750–799), 2 (700–749), 1 (650–699); no bureau history → 1× and thin-file capped |
+  | Thin file (Student / Other / no history) | capped at ₹20,000 |
+  | Tier cap | `CREDIT_LIMIT_MAX_STANDARD_KYC` / `CREDIT_LIMIT_MAX_FULL_KYC` settings |
+  | Minimum KYC | capped at the full-KYC threshold (`FULL_KYC_REQUIRED_ABOVE`); the application reports what full KYC would unlock |
   | Floor | below ₹5,000 → `INCOME_BELOW_FLOOR` |
   | Rounding | down to the nearest ₹500 |
-  | Admin override | may decline, or grant a different amount **within the tier cap**; never above |
+  | Admin decision | approve or reject only. No amount is typed: approval grants the eligible limit re-checked at that moment, and an ineligible application cannot be approved |
 
   **Spending & billing settings** (admin-configurable, seeded defaults):
 

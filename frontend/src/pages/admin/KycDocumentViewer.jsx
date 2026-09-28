@@ -18,8 +18,12 @@ import { Loader3D, cx } from '../../components/ui';
  * Zoom exists because the job here is judging whether a PAN card is genuine,
  * and that decision turns on small details: the hologram, the font of the
  * number, the alignment of the photo. A thumbnail cannot support it.
+ *
+ * Also shows a credit application's income proof: pass `load` (resolving to
+ * { url, type }) and a `docKey` that changes when the document does, in place
+ * of kycId and slot.
  */
-export default function KycDocumentViewer({ kycId, slot, label, available }) {
+export default function KycDocumentViewer({ kycId, slot, label, available, load, docKey }) {
   const [url, setUrl] = useState(null);
   const [type, setType] = useState('');
   const [error, setError] = useState('');
@@ -34,7 +38,7 @@ export default function KycDocumentViewer({ kycId, slot, label, available }) {
   const objectUrl = useRef(null);
 
   useEffect(() => {
-    if (!available || !kycId) return undefined;
+    if (!available || (!kycId && !load)) return undefined;
 
     let cancelled = false;
     setLoading(true);
@@ -43,7 +47,9 @@ export default function KycDocumentViewer({ kycId, slot, label, available }) {
 
     (async () => {
       try {
-        const next = await endpoints.admin.kycDocumentUrl(kycId, slot);
+        const next = load
+          ? await load()
+          : await endpoints.admin.kycDocumentUrl(kycId, slot);
         if (cancelled) {
           URL.revokeObjectURL(next.url);
           return;
@@ -65,7 +71,10 @@ export default function KycDocumentViewer({ kycId, slot, label, available }) {
         objectUrl.current = null;
       }
     };
-  }, [kycId, slot, available]);
+    // `load` is read through docKey, so a new function each render does not
+    // refetch the document.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kycId, slot, available, docKey]);
 
   if (!available) {
     return (

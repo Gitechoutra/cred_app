@@ -19,10 +19,13 @@ bill payment - and a replay returns the original transaction with 200 rather
 than creating a second one.
 """
 
-from flask_jwt_extended import jwt_required
-from flask_restx import Resource, reqparse
+from decimal import Decimal
 
-from portal.helpers import adapters, credit_engine, settings, test_cards
+from flask import request
+from flask_jwt_extended import jwt_required
+from flask_restx import Resource, inputs, reqparse
+
+from portal.helpers import adapters, credit_engine, settings, test_cards, uploads
 from portal.helpers.helpers import (
     ErrorCode, failure, idempotency_key, iso, paginated, success, to_float,
 )
@@ -32,9 +35,10 @@ from portal.helpers.validators import (
     ValidationError, sanitize_text, validate_amount, validate_choice,
     validate_idempotency_key, validate_pagination,
 )
+from portal.models.bank_accounts import BankAccounts
 from portal.models.credit_accounts import CreditAccountStatus, CreditPurpose
 from portal.models.credit_applications import (
-    ApplicationStatus, CreditApplications, EmploymentType,
+    ApplicationStatus, CreditApplications, EmploymentType, IncomeProofType,
 )
 from portal.models.credit_statements import CreditStatements
 from portal.models.credit_transactions import (
@@ -50,10 +54,23 @@ from . import logger, ns
 # before the plain-decimal check that exists to reject it ever ran.
 
 apply_parser = reqparse.RequestParser()
-apply_parser.add_argument('employment_type', type=str, required=True, location='json')
-apply_parser.add_argument('monthly_income', required=True, location='json')
-apply_parser.add_argument('existing_emi_outflow', required=False, location='json')
-apply_parser.add_argument('requested_limit', required=False, location='json')
+# JSON or multipart: the income proof is a file, so the web form posts
+# multipart, while every other field reads the same either way.
+_APPLY_FROM = ('json', 'form')
+apply_parser.add_argument('employment_type', type=str, required=True, location=_APPLY_FROM)
+apply_parser.add_argument('monthly_income', required=True, location=_APPLY_FROM)
+apply_parser.add_argument('existing_emi_outflow', required=False, location=_APPLY_FROM)
+apply_parser.add_argument('employer_name', type=str, required=False, location=_APPLY_FROM)
+apply_parser.add_argument('designation', type=str, required=False, location=_APPLY_FROM)
+apply_parser.add_argument('months_in_current_job', required=False, location=_APPLY_FROM)
+apply_parser.add_argument('income_proof_type', type=str, required=False, location=_APPLY_FROM)
+apply_parser.add_argument('bank_account_id', type=str, required=False, location=_APPLY_FROM)
+# No limit argument. The applicant does not choose a limit - it is worked out
+# from salary and credit score - so a `requested_limit` in the body is ignored.
+#: Consent to the credit bureau enquiry. Required: a report is never pulled
+#: without it.
+apply_parser.add_argument('bureau_consent', type=inputs.boolean, required=False,
+                          location=_APPLY_FROM)
 
 purpose_parser = reqparse.RequestParser()
 purpose_parser.add_argument('purpose', type=str, required=True, location='json')
@@ -114,16 +131,68 @@ _PAYMENT_OUTCOME = {
 
 # -- Serialisers -----------------------------------------------------------
 
+def plain(values: dict) -> dict:
+    """Decimals to floats, for JSON."""
+    return {
+        key: (to_float(value) if isinstance(value, Decimal) else value)
+        for key, value in (values or {}).items()
+    }
+
+
+def bank_summary(account) -> dict:
+    """The bank account on an application, masked."""
+    if not account:
+        return None
+    return {
+        'bank_account_id': account.bank_account_id,
+        'bank_name': account.bank_name,
+        'masked_account': account.masked_account(),
+        'ifsc_code': account.ifsc_code,
+        'account_type': account.account_type,
+        'penny_drop_status': account.penny_drop_status,
+    }
+
+
 def application_dict(application: CreditApplications) -> dict:
     reason = application.decision_reason
+    # The current assessment, for an undecided application: why it is or is not
+    # eligible, and what full KYC would unlock. Computed rather than stored, so
+    # it can never disagree with the rules.
+    assessment = (
+        credit_engine.assess(application, application.user)
+        if application.is_open and application.user else None
+    )
     return {
+        'assessment_reason': assessment['reason'] if assessment else None,
+        'assessment_message': (
+            credit_engine.DecisionReason.MESSAGES.get(assessment['reason'])
+            if assessment and not assessment['approved'] else None
+        ),
+        'full_kyc_limit': to_float(assessment.get('full_kyc_limit')) if assessment else None,
         'application_id': application.application_id,
         'status': application.status,
         'employment_type': application.employment_type,
+        'employer_name': application.employer_name,
+        'designation': application.designation,
+        'months_in_current_job': application.months_in_current_job,
         'monthly_income': to_float(application.monthly_income),
         'existing_emi_outflow': to_float(application.existing_emi_outflow),
-        'requested_limit': to_float(application.requested_limit),
+        'income_proof_type': application.income_proof_type,
+        'income_proof_label': IncomeProofType.LABELS.get(application.income_proof_type),
+        'has_income_proof': bool(application.income_proof_path),
+        'bank_account': bank_summary(application.bank_account),
+        # Every figure the eligible limit was built from, and each rule's
+        # outcome, for an undecided application.
+        'eligibility_breakdown': plain(assessment['breakdown']) if assessment else None,
+        'eligibility_checks': assessment['checks'] if assessment else None,
+        # What the rules make this application eligible for, from salary and
+        # credit score. Null until a score exists, or when it is not eligible.
+        'eligible_limit': to_float(application.offered_limit),
         'offered_limit': to_float(application.offered_limit),
+        'credit_score': application.credit_score,
+        'credit_score_band': credit_engine.score_band(application.credit_score),
+        'credit_no_history': application.credit_no_history,
+        'credit_score_fetched_at': iso(application.credit_score_fetched_at),
         'approved_limit': to_float(application.approved_limit),
         'eligibility_score': to_float(application.eligibility_score),
         'decision_reason': reason,
@@ -415,11 +484,15 @@ class CreditApplicationList(Resource):
         """
         Apply for a credit line.
 
-        Deliberately not behind kyc_required. An unverified applicant may apply
-        and is parked in KYC_PENDING - being told "apply after verifying" when
-        verification takes a day is a worse journey than being told "we have your
-        application, now verify". The gate is on approval, which is where it
-        matters.
+        JSON or multipart. The full application: employment and employer,
+        monthly income and existing EMIs, an income proof document
+        (`income_proof`), the verified bank account the salary is paid into,
+        and consent to a credit bureau enquiry. KYC must have been submitted;
+        if it is still in review the application waits in KYC_PENDING and moves
+        to review the moment KYC is approved.
+
+        There is no limit field. The eligible limit is worked out from income and
+        credit score, and an administrator approves or rejects it.
         """
         args = apply_parser.parse_args()
         user = current_user()
@@ -449,12 +522,47 @@ class CreditApplicationList(Resource):
                     raw_outflow, 'existing_emi_outflow',
                     minimum=0, maximum=100000000,
                 )
-            requested = validate_amount(
-                args['requested_limit'], 'requested_limit',
-                minimum=1, maximum=100000000,
-            ) if args.get('requested_limit') not in (None, '') else None
+            employer = sanitize_text(args.get('employer_name') or '', 150) or None
+            designation = sanitize_text(args.get('designation') or '', 100) or None
+            months = None
+            if args.get('months_in_current_job') not in (None, ''):
+                raw_months = str(args['months_in_current_job']).strip()
+                if not raw_months.isdigit() or int(raw_months) > 600:
+                    raise ValidationError(
+                        'Enter how many months you have been in this job.',
+                        'months_in_current_job',
+                    )
+                months = int(raw_months)
+            proof_type = (args.get('income_proof_type') or '').upper() or None
+            if proof_type:
+                proof_type = validate_choice(
+                    proof_type, IncomeProofType.CHOICES, 'income_proof_type',
+                )
         except ValidationError as exc:
-            return failure(ErrorCode.VALIDATION_ERROR, exc.message, 400)
+            return failure(ErrorCode.VALIDATION_ERROR, exc.message, 400,
+                           details={'field': exc.field})
+
+        proof_upload = request.files.get('income_proof')
+        consent = bool(args.get('bureau_consent'))
+
+        # Every refusal first, then the file: a refused application must not
+        # leave a customer's payslip on disk.
+        try:
+            credit_engine.check_can_apply(
+                user=user, bureau_consent=consent, employment_type=employment,
+                employer_name=employer, bank_account_id=args.get('bank_account_id'),
+                has_income_proof=bool(proof_upload and proof_upload.filename),
+            )
+        except credit_engine.CreditError as exc:
+            return _engine_failure(exc)
+
+        try:
+            proof_path = uploads.save_document(
+                proof_upload, 'income', user.user_id, 'income_proof',
+            )
+        except ValidationError as exc:
+            return failure(ErrorCode.VALIDATION_ERROR, exc.message, 400,
+                           details={'field': 'income_proof'})
 
         try:
             application = credit_engine.apply(
@@ -462,9 +570,16 @@ class CreditApplicationList(Resource):
                 employment_type=employment,
                 monthly_income=income,
                 existing_emi_outflow=outflow,
-                requested_limit=requested,
+                bureau_consent=consent,
+                employer_name=employer,
+                designation=designation,
+                months_in_current_job=months,
+                income_proof_type=proof_type or IncomeProofType.SALARY_SLIP,
+                income_proof_path=proof_path,
+                bank_account_id=args.get('bank_account_id'),
             )
         except credit_engine.CreditError as exc:
+            uploads.remove_document(proof_path)
             return _engine_failure(exc)
 
         message = (
@@ -538,7 +653,33 @@ class CreditEligibility(Resource):
         existing = credit_engine.account_for(user.user_id)
         open_application = credit_engine.application_for(user.user_id)
 
+        kyc = user.kyc_verification
+        profile = user.profile
+        accounts = BankAccounts.query.filter_by(
+            user_id=user.user_id, deleted_at=None, is_active=True,
+        ).order_by(BankAccounts.is_primary.desc(), BankAccounts.created_on.desc()).all()
+
         return success({
+            # What the application's identity step needs to show: whether KYC
+            # is done, in review, or still to be given.
+            'kyc_status': kyc.kyc_status if kyc else 'NOT_STARTED',
+            'kyc_submitted': bool(kyc and kyc.kyc_status in (
+                'PENDING', 'UNDER_REVIEW', 'APPROVED',
+            )),
+            'kyc_rejection_reason': kyc.rejection_reason if kyc else None,
+            'kyc_legal_name': kyc.verified_legal_name if kyc else None,
+            'pan_last4': profile.pan_last4 if profile else None,
+            'aadhaar_last4': profile.aadhaar_last4 if profile else None,
+            'bank_accounts': [
+                {**bank_summary(account), 'is_primary': bool(account.is_primary),
+                 'is_verified': account.penny_drop_status == 'VERIFIED'}
+                for account in accounts
+            ],
+            'income_proof_types': [
+                {'value': value, 'label': IncomeProofType.LABELS[value]}
+                for value in IncomeProofType.CHOICES
+            ],
+            'employment_requires_employer': EmploymentType.WITH_EMPLOYER,
             'can_apply': not existing and not open_application,
             'kyc_tier': user.kyc_tier,
             'kyc_required': user.kyc_tier == KYCTier.NONE,

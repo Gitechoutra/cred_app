@@ -32,6 +32,7 @@ import requests
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from throttle import throttled  # noqa: E402
+from credit_apply import apply_for_credit, link_bank  # noqa: E402
 
 BASE = os.getenv('CASHU_API', 'http://127.0.0.1:5050/v1')
 TIMEOUT = 45
@@ -105,37 +106,59 @@ def admin_token():
     return data_of(response).get('access_token')
 
 
-def approve_kyc(token, admin, name, tier='MINIMUM'):
-    """Take a user to a verified KYC tier through the real review path."""
-    user_id = (data_of(get('/users/me', token)) or {}).get('user_id')
-    if not user_id:
-        return False
-
+def submit_kyc(token, name, tier='MINIMUM', pan='ABCDE1234F'):
+    """Submit KYC without approving it. True when it is (now) in review."""
     png = b'\x89PNG\r\n\x1a\n' + b'0' * 400
     files = {'pan_document': ('pan.png', png, 'image/png')}
     form = {
-        'pan_number': 'ABCDE1234F', 'full_name': name,
+        'pan_number': pan, 'full_name': name,
         'requested_tier': tier,
     }
     if tier == 'FULL':
         form['aadhaar_number'] = f'{random.randint(100000000000, 999999999999)}'
         files['aadhaar_document'] = ('aadhaar.png', png, 'image/png')
 
-    if post('/kyc/submit', form=form, files=files,
-            token=token).status_code not in (200, 201):
+    response = post('/kyc/submit', form=form, files=files, token=token)
+    # 409: already in review, which is what the caller wanted.
+    return response.status_code in (200, 201, 409)
+
+
+def approve_kyc(token, admin, name, tier='MINIMUM', pan='ABCDE1234F'):
+    """Take a user to a verified KYC tier through the real review path."""
+    user_id = (data_of(get('/users/me', token)) or {}).get('user_id')
+    if not user_id:
         return False
 
-    queue = data_of(get('/admin/kyc/queue', admin))
-    rows = queue if isinstance(queue, list) else (queue.get('items') or [])
-    kyc_id = next(
-        (r.get('kyc_id') for r in rows if r.get('user_id') == user_id), None,
-    )
+    if not submit_kyc(token, name, tier=tier, pan=pan):
+        return False
+
+    kyc_id = None
+    for page in range(1, 60):
+        response = get(f'/admin/kyc/queue?page={page}&per_page=100', admin)
+        queue = data_of(response)
+        rows = queue if isinstance(queue, list) else (queue.get('items') or [])
+        kyc_id = next(
+            (r.get('kyc_id') for r in rows if r.get('user_id') == user_id), None,
+        )
+        if kyc_id or not rows:
+            break
     if not kyc_id:
         return False
 
     post(f'/admin/kyc/{kyc_id}/review',
          {'decision': 'APPROVE', 'tier': tier}, token=admin)
     return (data_of(get('/kyc/status', token)) or {}).get('kyc_tier') == tier
+
+
+def admin_queue_row(admin, application_id, status=''):
+    """Find one application in the admin queue, which is paginated oldest first."""
+    for page in range(1, 60):
+        response = get(f'/admin/credit/applications?status={status}&page={page}&per_page=100', admin)
+        rows = response.json().get('data') or []
+        row = next((r for r in rows if r.get('application_id') == application_id), None)
+        if row or not rows:
+            return row or {}
+    return {}
 
 
 def assert_invariant(token, label):
@@ -189,15 +212,70 @@ def main():
 
     # ── 2. Applying before KYC ────────────────────────────────────────────
     print('\n[2] Application and the KYC gate')
-    response = post('/credit/applications', {
-        'employment_type': 'SALARIED',
-        'monthly_income': 60000,
+    response = apply_for_credit(post, token, {
+        'employment_type': 'SALARIED', 'monthly_income': 18334,
         'existing_emi_outflow': 5000,
-    }, token=token)
+    })
+    check('an application without credit-check consent is refused',
+          response.status_code == 400 and 'permission' in response.text,
+          f'{response.status_code} {response.text[:160]}')
+
+    # KYC is part of the application: it must at least be submitted.
+    response = apply_for_credit(post, token, {
+        'employment_type': 'SALARIED', 'monthly_income': 18334,
+        'existing_emi_outflow': 5000, 'bureau_consent': True,
+    })
+    check('an application before any KYC submission is refused',
+          response.status_code == 400 and 'KYC' in response.text,
+          f'{response.status_code} {response.text[:160]}')
+
+    check('KYC submitted (not yet approved)',
+          submit_kyc(token, 'Credit Walker', tier='FULL'))
+
+    response = apply_for_credit(post, token, {
+        'employment_type': 'SALARIED', 'monthly_income': 18334,
+        'bureau_consent': True,
+    }, bank_account_id=None)
+    check('an application without a bank account is refused',
+          response.status_code == 400 and 'bank account' in response.text,
+          f'{response.status_code} {response.text[:160]}')
+
+    response = apply_for_credit(post, token, {
+        'employment_type': 'SALARIED', 'monthly_income': 18334,
+        'bureau_consent': True,
+    }, proof=False)
+    check('an application without income proof is refused',
+          response.status_code == 400 and 'proof of income' in response.text,
+          f'{response.status_code} {response.text[:160]}')
+
+    response = apply_for_credit(post, token, {
+        'employment_type': 'SALARIED', 'monthly_income': 18334,
+        'bureau_consent': True, 'employer_name': '',
+    })
+    check('a salaried application without an employer is refused',
+          response.status_code == 400 and 'employer' in response.text,
+          f'{response.status_code} {response.text[:160]}')
+
+    # (18,334 - 5,000) x 3 at the sandbox score of 760 = 40,002 -> 40,000.
+    # requested_limit is sent to prove it is ignored: the applicant does not
+    # choose a limit any more.
+    response = apply_for_credit(post, token, {
+        'employment_type': 'SALARIED',
+        'monthly_income': 18334,
+        'existing_emi_outflow': 5000,
+        'requested_limit': 999999,
+        'bureau_consent': True,
+    })
     application = data_of(response)
-    if not check('application accepted without KYC',
+    if not check('application accepted with KYC still in review',
                  response.status_code == 201, response.text[:250]):
         return finish()
+
+    check('the application carries the employer, bank and income proof',
+          application.get('employer_name') == 'Acme Technologies Pvt Ltd'
+          and (application.get('bank_account') or {}).get('penny_drop_status') == 'VERIFIED'
+          and application.get('has_income_proof') is True,
+          str(application)[:250])
 
     check('parked on the KYC gate',
           application.get('status') == 'KYC_PENDING',
@@ -205,10 +283,17 @@ def main():
     check('no limit approved while unverified',
           application.get('approved_limit') in (None, 0),
           str(application.get('approved_limit')))
+    check('no credit score before KYC - it needs the verified PAN',
+          application.get('credit_score') is None)
 
-    response = post('/credit/applications', {
+    check('an application waiting on KYC is visible in the admin queue',
+          admin_queue_row(admin, application.get('application_id')).get('status')
+          == 'KYC_PENDING')
+
+    response = apply_for_credit(post, token, {
         'employment_type': 'SALARIED', 'monthly_income': 60000,
-    }, token=token)
+        'bureau_consent': True,
+    })
     check('a second open application is refused', response.status_code == 409,
           f'got {response.status_code}')
 
@@ -222,35 +307,66 @@ def main():
     response = post(f'/admin/credit/applications/{application_id}/review',
                     {'decision': 'APPROVE'}, token=admin)
     check('an unverified applicant cannot be approved',
-          response.status_code == 400
+          response.status_code in (400, 409)
           or data_of(response).get('status') == 'REJECTED',
           f'{response.status_code} {response.text[:160]}')
 
     # ── 3. KYC approval advances the application ──────────────────────────
     print('\n[3] KYC approval advances the queue')
-    if not check('KYC approved', approve_kyc(token, admin, 'Credit Walker')):
+    if not check('KYC approved', approve_kyc(token, admin, 'Credit Walker', tier='FULL')):
         return finish()
 
     application = data_of(get(f'/credit/applications/{application_id}', token))
     check('application moved to review on KYC approval',
           application.get('status') == 'UNDER_REVIEW',
           str(application.get('status')))
-    check('an indicative offer was computed',
-          (application.get('offered_limit') or 0) > 0,
-          str(application.get('offered_limit')))
+    check('the credit score was fetched once KYC was approved',
+          application.get('credit_score') == 760,
+          str(application.get('credit_score')))
+    check('the score is given a band', application.get('credit_score_band') == 'Very good',
+          str(application.get('credit_score_band')))
+    check('the eligible limit comes from salary and score, not the request',
+          application.get('eligible_limit') == 40000,
+          str(application.get('eligible_limit')))
 
-    # 60,000 income less 5,000 outflow = 55,000 disposable; three months of that
-    # is 165,000, capped by the MINIMUM-KYC tier ceiling of 50,000. Above the
-    # full-KYC threshold, so this applicant is told to upgrade rather than handed
-    # a number they did not ask for.
-    check('the offer is bounded by the KYC tier cap',
-          (application.get('offered_limit') or 0) <= 50000,
-          str(application.get('offered_limit')))
+    row = admin_queue_row(admin, application_id)
+    check('the admin queue shows the score and the eligible limit',
+          row.get('credit_score') == 760 and row.get('eligible_limit') == 40000
+          and row.get('eligible') is True, str(row)[:200])
+
+    response = get(f'/admin/credit/applications/{application_id}', admin)
+    detail = data_of(response)
+    check('the admin sees the complete application',
+          response.status_code == 200
+          and (detail.get('kyc') or {}).get('kyc_status') == 'APPROVED'
+          and (detail.get('bank_account') or {}).get('penny_drop_status') == 'VERIFIED'
+          and (detail.get('bureau') or {}).get('credit_score') == 760
+          and (detail.get('income_proof') or {}).get('available') is True,
+          response.text[:250])
+    breakdown = detail.get('eligibility_breakdown') or {}
+    check('with the figures the eligible limit was built from',
+          breakdown.get('disposable_income') == 13334
+          and breakdown.get('income_multiple') == 3
+          and breakdown.get('eligible_limit') == 40000,
+          str(breakdown)[:250])
+    check('and every eligibility rule passed',
+          detail.get('eligibility_checks')
+          and all(c.get('passed') for c in detail['eligibility_checks']),
+          str(detail.get('eligibility_checks'))[:250])
+    response = get(f'/admin/credit/applications/{application_id}/income-proof', admin)
+    check('the income proof opens for an administrator',
+          response.status_code == 200
+          and response.headers.get('Content-Type', '').startswith('image/png'),
+          f'{response.status_code} {response.text[:120]}')
+    response = get(f'/admin/credit/applications/{application_id}/income-proof', token)
+    check('and not for the applicant', response.status_code in (401, 403),
+          f'got {response.status_code}')
 
     # ── 4. Approval issues an account, and nothing more ───────────────────
     print('\n[4] Approval and issuance')
+    # A limit in the request is ignored: approval grants the eligible limit.
     response = post(f'/admin/credit/applications/{application_id}/review',
-                    {'decision': 'APPROVE', 'limit': 40000}, token=admin)
+                    {'decision': 'APPROVE', 'limit': 150000}, token=admin)
     decision = data_of(response)
     if not check('approved by an administrator', response.status_code == 200,
                  response.text[:250]):
@@ -258,7 +374,7 @@ def main():
 
     check('a credit account was issued',
           bool(decision.get('credit_account_id')))
-    check('the approved limit is what was granted',
+    check('the approved limit is the eligible limit, not one typed in',
           decision.get('approved_limit') == 40000,
           str(decision.get('approved_limit')))
 
@@ -941,7 +1057,8 @@ def main():
         f'/credit/applications/{application_id}': (
             get(f'/credit/applications/{application_id}', token),
             ['application_id', 'status', 'employment_type', 'monthly_income',
-             'existing_emi_outflow', 'requested_limit', 'offered_limit',
+             'existing_emi_outflow', 'eligible_limit', 'credit_score',
+             'credit_score_band', 'offered_limit',
              'approved_limit', 'eligibility_score', 'decision_reason',
              'decision_message', 'submitted_at', 'kyc_verified_at',
              'decided_at', 'is_open'],
@@ -982,11 +1099,11 @@ def main():
     # refused as "Amount must be greater than zero".
     print('\n[13b] Applying with no existing EMIs')
     _, zero_emi = make_user('Credit No Emis')
-    if zero_emi:
-        response = post('/credit/applications', {
+    if zero_emi and submit_kyc(zero_emi, 'Credit No Emis'):
+        response = apply_for_credit(post, zero_emi, {
             'employment_type': 'SALARIED', 'monthly_income': 30000,
-            'existing_emi_outflow': 0,
-        }, token=zero_emi)
+            'existing_emi_outflow': 0, 'bureau_consent': True,
+        })
         check('an application declaring zero EMIs is accepted',
               response.status_code == 201, response.text[:200])
         check('the zero is recorded as zero',
@@ -994,26 +1111,92 @@ def main():
     else:
         check('zero-EMI application check ran', False, 'user unavailable')
 
-    # ── 14. Tier caps on an override ──────────────────────────────────────
-    print('\n[14] A limit override is still bounded by the KYC tier')
-    _, second = make_user('Credit Capped')
-    if second and approve_kyc(second, admin, 'Credit Capped'):
-        response = post('/credit/applications', {
+    # ── 14. Nobody sets the limit by hand ─────────────────────────────────
+    print('\n[14] The limit comes from salary and credit score only')
+
+    # Minimum KYC, high salary: eligible for far more, capped at the full-KYC
+    # threshold, and told what full KYC would unlock.
+    _, capped = make_user('Credit Capped')
+    if capped and approve_kyc(capped, admin, 'Credit Capped'):
+        application = data_of(apply_for_credit(post, capped, {
             'employment_type': 'SALARIED', 'monthly_income': 500000,
-        }, token=second)
-        second_app = data_of(response).get('application_id')
-        if second_app:
-            response = post(
-                f'/admin/credit/applications/{second_app}/review',
-                {'decision': 'APPROVE', 'limit': 5000000}, token=admin,
-            )
-            check('an admin cannot grant above the tier cap',
-                  response.status_code == 400, f'got {response.status_code}')
-            check('the refusal names the cap',
-                  '50,000' in response.text or '50000' in response.text,
-                  response.text[:200])
+            'bureau_consent': True,
+        }))
+        check('a minimum-KYC applicant is offered the full-KYC threshold',
+              application.get('eligible_limit') == 10000,
+              str(application.get('eligible_limit')))
+        check('and told what full KYC would unlock',
+              (application.get('full_kyc_limit') or 0) > 10000,
+              str(application.get('full_kyc_limit')))
+        response = post(
+            f"/admin/credit/applications/{application['application_id']}/review",
+            {'decision': 'APPROVE', 'limit': 5000000}, token=admin,
+        )
+        check('an admin cannot grant more than the eligible limit',
+              data_of(response).get('approved_limit') == 10000,
+              f'{response.status_code} {response.text[:160]}')
     else:
-        check('tier cap override check ran', False, 'second user unavailable')
+        check('capped-applicant check ran', False, 'user unavailable')
+
+    # A score below 650: not eligible, cannot be approved, can be rejected.
+    _, poor = make_user('Credit Poor Score')
+    if poor and approve_kyc(poor, admin, 'Credit Poor Score', pan='ABCDE0600F'):
+        application = data_of(apply_for_credit(post, poor, {
+            'employment_type': 'SALARIED', 'monthly_income': 90000,
+            'bureau_consent': True,
+        }))
+        check('a 600 score is recorded', application.get('credit_score') == 600,
+              str(application.get('credit_score')))
+        check('a low score has no eligible limit, and says why',
+              application.get('eligible_limit') is None
+              and application.get('assessment_reason') == 'CREDIT_SCORE_TOO_LOW',
+              str(application)[:200])
+        response = post(
+            f"/admin/credit/applications/{application['application_id']}/review",
+            {'decision': 'APPROVE'}, token=admin,
+        )
+        check('an ineligible application cannot be approved',
+              response.status_code == 400, f'{response.status_code} {response.text[:160]}')
+        response = post(
+            f"/admin/credit/applications/{application['application_id']}/review",
+            {'decision': 'REJECT', 'note': 'Credit score below 650'}, token=admin,
+        )
+        check('it can be rejected with a reason', response.status_code == 200,
+              response.text[:160])
+    else:
+        check('low-score check ran', False, 'user unavailable')
+
+    # Bands: 700-749 is two months of disposable income.
+    _, good = make_user('Credit Good Score')
+    if good and approve_kyc(good, admin, 'Credit Good Score', tier='FULL', pan='ABCDE0720F'):
+        application = data_of(apply_for_credit(post, good, {
+            'employment_type': 'SALARIED', 'monthly_income': 12000,
+            'bureau_consent': True,
+        }))
+        check('a 720 score gives two months of disposable income',
+              application.get('eligible_limit') == 24000,
+              str(application.get('eligible_limit')))
+    else:
+        check('score band check ran', False, 'user unavailable')
+
+    # FOIR: 12,000 of 20,000 already goes to EMIs - 60% is the ceiling, so
+    # 12,001 is over it, however good the score.
+    _, heavy = make_user('Credit Heavy Emis')
+    if heavy and approve_kyc(heavy, admin, 'Credit Heavy Emis', tier='FULL'):
+        application = data_of(apply_for_credit(post, heavy, {
+            'employment_type': 'SALARIED', 'monthly_income': 20000,
+            'existing_emi_outflow': 12001, 'bureau_consent': True,
+        }))
+        check('EMIs above 60% of income are not eligible',
+              application.get('eligible_limit') is None
+              and application.get('assessment_reason') == 'OBLIGATIONS_TOO_HIGH',
+              str(application)[:200])
+        foir = next((c for c in application.get('eligibility_checks') or []
+                     if c.get('key') == 'foir'), {})
+        check('the failed rule is named in the eligibility checks',
+              foir.get('passed') is False, str(foir))
+    else:
+        check('FOIR check ran', False, 'user unavailable')
 
     return finish()
 

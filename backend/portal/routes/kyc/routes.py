@@ -9,16 +9,12 @@ No KYC vendor is signed yet (PRD open decision 4), so submissions land in an
 admin review queue. The tier is granted on approval, never on submission.
 """
 
-import os
-import uuid
-
-from flask import current_app, request
+from flask import request
 from flask_jwt_extended import jwt_required
 from flask_restx import Resource, reqparse
-from werkzeug.utils import secure_filename
 
 from portal import db
-from portal.helpers import audit, settings
+from portal.helpers import audit, settings, uploads
 from portal.helpers.encryption import encrypt
 from portal.helpers.helpers import ErrorCode, failure, iso, success
 from portal.helpers.jwt import active_user_required, current_user
@@ -40,34 +36,9 @@ submit_parser.add_argument('aadhaar_number', type=str, required=False, location=
 submit_parser.add_argument('requested_tier', type=str, required=False, location='form',
                            default=KYCTier.MINIMUM)
 
-ALLOWED_EXTENSIONS = {'.pdf', '.jpg', '.jpeg', '.png'}
-
 
 def _save_document(upload, user_id: str, label: str) -> str:
-    """
-    Persist a KYC document under a random filename.
-
-    The uploaded name is attacker-controlled and may carry a path or a
-    misleading extension, so only the validated extension is reused.
-    """
-    if not upload or not upload.filename:
-        return None
-
-    extension = os.path.splitext(secure_filename(upload.filename))[1].lower()
-    if extension not in ALLOWED_EXTENSIONS:
-        raise ValidationError(
-            'Upload a PDF or an image (JPG, PNG).', label
-        )
-
-    folder = os.path.join(
-        current_app.config['UPLOAD_FOLDER'], 'kyc', str(user_id)
-    )
-    os.makedirs(folder, exist_ok=True)
-
-    filename = f'{label}_{uuid.uuid4().hex}{extension}'
-    upload.save(os.path.join(folder, filename))
-
-    return os.path.join('kyc', str(user_id), filename).replace('\\', '/')
+    return uploads.save_document(upload, 'kyc', user_id, label)
 
 
 def kyc_dict(kyc: KYCVerifications, user) -> dict:

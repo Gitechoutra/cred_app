@@ -307,7 +307,8 @@ export const endpoints = {
     // -- Application ----------------------------------------------------
     eligibility: () => api.get('/credit/eligibility'),
     applications: () => api.get('/credit/applications'),
-    apply: (data) => api.post('/credit/applications', data),
+    // Multipart: the application carries the income proof document.
+    apply: (form) => api.upload('/credit/applications', form),
     application: (id, opts = {}) => api.get(`/credit/applications/${id}`, opts),
     withdraw: (id) => api.post(`/credit/applications/${id}/withdraw`),
 
@@ -426,6 +427,8 @@ export const endpoints = {
     kycQueue: () => api.get('/admin/kyc/queue'),
     reviewKyc: (id, data) => api.post(`/admin/kyc/${id}/review`, data),
     kycDocumentUrl: (id, slot) => fetchBlobUrl(`/admin/kyc/${id}/document/${slot}`),
+    creditApplication: (id) => api.get(`/admin/credit/applications/${id}`),
+    incomeProofUrl: (id) => fetchBlobUrl(`/admin/credit/applications/${id}/income-proof`),
     creditApplications: (params = '') => api.get(
       `/admin/credit/applications${params}`,
     ),
