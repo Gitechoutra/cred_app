@@ -242,11 +242,35 @@ export default function CreditStatus() {
               title="Under review"
               subtitle="Nothing more is needed from you. This page updates by itself when there is a decision."
             />
-            {application.offered_limit > 0 && (
-              <p className="mt-4 text-center text-xs text-slate">
-                Indicative limit{' '}
-                <span className="money font-semibold text-ink">{money(application.offered_limit)}</span>
-                {' '}- final once approved.
+            {/* The eligible limit, worked out from salary and CIBIL score.
+                Nothing here is chosen by the applicant. */}
+            <div className="mt-5 grid grid-cols-2 gap-2 text-center">
+              <div className="rounded-2xl border border-line bg-mist/40 p-3">
+                <p className="text-2xs uppercase tracking-wider text-slate">CIBIL score</p>
+                <p className="money mt-1 text-xl font-bold text-ink">
+                  {application.credit_no_history ? 'New' : application.credit_score ?? '—'}
+                </p>
+                <p className="text-2xs text-slate">
+                  {application.credit_no_history ? 'No credit history yet' : application.credit_score_band || 'Being fetched'}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-mint-200 bg-mint-50/60 p-3">
+                <p className="text-2xs uppercase tracking-wider text-slate">Eligible limit</p>
+                <p className="money mt-1 text-xl font-bold text-ink">
+                  {application.eligible_limit ? money(application.eligible_limit, { decimals: 0 }) : '—'}
+                </p>
+                <p className="text-2xs text-slate">Final once approved</p>
+              </div>
+            </div>
+            {application.assessment_message && (
+              <p className="mt-3 rounded-xl bg-amber-50 px-3.5 py-3 text-center text-xs text-amber-800">
+                {application.assessment_message}
+              </p>
+            )}
+            {application.full_kyc_limit > 0 && (
+              <p className="mt-3 text-center text-xs text-slate">
+                Complete full KYC to be eligible for up to{' '}
+                <span className="money font-semibold text-ink">{money(application.full_kyc_limit, { decimals: 0 })}</span>.
               </p>
             )}
           </>
@@ -293,12 +317,9 @@ export default function CreditStatus() {
       <Card className="divide-y divide-line py-1">
         <p className="py-2.5 text-2xs font-semibold uppercase tracking-wider text-slate">What you told us</p>
         <Row label="Employment" value={application.employment_type.replace(/_/g, ' ').toLowerCase()} />
-        <Row label="Monthly income" value={money(application.monthly_income)} mono />
+        <Row label="Monthly salary" value={money(application.monthly_income)} mono />
         {application.existing_emi_outflow > 0 && (
           <Row label="Existing EMIs" value={money(application.existing_emi_outflow)} mono />
-        )}
-        {application.requested_limit > 0 && (
-          <Row label="Limit you asked for" value={money(application.requested_limit)} mono />
         )}
         <Row label="Submitted" value={date(application.submitted_at)} />
       </Card>

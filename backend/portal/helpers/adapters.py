@@ -302,6 +302,59 @@ def refund_payment(*, order_id: str, refund_id: str, amount, note: str = None) -
     return {'ok': False, 'error': result['error']}
 
 
+# ── Credit bureau (CIBIL score) ────────────────────────────────────────────
+
+#: What the sandbox returns for an ordinary PAN: a good score, in the 750-799
+#: band. Fixed rather than random so a test knows the limit it should get.
+SANDBOX_CREDIT_SCORE = 760
+
+
+def fetch_credit_score(*, reference: str, pan: str, full_name: str = None,
+                       phone: str = None) -> dict:
+    """
+    The applicant's credit score from the bureau, by PAN.
+
+    Only ever called with the applicant's recorded consent - pulling a credit
+    report without it is not permitted - and it is a soft enquiry, which does
+    not itself affect the score.
+
+    Returns {'ok', 'score', 'no_history', 'provider', 'reference'}. A score of
+    None with no_history=True means the bureau has no file on the person: new to
+    credit, which is not the same as a bad score.
+
+    Sandbox: a PAN whose four digits are 0300-0900 returns that number as the
+    score (ABCDE0680F scores 680), and 0000 means no credit history - so every
+    band, a decline and a thin file can be walked through by hand. Any other PAN
+    scores SANDBOX_CREDIT_SCORE.
+
+    Live: no bureau vendor is contracted yet (CIBIL, Experian, CRIF and Equifax
+    all need a membership agreement), so this reports the score as unavailable
+    rather than inventing one. The application then waits for review with no
+    eligible limit, and cannot be approved until a score exists.
+    """
+    if _use_sandbox():
+        digits = (pan or '')[5:9]
+        if digits == '0000':
+            return {
+                'ok': True, 'score': None, 'no_history': True,
+                'provider': 'SANDBOX', 'reference': _ref('bureau_sbx'),
+            }
+        if digits.isdigit() and 300 <= int(digits) <= 900:
+            score = int(digits)
+        else:
+            score = SANDBOX_CREDIT_SCORE
+        return {
+            'ok': True, 'score': score, 'no_history': False,
+            'provider': 'SANDBOX', 'reference': _ref('bureau_sbx'),
+        }
+
+    return {
+        'ok': False,
+        'error_code': 'BUREAU_NOT_CONFIGURED',
+        'error': 'The credit bureau is not connected yet.',
+    }
+
+
 # ── Penny drop (PRD FR-005) ────────────────────────────────────────────────
 
 def penny_drop(

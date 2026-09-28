@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
 import { PageHeader } from '../../components/layout/AppShell';
-import { Badge, Button, Card, Input, Row, Skeleton, cx } from '../../components/ui';
+import { Badge, Button, Card, Input, Skeleton, cx } from '../../components/ui';
 import {
   ErrorCard, JourneySteps, ProcessingPanel, friendlyError,
 } from '../../components/credit/CreditUI';
@@ -15,10 +15,11 @@ import { money, sanitizeAmount } from '../../utils/format';
 /**
  * Apply for a credit card.
  *
- * The number shown while typing is an *estimate*, computed here purely so the
- * form is not a black box. It is labelled as an estimate everywhere it appears,
- * and it is never sent: the limit that gets granted is computed by the backend
- * from the same declared figures, and this screen has no way to influence it.
+ * There is no limit to ask for. The applicant gives their salary and existing
+ * EMIs and consents to a credit score check; the eligible limit is worked out
+ * from those on the server and shown on the status screen. Asking for a limit
+ * used to be possible, and it was a way for the number to drift from the
+ * evidence - so the field, and the estimate that went with it, are gone.
  *
  * KYC is not a precondition for applying. An unverified applicant submits and is
  * told to verify next - being turned away at the door and asked to come back
@@ -37,29 +38,19 @@ const EMPLOYMENT = [
   { value: 'OTHER', label: 'Other', hint: 'Limits are lower' },
 ];
 
-//: Mirrors credit_engine.DISPOSABLE_INCOME_MULTIPLE and THIN_FILE_CAP. Kept in
-//: step deliberately: if these drift, the estimate stops matching the offer and
-//: the screen starts lying. The backend remains authoritative either way.
-const DISPOSABLE_MULTIPLE = 3;
-const THIN_FILE_CAP = 20000;
-const THIN_FILE = ['STUDENT', 'OTHER'];
-
 //: The server refuses a declared income above this as a typo or a probe.
 const INCOME_CEILING = 100000000;
 
-function estimate({ employment, income, outflow, requested, tierCap }) {
-  const disposable = Number(income || 0) - Number(outflow || 0);
-  if (disposable <= 0) return 0;
+//: How the limit is worked out, mirroring credit_engine.SCORE_BANDS. Shown so
+//: the process is not a black box; the server is what applies it.
+const BANDS = [
+  { range: '800+', label: 'Excellent', months: 4 },
+  { range: '750-799', label: 'Very good', months: 3 },
+  { range: '700-749', label: 'Good', months: 2 },
+  { range: '650-699', label: 'Fair', months: 1 },
+];
 
-  let offer = disposable * DISPOSABLE_MULTIPLE;
-  if (THIN_FILE.includes(employment)) offer = Math.min(offer, THIN_FILE_CAP);
-  if (requested) offer = Math.min(offer, Number(requested));
-  if (tierCap) offer = Math.min(offer, Number(tierCap));
-
-  return Math.floor(offer / 500) * 500;
-}
-
-const EMPTY = { employment: 'SALARIED', income: '', outflow: '', requested: '' };
+const EMPTY = { employment: 'SALARIED', income: '', outflow: '', consent: false };
 
 export default function CreditApply() {
   const navigate = useNavigate();
@@ -74,9 +65,6 @@ export default function CreditApply() {
   const [submitError, setSubmitError] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  const tierCap = eligibility?.max_limit_for_tier;
-  const floor = eligibility?.minimum_limit ?? 5000;
-  const provisional = estimate({ ...form, tierCap });
 
   function set(patch) {
     update(patch);
@@ -92,7 +80,6 @@ export default function CreditApply() {
     const found = {};
     const monthly = Number(form.income);
     const emis = Number(form.outflow || 0);
-    const wanted = Number(form.requested || 0);
 
     if (!form.income) found.income = 'Enter your monthly income.';
     else if (!Number.isFinite(monthly) || monthly <= 0) found.income = 'Enter a valid monthly income.';
@@ -104,12 +91,8 @@ export default function CreditApply() {
       found.outflow = 'Your existing EMIs must be less than your income.';
     }
 
-    if (form.requested) {
-      if (!Number.isFinite(wanted) || wanted <= 0) {
-        found.requested = 'Enter a valid amount, or leave this blank.';
-      } else if (wanted < floor) {
-        found.requested = `The smallest limit we offer is ${money(floor, { decimals: 0 })}.`;
-      }
+    if (!form.consent) {
+      found.consent = 'We need your permission to check your credit score.';
     }
 
     setErrors(found);
@@ -127,7 +110,7 @@ export default function CreditApply() {
         employment_type: form.employment,
         monthly_income: form.income,
         existing_emi_outflow: form.outflow || undefined,
-        requested_limit: form.requested || undefined,
+        bureau_consent: form.consent,
       });
       clearDraft();
       toast.success(response.message || 'Application submitted.');
@@ -289,37 +272,54 @@ export default function CreditApply() {
             hint="Loan and card repayments you already make. Leave blank if none."
           />
 
-          <Input
-            label="Limit you want (optional)"
-            prefix="₹"
-            inputMode="decimal"
-            placeholder="Leave blank for the most you qualify for"
-            value={form.requested}
-            onChange={(event) => set({ requested: sanitizeAmount(event.target.value) })}
-            error={errors.requested}
-            hint="Asking for less than you qualify for is honoured. Asking for more is not."
-          />
-
-          {provisional > 0 && (
-            <div className="rounded-2xl border border-line bg-gradient-to-br from-mint-50/70 to-canvas p-4">
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="text-sm text-slate">Estimated limit</span>
-                <span className="money text-xl font-bold text-ink">{money(provisional, { decimals: 0 })}</span>
-              </div>
-              <p className="mt-2 border-t border-line pt-2 text-2xs leading-relaxed text-slate">
-                An estimate from what you have entered, not an offer. The limit is
-                decided when the application is reviewed, and can differ from this.
-                {provisional < floor && (
-                  <> This is below our minimum of {money(floor, { decimals: 0 })}, so it
-                  would not be approved as it stands.</>
-                )}
-              </p>
+          {/* How the limit is decided. There is nothing to choose here - it is
+              explained so the applicant knows what the number will rest on. */}
+          <div className="rounded-2xl border border-line bg-gradient-to-br from-mint-50/70 to-canvas p-4">
+            <p className="text-sm font-semibold text-ink">How your limit is decided</p>
+            <p className="mt-1 text-xs leading-relaxed text-slate">
+              From your salary, less the EMIs you already pay, and your CIBIL
+              credit score. You do not need to choose a limit - we work out the
+              highest one you are eligible for.
+            </p>
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {BANDS.map((band) => (
+                <div key={band.range} className="rounded-xl border border-line bg-canvas px-2.5 py-2">
+                  <p className="money text-xs font-bold text-ink">{band.range}</p>
+                  <p className="text-2xs text-slate">{band.label}</p>
+                  <p className="mt-1 text-2xs font-medium text-mint-800">
+                    {band.months}x monthly surplus
+                  </p>
+                </div>
+              ))}
             </div>
-          )}
+            <p className="mt-2 text-2xs text-slate">
+              Scores below 650 are not eligible yet. With minimum KYC, limits
+              are up to {money(eligibility.full_kyc_required_above, { decimals: 0 })};
+              full KYC unlocks more.
+            </p>
+          </div>
 
-          {tierCap > 0 && (
-            <Row label={`Maximum for your ${eligibility.kyc_tier} KYC`} value={money(tierCap, { decimals: 0 })} mono />
-          )}
+          <label
+            className={cx(
+              'flex cursor-pointer items-start gap-3 rounded-2xl border p-3.5 transition',
+              errors.consent ? 'border-alert ring-2 ring-alert/15' : 'border-line hover:border-ink/20',
+            )}
+          >
+            <input
+              type="checkbox"
+              checked={form.consent}
+              onChange={(event) => set({ consent: event.target.checked })}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-mint-600"
+            />
+            <span className="text-xs leading-relaxed text-slate">
+              <span className="font-medium text-ink">
+                I authorise CashU to fetch my credit report from a credit bureau
+              </span>{' '}
+              using my PAN, to decide my credit limit. This is a soft enquiry and
+              does not affect my credit score.
+            </span>
+          </label>
+          {errors.consent && <p className="-mt-3 text-xs text-alert">{errors.consent}</p>}
 
           {submitError && (
             <p className="rounded-xl bg-red-50 px-3.5 py-3 text-sm text-alert" role="alert">
@@ -332,8 +332,8 @@ export default function CreditApply() {
           </Button>
 
           <p className="text-center text-2xs text-slate">
-            Submitting does not open a card. You choose what the credit is for, and
-            activate it, after approval.
+            Submitting does not open a card. Once approved you choose what the credit
+            is for, then activate it.
           </p>
         </Card>
       </form>
