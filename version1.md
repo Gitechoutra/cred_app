@@ -2,7 +2,8 @@
 
   > **Derived from:** Project Requirement Document (PRD) v1.0.0-PROD-SPEC —
   > *"CredFlow / Unified Credit & EMI Management Platform"*, working title `cred_v1`.
-  > **This document:** v1 build specification · **Date:** 2026-09-09 · **Owner:** Mahesh
+  > **This document:** v1 build specification · **Revision 2** · **Date:** 2026-09-28 · **Owner:** Mahesh
+  > **Reflects code at:** branch `cashu`, commit `a1d426c`
   >
   > The PRD is the source of truth for *what* CashU is. This document is the source of
   > truth for *how v1 gets built* on the chosen stack — it takes the PRD's P0 slice and
@@ -10,6 +11,13 @@
   >
   > Where this document departs from the PRD, the departure is marked **⚑ DEVIATION**
   > with the reason. Nothing is silently dropped.
+
+  ### Revision log
+
+  | Rev | Date | Change |
+  |---|---|---|
+  | 1 | 2026-09-09 | Initial v1 specification from the PRD P0 slice. |
+  | 2 | 2026-09-28 | **Product pivot.** Credit-to-bank transfer (FR-006) removed (`5b64317`). Replaced by a **CashU-issued credit line**: apply → KYC → review → purpose → activate → spend → statement → bill pay → credit restored (`0f20029`, `ef02c50`, `28c6286`, `f182906`, `a1d426c`). Added Scan & Pay (UPI QR), Razorpay as the collection rail, the transaction-error centre and support assistant. Sections 1, 2, 5, 6, 7, 8, 9, 10, 12–17 updated to match the code. |
 
   ---
 
@@ -21,15 +29,18 @@
   | PRD codename | CredFlow / Unified Credit & EMI Hub (`cred_v1`) |
   | Market | India (INR only, domestic cards and banks) |
   | Release | Version 1.0 — MVP, production-intent |
-  | Regulatory posture | RBI CoFT · DPDPA 2023 · PCI DSS v4.0 SAQ-A · PMLA · NPCI e-Mandate |
+  | Delivery | **Responsive web app** (desktop sidebar layout, drawer + bottom nav below `lg`) |
+  | Regulatory posture | RBI Credit Card Master Direction · DPDPA 2023 · PCI DSS v4.0 SAQ-A · PMLA · NPCI e-Mandate · NPCI UPI |
 
-  **One line:** CashU unifies a user's credit cards and NBFC loan EMIs under a single
-  dashboard, lets them service those obligations without visiting six banking portals,
-  and provides a regulated credit-facility-to-bank liquidity transfer.
+  **One line:** CashU gives a user their own CashU credit line (a RuPay card), puts it
+  next to their other credit cards and NBFC loan EMIs on one dashboard, and lets them
+  pay every one of those obligations — card bill, EMI, auto-pay — without visiting six
+  banking portals.
 
   **What CashU is not.** Not a rewards or cashback app. Not a wallet — CashU holds no
-  customer funds. Not a lender. Not a card issuer. It is a technology layer on top of
-  licensed partners.
+  customer funds. **It does not move credit into a bank account** — that product was
+  removed on 2026-09-24. Not a card issuer or lender *in its own right*: the credit line
+  must be issued through a licensed lending/issuing partner (see §16, decision 1).
 
   ---
 
@@ -40,12 +51,18 @@
 
   | Pillar | User job | Anchor requirements |
   |---|---|---|
-  | **1. See** | "Show me everything I owe, in one place, without anxiety." | FR-002 dashboard, FR-003 card linking, FR-004 card detail, FR-007 EMI registry |
-  | **2. Service** | "Let me pay what's due without hunting for a portal." | FR-008 manual EMI pay, FR-009 auto-pay mandates |
-  | **3. Access** | "Let me turn credit headroom into bank liquidity, transparently." | FR-005 penny-drop, FR-006 credit-to-bank transfer |
+  | **1. See** | "Show me everything I owe, in one place, without anxiety." | FR-002 dashboard, FR-003 external card tracking, FR-004 card detail, FR-007 EMI registry, CashU card home |
+  | **2. Service** | "Let me pay what's due without hunting for a portal." | FR-008 manual EMI pay, FR-009 auto-pay mandates, **credit line bill payment** |
+  | **3. Credit** *(was "Access")* | "Give me a credit line I can apply for, understand, and spend responsibly." | **Credit line lifecycle** (apply, decision, purpose, activate, spend, statements), Scan & Pay |
 
-  Underneath all three: FR-001 identity, FR-010 ledger, FR-011 notifications,
-  FR-012 profile/KYC/security.
+  Underneath all three: FR-001 identity, FR-005 bank-account verification, FR-010
+  ledger, FR-011 notifications, FR-012 profile/KYC/security.
+
+  > ⚑ **DEVIATION — Pillar 3.** The PRD's "Access" pillar was FR-006 credit-to-bank
+  > transfer. It was removed because RBI's Credit Card Master Direction treats
+  > credit-to-bank movement as disguised cash cycling and PRD open decision #1 (the
+  > merchant model) was never resolved. The credit line only funds **merchant
+  > purchases**, which is what a card is licensed to do.
 
   ---
 
@@ -59,7 +76,7 @@
   |---|---|---|
   | `--cashu-mint` | `#00F5B8` | **Primary accent** — CTAs, active states, positive deltas, focus rings |
   | `--cashu-canvas` | `#FFFFFF` | **Primary background** |
-  | `--cashu-ink` | `#0A0F0D` | Primary text; dark surfaces (card tiles, the transfer sheet) |
+  | `--cashu-ink` | `#0A0F0D` | Primary text; dark surfaces (card tiles, the card face) |
   | `--cashu-mist` | `#F4F6F5` | Secondary surfaces, input fills, skeletons |
   | `--cashu-line` | `#E6EAE8` | Hairlines, dividers, card borders |
   | `--cashu-slate` | `#6B7674` | Secondary text, captions, disabled |
@@ -78,15 +95,31 @@
 
   Premium here means *calm*, not flashy. Money numbers animate once on load
   (count-up, 400ms, ease-out) and never again. State transitions are 150–200ms.
-  The transfer success screen is the single "moment" — everything else is quiet.
+  The payment result (receipt) screen is the single "moment" — animated
+  success / failure / pending — everything else is quiet.
 
   **Type.** One geometric sans. All monetary values in tabular-lining numerals so digits
   don't jitter during count-up or live refresh.
 
   **Copy.** Never scold. "₹4,250 due in 3 days" — not "You're late." Failure messages
   state the cause and the next action, per the PRD §20 user-facing message column.
+  A credit balance reads **"Credit ₹X"**, never a negative "Used".
 
-  ### 3.3 Logo
+  ### 3.3 Navigation
+
+  - Primary nav (5 items, fits 320px): **Home · Cards · Scanner · Search · History**.
+    Profile menu: Profile, Security, Bank accounts, Help & support, Operations console
+    (admins only), Logout.
+  - **Back buttons go through `useNavHistory`** (`useBack` / `useReturnTo`). `back()`
+    goes to the real previous screen and falls back to the page's parent only when
+    there is none. A string `back` on `PageHeader` is a fallback, never a destination.
+    Hard-coded back paths are not allowed.
+  - Multi-step screens keep the step in the URL so browser back walks the steps, and
+    drafts survive leaving and returning. A finished flow uses `returnTo()` so
+    completed steps drop off the history stack.
+  - Every screen has loading, empty and error states.
+
+  ### 3.4 Logo
 
   **Concept — "The Coin Cut."** A `U` drawn as the lower arc of a coin, its negative
   space cutting an upward notch: reads simultaneously as currency and as headroom
@@ -102,48 +135,51 @@
 
   ## 4. Target users
 
-  Straight from PRD §4 — the build serves these four, in this priority order.
+  From PRD §4, re-weighted for the credit-line product.
 
   | Persona | Who | What v1 gives them |
   |---|---|---|
-  | **Multi-Card Maximizer** *(primary)* | 26–42, salaried, 3–6 cards, ₹8L–₹30L p.a. | Aggregate limit, utilization warning, unified due calendar |
+  | **Multi-Card Maximizer** *(primary)* | 26–42, salaried, 3–6 cards, ₹8L–₹30L p.a. | Aggregate limit, utilization warning, unified due calendar, a CashU card alongside the rest |
   | **Consumer EMI Repayer** *(primary)* | 22–48, consumer-durable / two-wheeler loans via Bajaj, HDB, IDFC | Biller discovery, one-tap UPI payment, auto-pay scheduling |
-  | **Emergency Liquidity Seeker** *(secondary)* | Freelancer / trader with mid-month cash-flow gaps | Compliant credit-to-bank transfer, upfront fee breakdown, instant IMPS |
-  | **Ops & Compliance Staff** *(internal)* | Risk analysts, support, settlement accountants | RBAC console, immutable audit trail, recon dashboard |
+  | **First-Line Credit Seeker** *(secondary, replaces "Emergency Liquidity Seeker")* | Salaried or self-employed, wants a transparent credit line with a declared purpose | Instant indicative offer, clear decision reasons, statements with minimum due |
+  | **Ops & Compliance Staff** *(internal)* | Risk analysts, support, settlement accountants | RBAC console, credit application queue, KYC queue, immutable audit trail, recon dashboard |
 
   ---
 
   ## 5. Scope boundary
 
-  ### 5.1 In — v1.0 (PRD P0, all mandatory)
+  ### 5.1 In — v1.0 (as built)
 
-  | # | Capability | FR |
-  |---|---|---|
-  | 1 | Mobile + OTP authentication, 6-digit MPIN, device binding | FR-001 |
-  | 2 | Home dashboard — aggregate limit, utilization, nearest due | FR-002 |
-  | 3 | Credit card linking via CoFT tokenization, masked display | FR-003 |
-  | 4 | Card detail, billing cycle config, unlink + token revocation | FR-004 |
-  | 5 | Bank account linking with ₹1 penny-drop name verification | FR-005 |
-  | 6 | Credit-facility → bank transfer with fee disclosure | FR-006 |
-  | 7 | EMI obligation registry (Bajaj Finance anchor adapter) | FR-007 |
-  | 8 | Manual EMI payment via UPI / netbanking | FR-008 |
-  | 9 | Recurring auto-pay via NPCI e-Mandate / UPI AutoPay | FR-009 |
-  | 10 | Double-entry immutable ledger + transaction history | FR-010 |
-  | 11 | Notification & alert engine (SMS/Email/Push/In-App) | FR-011 |
-  | 12 | Profile, KYC tiering, security settings | FR-012 |
-  | 13 | RBAC admin & operations console | §15, §16 |
+  | # | Capability | Ref | Status |
+  |---|---|---|---|
+  | 1 | Mobile + OTP authentication, 6-digit MPIN, device binding, sessions | FR-001 | ✅ Built |
+  | 2 | Home hub + dashboard — aggregate limit, utilization, nearest due | FR-002 | ✅ Built |
+  | 3 | External credit card tracking (BIN + last 4 only), masked display | FR-003 | ✅ Built — **tracking only**, no bill-pay rail for external cards |
+  | 4 | Card detail, billing cycle config, unlink | FR-004 | ✅ Built |
+  | 5 | Bank account linking with penny-drop name verification + IFSC lookup | FR-005 | ✅ Built |
+  | 6 | ~~Credit-facility → bank transfer~~ | FR-006 | ❌ **Removed 2026-09-24** |
+  | 7 | EMI obligation registry (Bajaj Finance anchor adapter) + sanction-letter upload | FR-007 | ✅ Built |
+  | 8 | Manual EMI payment via UPI / netbanking / debit card (Razorpay) | FR-008 | ✅ Built |
+  | 9 | Recurring auto-pay via NPCI e-Mandate / UPI AutoPay | FR-009 | ✅ Built (sandbox rail) |
+  | 10 | Double-entry immutable ledger + transaction history | FR-010 | ✅ Built |
+  | 11 | Notification & alert engine (SMS/Email/In-App) | FR-011 | ⚠ Partial — credit-line events do not notify yet (§11) |
+  | 12 | Profile, KYC tiering, security settings, data export, erasure | FR-012 | ✅ Built |
+  | 13 | RBAC admin & operations console | §15, §16 | ✅ Built |
+  | 14 | **CashU credit line** — apply, decision, purpose, activate, spend, statements, bill pay, refunds, block | New | ✅ Built |
+  | 15 | **Scan & Pay** — scan a UPI QR, pay the merchant from the user's bank via UPI | New | ✅ Built |
+  | 16 | **Transaction-error centre + support assistant** — every failed payment recorded with a reason; scripted, transaction-aware help; ticket escalation | New | ✅ Built |
 
   ### 5.2 Deferred — explicitly not v1
 
   | Deferred to | Items |
   |---|---|
-  | **Phase 1.1 (P1)** | Push via FCM/APNS, additional EMI providers (HDB, IDFC), smart auto-pay retries, biometric unlock |
-  | **Phase 2.0 (P2)** | Account Aggregator statement sync, credit score tracking (CIBIL/Experian) |
+  | **Phase 1.1 (P1)** | Push via FCM/APNS, additional EMI providers (HDB, IDFC), smart auto-pay retries, biometric unlock, credit-line notifications |
+  | **Phase 2.0 (P2)** | Account Aggregator statement sync, credit score tracking (CIBIL/Experian), interest on revolving balances |
   | **Phase 3.0 (P3)** | Card reward-points optimization, split-card payments |
-  | **Never (non-goals)** | Direct card issuance, P2P money laundering / cash cycling, crypto, raw PAN/CVV/PIN storage, unlicensed P2P lending, physical POS |
+  | **Never (non-goals)** | Credit-to-bank transfers, P2P money laundering / cash cycling, crypto, raw PAN/CVV/PIN storage, unlicensed P2P lending, physical POS, paying a loan EMI with credit |
 
   > **Note.** Rewards, coins, cashback, and a user wallet are **not** part of CashU.
-  > Reward-points optimization is P3. CashU never holds customer funds.
+  > CashU never holds customer funds.
 
   ---
 
@@ -153,11 +189,13 @@
 
   | Layer | Choice |
   |---|---|
-  | Frontend | React.js + Tailwind CSS + Vite |
-  | Backend | Python 3.12 · Flask · flask-restx · Flask-SQLAlchemy |
+  | Frontend | React.js + Tailwind CSS + Vite (dev server on :3000) |
+  | Backend | Python 3.12 · Flask · flask-restx · Flask-SQLAlchemy · Flask-Migrate |
   | Database | **MySQL 8.4** (InnoDB, utf8mb4) |
   | Auth | flask-jwt-extended |
-  | Scheduler | APScheduler |
+  | Scheduler | APScheduler (IST cron triggers) |
+  | Collection rail | **Razorpay** — Checkout for UPI, Google Pay / PhonePe / Paytm, net banking, debit card |
+  | Verification rail | **Cashfree** — penny drop, IFSC verification |
   | Container | Docker + docker compose |
 
   ### 6.2 ⚑ DEVIATIONS from PRD infrastructure
@@ -168,22 +206,24 @@
 
   | # | PRD specifies | v1 does | Consequence & mitigation |
   |---|---|---|---|
-  | **D1** | PostgreSQL | **MySQL 8.4** | Per your stack decision. Ledger integrity preserved via InnoDB + explicit `REPEATABLE READ` transactions with `SELECT … FOR UPDATE` on balance-affecting rows. **Every ledger write must be inside an explicit transaction** — this is not optional and is the single highest-risk area of the port. |
-  | **D2** | Redis (OTP hash 180s TTL, sliding-window rate limits, 24h idempotency keys) | **MySQL tables + APScheduler sweeps** | `otp_verifications` carries `expires_at`; rate limits become counter rows on a time bucket; **idempotency is enforced by a `UNIQUE` index on `master_transactions.idempotency_key`** — a duplicate insert raises `IntegrityError`, which the handler catches and returns the original transaction. This is stricter than Redis, not weaker. A janitor job purges expired rows. Redis remains a drop-in optimisation later. |
-  | **D3** | Microservices on Kubernetes/EKS with HPA | **Modular Flask monolith** | Each PRD "service" (Auth, Card & Token, Transfer & Payout, EMI & BBPS, Auto-Pay, Ledger, Notification, Audit & Risk) becomes an *engine module* in `portal/helpers/` with a defined interface. Extraction to a service later is a deployment change, not a rewrite — provided no engine reaches into another's tables directly. |
-  | **D4** | Kafka / RabbitMQ event bus with outbox | **In-process domain events + APScheduler workers** | A `domain_events` table plays the outbox role; the scheduler drains it. Preserves at-least-once semantics and the audit trail; loses cross-service fan-out CashU doesn't yet need. |
-  | **D5** | React Native (iOS/Android) + Next.js | **React + Vite responsive web** | v1 is responsive web, mobile-first. Native shell is post-v1. |
-  | **D6** | Integer autoincrement (stockverse house style) | **UUIDv4 primary keys** on financial entities | Per PRD §13/§23. Sequential IDs on cards, transfers, and transactions are enumerable and leak volume; a fintech should not expose them. Stored `CHAR(36)`. Lookup/reference tables (`roles`, `providers`) keep integer PKs. |
-  | **D7** | Multi-AZ, 99.95% SLA, PITR, WORM audit storage | Single-node dev/staging | Production hardening is a deployment concern, deferred until a licensed partner is signed. Audit rows are append-only *by application rule* now; WORM storage comes with production. |
+  | **D1** | PostgreSQL | **MySQL 8.4** | Ledger integrity preserved via InnoDB + explicit `REPEATABLE READ` transactions with `SELECT … FOR UPDATE` on balance-affecting rows. **Every locking read uses `populate_existing()`** — without it SQLAlchemy takes the lock and then keeps the stale, pre-lock attributes from its identity map (found by `credit_concurrency.py`: 5 of 6 concurrent purchases were lost before the fix). |
+  | **D2** | Redis (OTP hash 180s TTL, sliding-window rate limits, 24h idempotency keys) | **MySQL tables + APScheduler sweeps** | `otp_verifications` carries `expires_at`; rate limits are `rate_limit_counters` rows on a time bucket; **idempotency is a `UNIQUE` index** on `master_transactions`, `credit_transactions` and `qr_payments` — a duplicate insert raises `IntegrityError` and the original is returned. A janitor job purges expired rows. |
+  | **D3** | Microservices on Kubernetes/EKS with HPA | **Modular Flask monolith** | Each PRD "service" is an *engine module* in `portal/helpers/` with a defined interface. Extraction later is a deployment change, provided no engine reaches into another's tables directly. |
+  | **D4** | Kafka / RabbitMQ event bus with outbox | **In-process domain events + APScheduler workers** | A `domain_events` table plays the outbox role; the scheduler drains it every minute. |
+  | **D5** | React Native (iOS/Android) + Next.js | **React + Vite responsive web** | Web application with a persistent sidebar, top bar and multi-column layouts; drawer + bottom nav below `lg`. Native shell is post-v1. |
+  | **D6** | Integer autoincrement (stockverse house style) | **UUIDv4 primary keys** on financial entities | Stored `CHAR(36)`. Lookup tables (`roles`, `providers`) keep integer PKs. Credit transactions additionally carry a quotable `CCT…` reference. |
+  | **D7** | Multi-AZ, 99.95% SLA, PITR, WORM audit storage | Single-node dev/staging | Deferred until a licensed partner is signed. Audit rows are append-only *by application rule*. |
+  | **D8** | FR-006 credit-to-bank transfer | **Removed; replaced by an issued credit line** | See §2. Settled transfers remain in `master_transactions` / `double_entry_ledger` (append-only); `CARD_TO_BANK_TRANSFER` stays a valid type so those rows still validate. |
 
   ### 6.3 What these deviations cost
 
-  Honest accounting: **D1 and D2 are the ones that can bite.** The ledger's correctness
-  now depends on discipline in application code rather than the database's strongest
-  isolation guarantees. Mitigations: every money path goes through a single
-  `ledger_engine.post()` function, no exceptions; a nightly self-audit job asserts that
-  debits equal credits per transaction and that derived balances match ledger sums,
-  raising a critical alert on drift. This job is a v1 deliverable, not a nice-to-have.
+  **D1 and D2 are the ones that can bite.** The ledger's correctness depends on
+  discipline in application code. Mitigations: every money path goes through
+  `ledger_engine.post()`; every credit-line balance goes through `credit_engine`; each
+  balance change asserts `available_credit + current_outstanding == credit_limit`
+  before commit; a nightly self-audit asserts debits equal credits and that derived
+  balances match ledger sums; statement cut logs any closing balance that disagrees
+  with what the account owes.
 
   ---
 
@@ -193,207 +233,291 @@
 
   ```
   CashU/
-  ├── backend/                          Flask API — mirrors stockverse exactly
+  ├── backend/                          Flask API — mirrors stockverse
   │   ├── app.py                        entry point; create_all + seeders; port 5050
-  │   ├── config/
-  │   │   ├── config.py                 Development / Testing / Production classes
-  │   │   └── dev.ini · uat.ini · prod.ini
+  │   ├── config/                       config.py (Dev / Testing / Production) + *.ini
   │   ├── portal/
   │   │   ├── __init__.py               InitApp class, APP singleton, db = SQLAlchemy()
-  │   │   ├── extensions.py             shared db / migrate instances
-  │   │   ├── logger.py                 rotating file + stream handler
-  │   │   ├── scheduler.py              APScheduler registrations (see §7.3)
-  │   │   ├── seeds.py
+  │   │   ├── extensions.py · logger.py · scheduler.py
   │   │   ├── api/__init__.py           flask-restx Api on the /v1 blueprint
   │   │   ├── helpers/                  the engines — see §7.2
   │   │   ├── models/                   one model per file
-  │   │   ├── routes/                   one package per domain namespace
-  │   │   ├── seeders/                  idempotent, dependency-ordered
+  │   │   ├── routes/                   one package per namespace (§9)
+  │   │   ├── seeders/                  roles, admin, settings, flags, ledger accounts,
+  │   │   │                             card networks, EMI providers, notification templates
   │   │   └── uploads/                  KYC documents, loan sanction letters
   │   ├── migrations/                   Flask-Migrate
-  │   ├── tests/
-  │   ├── logs/
-  │   ├── requirements.txt
-  │   ├── Dockerfile · docker-entrypoint.sh · .dockerignore
-  │   └── .env · .env.example
+  │   ├── tests/                        integration suites + run_all.py (§17.2)
+  │   └── requirements.txt · Dockerfile · docker-entrypoint.sh · .env.example
   │
   ├── frontend/                         React + Vite + Tailwind
   │   ├── src/
-  │   │   ├── app/                      App.jsx, routes.jsx
-  │   │   ├── components/               shared UI primitives
+  │   │   ├── app/App.jsx               route table
+  │   │   ├── components/               ui primitives, layout (AppShell, BottomNav), domain rows
   │   │   ├── pages/
-  │   │   │   ├── auth/                 onboarding, OTP, MPIN
-  │   │   │   ├── user/                 dashboard, cards, transfer, emi, transactions, profile
-  │   │   │   └── admin/                console modules
-  │   │   ├── context/                  AuthContext, DashboardContext
-  │   │   ├── hooks/  api/  utils/  styles/
-  │   ├── Dockerfile · nginx.conf
+  │   │   │   ├── auth/                 splash, phone, OTP, MPIN, profile setup, admin login
+  │   │   │   ├── user/                 hub, dashboard, cards, banks, EMI, scan, transactions, profile, KYC, support
+  │   │   │   ├── credit/               apply, status, purpose, activate, home, spend, pay bill, transactions, statements
+  │   │   │   └── admin/                dashboard, users, KYC queue, reconciliation, settings
+  │   │   ├── context/  hooks/ (useNavHistory, useProfile, useReveal)  api/  utils/  styles/
+  │   ├── scripts/ui-audit.mjs          static UI audit (routes, nav targets)
+  │   └── Dockerfile · nginx.conf
   │
   ├── docker-compose.yml                MySQL 8.4 + backend + frontend
-  └── version1.md                       this document
+  └── Version1.md                       this document
   ```
 
-  ### 7.2 Engines — PRD services mapped to `portal/helpers/`
+  ### 7.2 Engines — `portal/helpers/`
 
-  | PRD service (§22) | v1 module | Responsibility |
+  | Area | Module | Responsibility |
   |---|---|---|
-  | Auth & User Service | `jwt.py`, `otp.py`, `device_binding.py` | Token issue/rotate, OTP lifecycle, device UUID binding |
-  | Card & Token Service | `token_requestor.py` | CoFT adapter; masked metadata; token revoke |
-  | Transfer & Payout Engine | `transfer_engine.py`, `fee_calculator.py`, `idempotency.py` | FR-006 state machine, fee + GST maths, duplicate defence |
-  | EMI & BBPS Service | `emi_provider_adapter.py`, `bbps_adapter.py` | Biller lookup, EMI payment rail |
-  | Auto-Pay Mandate Engine | `mandate_engine.py` | e-Mandate registration, pre-debit scheduling, retry ladder |
-  | Double-Entry Ledger | `ledger_engine.py` | **The only writer of ledger rows.** Post, reverse, reconcile |
-  | Notification Service | `notify.py`, `sms.py`, `email.py`, `templates/` | Channel routing per §14 matrix |
-  | Audit & Risk Engine | `risk_engine.py`, `audit.py` | Velocity limits, BIN blocklist, immutable audit writes |
-  | — | `encryption.py` | AES-256-GCM field encryption for PII, bank numbers, tokens |
-  | — | `validators.py` | IFSC, PAN, mobile, LAN, amount, pagination |
+  | Auth | `jwt.py`, `otp.py`, `rate_limit.py` | Token issue/rotate, OTP lifecycle, throttles |
+  | **Credit line** | `credit_engine.py` | **The only writer of credit limit, available credit and outstanding.** Assess, decide, issue, purpose, activate, block, purchase, bill payment open/settle/cancel/poll, statement cut, overdue + late fee, refund |
+  | EMI | `emi_engine.py`, `emi_provider_adapter.py`, `emi_fees.py` | FR-008 lifecycle, biller lookup, mandate cap (≥110% of EMI) |
+  | Auto-pay | `mandate_engine.py` | e-Mandate registration, pre-debit notices, execution, retry ladder |
+  | Scan & Pay | `qr_payment_engine.py`, `upi_qr.py` | Strict UPI deep-link parsing; collect over UPI, confirm from gateway |
+  | Ledger | `ledger_engine.py` | **The only writer of ledger rows.** Post, reverse, reconcile, self-audit |
+  | Rails | `adapters.py`, `razorpay.py`, `cashfree.py` | Vendor seams; sandbox vs live selection; signature verification |
+  | Bank accounts | `name_match.py`, `bank_ifsc_service.py` | Penny-drop name similarity, IFSC → bank/branch |
+  | Notifications | `notify.py`, `sms.py`, `email.py` | Channel routing per §11 |
+  | Errors & support | `error_catalog.py`, `error_recorder.py`, `support_bot.py` | Record every failed payment with a cause; scripted, transaction-aware assistant |
+  | Platform | `audit.py`, `encryption.py`, `validators.py`, `settings.py`, `test_cards.py` | Audit writes, AES-256-GCM PII, input validation, admin settings with defaults, dev-only test cards |
 
-  **Hard rule.** `ledger_engine.post()` is the sole entry point for any monetary state
-  change. No route, no other engine, writes to `master_transactions` or
-  `double_entry_ledger` directly.
+  **Removed with FR-006:** `transfer_engine.py`, `fee_calculator.py`, `risk_engine.py`.
 
-  ### 7.3 Scheduled jobs (`scheduler.py`)
+  **Hard rules.**
+  - `ledger_engine.post()` is the sole entry point for any ledger row.
+  - `credit_engine` is the sole writer of credit balances. No route computes a balance
+    and no request parser accepts one.
 
-  | Job | Cadence | Purpose | PRD ref |
-  |---|---|---|---|
-  | `mandate_predebit_notice` | daily 10:00 IST | T-48h pre-debit SMS+Email — **regulatory, non-negotiable** | §12.2 |
-  | `mandate_execute` | daily 04:00 IST | Trigger due mandate debits | §12.3 |
-  | `mandate_retry` | daily 11:30 & 18:00 IST | Retry ladder attempts 2 and 3 | §12.3 |
-  | `emi_due_reminder` | daily 09:00 IST | T-7 and T-1 reminders | §14 |
-  | `payment_status_poll` | every 15 min | Poll PENDING payments up to 24h | FR-008 |
-  | `transfer_recon` | every 6 h | Three-way reconciliation (T+0, T+1) | §9.4 |
-  | `ledger_self_audit` | nightly | Assert debits == credits; flag drift | ⚑ D1 mitigation |
-  | `domain_event_drain` | every 1 min | Outbox → notification dispatch | ⚑ D4 |
-  | `token_expiry_sweep` | daily | Flag cards past expiry, notify | ERR-009 |
-  | `otp_janitor` | hourly | Purge expired OTP + rate-limit rows | ⚑ D2 |
+  ### 7.3 Scheduled jobs (`scheduler.py`, all times IST)
+
+  | Job | Cadence | Purpose |
+  |---|---|---|
+  | `payment_status_poll` | every 15 min | Poll PENDING EMI / QR payments up to 24h |
+  | `credit_bill_payment_poll` | every 2 min | Settle PROCESSING credit bill payments from the gateway; close unpaid ones after 30 min |
+  | `domain_event_drain` | every 1 min | Outbox → notification dispatch (⚑ D4) |
+  | `credit_statement_cut` | daily 00:20 | Cut statements whose cycle day is today |
+  | `credit_overdue_sweep` | daily 01:00 | Mark past-due statements OVERDUE; charge late fee once |
+  | `mandate_execute` | daily 04:00 | Trigger due mandate debits |
+  | `mandate_predebit_notice` | daily 10:00 | T-48h pre-debit notice — **regulatory, non-negotiable** |
+  | `mandate_retry_midday` / `_evening` | 11:30 / 18:00 | Retry ladder attempts 2 and 3 |
+  | `ledger_self_audit` | daily 02:30 | Assert debits == credits; flag drift (⚑ D1) |
+  | `emi_due_reminder` | daily 09:00 | Flags overdue EMIs (despite the name, sends no T-7/T-1 reminder — see §11) |
+  | `janitor` | hourly | Purge expired OTP + rate-limit rows (⚑ D2) |
+
+  Removed: `transfer_recon`, `token_expiry_sweep`.
 
   ---
 
   ## 8. Data model
 
-  Follows PRD §23 ERD and §13.1 transaction schema, expressed in stockverse house style:
-  plural class names, sibling status-constant classes, `created_on` / `updated_on`,
-  and `save()` / `update()` / `delete()` instance helpers.
-
-  Money is `Numeric(12,2)` per PRD §13.1. Timestamps are UTC.
+  Stockverse house style: plural class names, sibling status-constant classes,
+  `created_on` / `updated_on`, `save()` / `update()` helpers. Money is `Numeric(12,2)`.
+  Timestamps are UTC and serialised with an explicit offset. Credit transactions use
+  `DATETIME(6)` so two rows in the same second still order correctly.
 
   ### 8.1 Identity & access
 
-  | Model | Notes |
-  |---|---|
-  | `Roles` | `RoleTypes`: `NORMAL_USER`, `L1_SUPPORT`, `L2_RISK_RECON`, `L3_SUPER_ADMIN` |
-  | `Users` | phone (unique, indexed), full_name, email, `kyc_tier`, `mpin_hash`, is_active |
-  | `UserProfiles` | PAN (encrypted), DOB, address; `KYCTier`: `NONE`/`MINIMUM`/`FULL` |
-  | `UserSessions` | device UUID binding, refresh-token fingerprint, revocation |
-  | `OTPVerifications` | hashed OTP, `expires_at`, attempt count, `OTPPurpose` |
-  | `LoginHistory` | IP, user agent, device, `LoginStatus` |
-  | `UserSecuritySettings` | biometric toggle, session kill switch |
-  | `KYCVerifications` | PAN/Aadhaar docs, `KYCStatus`, reviewer, rejection reason |
-  | `DeviceBindings` | device UUID, carrier signature, trusted flag |
+  `Roles` (`NORMAL_USER`, `L1_SUPPORT`, `L2_RISK_RECON`, `L3_SUPER_ADMIN`) · `Users`
+  (`kyc_tier` NONE/MINIMUM/FULL, `mpin_hash`) · `UserProfiles` · `UserSessions` ·
+  `OTPVerifications` · `LoginHistory` · `UserSecuritySettings` · `KYCVerifications` ·
+  `DeviceBindings` · `RateLimitCounters`
 
-  ### 8.2 Cards & banking
+  ### 8.2 External cards & banking
 
   | Model | Notes |
   |---|---|
-  | `Cards` | `token_reference_id`, `masked_pan`, `issuer_bank`, `network`, `card_limit`, `due_day`, `CardStatus`. **Never a PAN, CVV, or PIN column — enforced at review.** |
+  | `Cards` | External cards the user tracks: BIN, `masked_pan`, issuer, network, limit, due day. **Never a PAN, CVV, or PIN column.** |
   | `CardNetworks` | Visa / Mastercard / RuPay / Amex reference + BIN routing |
-  | `BankAccounts` | `account_number_enc`, `ifsc_code`, `bank_name`, `verified_cbs_name`, `PennyDropStatus`, `is_primary` |
-  | `PennyDropVerifications` | ₹1 IMPS ref, CBS name returned, similarity score, decision |
+  | `BankAccounts` | `account_number_enc`, IFSC, bank name, `verified_cbs_name`, penny-drop status, `is_primary` |
+  | `PennyDropVerifications` | IMPS ref, CBS name returned, similarity score, decision |
 
-  ### 8.3 Transfers
+  ### 8.3 CashU credit line *(new)*
 
   | Model | Notes |
   |---|---|
-  | `Transfers` | card_id, bank_account_id, gross/fee/tax/net, `idempotency_key` **(UNIQUE)**, `TransferStatus` (§9.3 state machine), `bank_rrn_utr` |
-  | `TransferLimits` | per-user rolling daily/monthly counters |
+  | `CreditApplications` | employment type, monthly income, existing EMI outflow, requested / offered / approved limit, eligibility score, `decision_reason`, `ApplicationStatus` |
+  | `CreditAccounts` | card BIN + last 4 only (RuPay), name on card, expiry, `credit_limit`, `available_credit`, `current_outstanding`, `purpose` (+ note for OTHER), `statement_day`, `grace_days`, `CreditAccountStatus` |
+  | `CreditTransactions` | **Append-only.** PURCHASE / PAYMENT / REFUND / FEE; amount, `balance_after`, `available_after`, merchant + category, `idempotency_key` (UNIQUE), `statement_id`, payment method + gateway ids, `failure_code/reason`, `is_test` |
+  | `CreditStatements` | **Append-only.** period, opening / purchases / payments / refunds / fees / closing, `minimum_due`, `total_amount_due`, limit + available at close, `amount_paid`, `StatementStatus`, `late_fee_charged_at`. UNIQUE (`credit_account_id`, `period_end`) |
 
   ### 8.4 EMI
 
+  `EMIProviders` · `EMIObligations` (matches PRD §10.2) · `EMIPayments` ·
+  `AutoPayMandates` · `MandateDebitAttempts`
+
+  ### 8.5 Scan & Pay *(new)*
+
+  `QRPayments` — payee VPA + name, amount (and whether it came from the QR), note,
+  `idempotency_key` (UNIQUE), gateway order/payment ids, UPI RRN, payer VPA,
+  `QRPaymentState` (INITIATED → PROCESSING → SUCCESSFUL / PENDING / FAILED / CANCELLED).
+
+  ### 8.6 Ledger & money (the core)
+
   | Model | Notes |
   |---|---|
-  | `EMIProviders` | Bajaj Finance, HDB, IDFC…; adapter key; BBPS biller id |
-  | `EMIObligations` | `loan_account_no` (masked in UI), `loan_type`, `emi_amount`, `due_day_of_month`, `total_tenure`, `tenure_remaining`, `outstanding_bal`, `auto_pay_status`, `payment_status` — matches PRD §10.2 exactly |
-  | `EMIPayments` | amount, `payment_mode`, `bbps_rrn`, `EMIPaymentStatus` (§11.1 lifecycle) |
-  | `AutoPayMandates` | `mandate_umn`, `max_amount`, `frequency`, `next_debit_date`, `MandateStatus` |
-  | `MandateDebitAttempts` | attempt no., scheduled_at, result, bounce code — drives the §12.3 retry ladder |
+  | `MasterTransactions` | PRD §13.1: type, gross/net/fee/tax, source/dest, `gateway_provider` (CASHFREE / RAZORPAY / SANDBOX / **INTERNAL**), refs, `idempotency_key` (UNIQUE), status, `recon_status` |
+  | `DoubleEntryLedger` | **Append-only.** Debit/credit lines per transaction |
+  | `LedgerAccounts` | Chart of accounts, now including `CREDIT_RECEIVABLE`, `MERCHANT_PAYABLE`, `INTEREST_INCOME` |
+  | `ReconciliationRuns` · `ReconciliationDiscrepancies` | Per-run match results |
 
-  ### 8.5 Ledger & money (the core)
-
-  | Model | Notes |
-  |---|---|
-  | `MasterTransactions` | PRD §13.1 verbatim: `transaction_type`, gross/net/fee/tax, source/dest type + masked ref, `gateway_provider`, `gateway_ref_no`, `bank_rrn_utr`, `idempotency_key` (UNIQUE), `status`, `failure_code`, `failure_reason`, `recon_status` |
-  | `DoubleEntryLedger` | `transaction_id` FK, `account_code` (Asset/Liability), `debit_amount`, `credit_amount`, `currency`, `entry_timestamp`. **Append-only.** |
-  | `LedgerAccounts` | chart of accounts — the `account_code` vocabulary |
-  | `ReconciliationRuns` | per-run three-way match results, discrepancies |
+  Transaction types: `EMI_MANUAL_PAY`, `EMI_AUTO_PAY`, `QR_UPI_PAYMENT`,
+  `CREDIT_PURCHASE`, `CREDIT_BILL_PAYMENT`, `CREDIT_REFUND`, `CREDIT_LATE_FEE`,
+  `FEE_DEBIT`, `REVERSAL_REFUND`, `PENNY_DROP`, and the retired `CARD_TO_BANK_TRANSFER`.
 
   **Immutability rule (PRD FR-010).** Financial rows are never hard-deleted or updated in
-  place. Corrections are compensating journal entries. Enforced by application rule and
-  verified by the nightly self-audit; there is no `delete()` helper on these models.
+  place. Corrections are compensating entries (a refund is a new REFUND row, never an
+  edit to the purchase).
 
-  ### 8.6 Platform
+  ### 8.7 Platform
 
   `Notifications` · `NotificationPreferences` · `NotificationTemplates` ·
-  `DomainEvents` (outbox) · `AuditLogs` · `AdminActivityLogs` · `AdminSettings` ·
-  `FeatureFlags` · `RateLimitCounters` · `SupportMessages` · `PlatformStatistics`
+  `DomainEvents` · `AuditLogs` · `AdminActivityLogs` · `AdminSettings` ·
+  `FeatureFlags` · `SupportTickets` · `SupportMessages` · `TransactionErrors` ·
+  `PlatformStatistics`
+
+  **Removed:** `Transfers`, `TransferLimits`.
 
   ---
 
   ## 9. API surface
 
-  flask-restx on `/v1`, Swagger at `/v1/doc/`. One route package per namespace, each with
-  `__init__.py` declaring `ns = api.namespace(...)` then `from .routes import *`.
+  flask-restx on `/v1`, Swagger at `/v1/doc/`.
 
   | Namespace | Endpoints |
   |---|---|
-  | `/authentication` | `otp/send`, `otp/verify`, `mpin/set`, `mpin/verify`, `refresh`, `logout` |
-  | `/users` | profile get/update, admin user management |
-  | `/kyc` | submit, status, admin approve/reject |
-  | `/dashboard` | aggregate telemetry (FR-002 payload) |
-  | `/cards` | list, initiate-link, link-callback, detail, update-cycle, unlink |
-  | `/bank-accounts` | list, add, penny-drop status, set-primary, remove |
-  | `/transfers` | quote (fee breakdown), initiate, confirm, status, history |
-  | `/emi` | providers, obligations CRUD, lookup-biller, schedule |
-  | `/emi-payments` | initiate, status, receipt |
-  | `/mandates` | create, status, pause, resume, cancel |
-  | `/transactions` | list (filtered, paginated), detail, receipt PDF |
-  | `/notifications` | list, mark-read, preferences |
-  | `/webhooks` | gateway, BBPS, mandate, payout — **signature-verified, unauthenticated** |
-  | `/admin` | users, transactions, reversals, recon, risk, audit, settings, flags |
-  | `/support` | threads, messages |
-  | `/health` | liveness — used by the Docker HEALTHCHECK |
+  | `/authentication` | `otp/send`, `otp/verify`, `register`, `mpin/set`, `mpin/verify`, `refresh`, `logout`, `sessions` (list / revoke) |
+  | `/users` | `me` (get/patch), `me/security`, `me/login-history`, `me/export`, `me/erasure` |
+  | `/kyc` | `status`, `submit` |
+  | `/dashboard` | aggregate (FR-002), `activity` |
+  | `/cards` | list, add, detail, update, unlink, `test-cards`, `networks/lookup/{bin}` |
+  | `/bank-accounts` | list, add, detail, remove, `{id}/verify`, `{id}/primary`, `ifsc/{code}`, `lookup-account` |
+  | **`/credit`** | `applications` (list / apply), `applications/{id}`, `applications/{id}/withdraw`, `eligibility`, `account`, `account/purpose` (get options / declare), `account/activate`, `account/block`, `account/unblock`, `purchases`, `transactions`, `transactions/{id}`, `statements`, `statements/current`, `statements/{id}`, `payments/methods`, `payments`, `payments/{id}/verify`, `payments/{id}/cancel` |
+  | `/emi` | `providers`, `lookup`, obligations CRUD, `{id}/document` |
+  | `/emi-payments` | `methods`, list, initiate, detail, `{id}/confirm`, `{id}/verify`, `{id}/cancel`, `{id}/receipt` |
+  | `/mandates` | list, create, `preview`, detail, cancel, `{id}/activate`, `{id}/pause`, `{id}/resume` |
+  | **`/qr-payments`** | `decode`, list, initiate, detail, `{id}/verify`, `{id}/cancel` |
+  | `/transactions` | list (filtered, paginated), detail, `summary` |
+  | `/notifications` | list, `{id}/read`, `read-all`, `preferences` |
+  | `/support` | `tickets`, `tickets/{id}`, `tickets/{id}/reply`, `chat`, `escalate`, `transaction-error/{type}/{id}` |
+  | `/webhooks` | `razorpay`, `cashfree/verification`, `cashfree/health` — **signature-verified, unauthenticated** |
+  | `/admin` | dashboard, users (+ freeze/unfreeze), KYC queue + document + review, **credit applications + review, credit account detail/block/statement, credit refund**, reconciliation + self-audit, settings, feature flags, audit logs, admin activity, EMI verify, transaction errors (+ summary, resolve) |
+
+  **Removed:** the whole `/transfers` namespace and its four admin endpoints; `/cards/{id}/pay-bill` (there is no rail for paying an external issuer — the card detail screen tells the user to pay their issuer directly).
 
   **Every state-changing money endpoint requires an `X-Idempotency-Key` header.**
+  Amounts are parsed from raw text, never `type=float`, so `1e9` is rejected.
 
   ---
 
   ## 10. Critical flows
 
-  ### 10.1 Credit-to-bank transfer — state machine (PRD §9.3)
+  ### 10.1 Credit line journey (end to end)
 
   ```
-  INITIATED → RISK_CHECKED ─┬─(rejected)→ RISK_FAILED
-                            └─(cleared)→ AUTH_PENDING → INBOUND_CHARGED
-                                                          ├─(payout ok)→ SUCCEEDED
-                                                          └─(payout fails)→ PAYOUT_PROCESSING
-                                                                ├─(retry ok)→ SUCCEEDED
-                                                                └─(3 retries fail)→ REVERSAL_INIT → REVERSED_TO_CARD
+  Apply ──► KYC gate ──► Review ──► Approved (limit issued)
+                                         │
+                                         ▼
+                         Purpose of credit ──► Activate ──► Spend
+                                                              │
+                   Credit restored ◄── Bill payment ◄── Statement
   ```
 
-  **Limits & fees (PRD §9.2)** — all admin-configurable, seeded to these defaults:
+  | Step | Screen | What happens |
+  |---|---|---|
+  | 1. Apply | `/credit/apply` | Employment type, monthly income, existing EMI outflow (zero allowed), optional requested limit. A running **estimate** is shown, labelled as such and never sent. |
+  | 2. KYC gate | `/credit/status/:id` | KYC tier NONE → `KYC_PENDING`. When an admin approves KYC, the application moves to `UNDER_REVIEW` immediately (not on next visit) and is re-assessed. |
+  | 3. Review | `/credit/status/:id` | L2/L3 approves or rejects. Status polls for the decision and shows the real KYC sub-state and a timeline. |
+  | 4. Issue | — | Approval issues a `CreditAccount` in `PENDING_PURPOSE`: RuPay BIN + random last 4, expiry +5 years. The middle digits are never composed. |
+  | 5. Purpose | `/credit/purpose` | Accessible dropdown: Education, Medical, Shopping, Travel, Business, Bills, Emergency, Other. **Other requires a note; every other option refuses one.** Mandatory gate. |
+  | 6. Activate | `/credit/activate` | `PENDING_ACTIVATION → ACTIVE`. Refused without a purpose. |
+  | 7. Spend | `/credit/spend` | Details → review → receipt. One idempotency key per attempt, **kept across a retry** after a dropped connection. Declines are recorded as FAILED rows with a reason. |
+  | 8. Statement | `/credit/statements` | Cut on the cycle day; due date = statement date + grace days. |
+  | 9. Bill pay | `/credit/pay` | Amount → method → Razorpay Checkout → server verification. Resumes a payment already in flight instead of opening a second. |
+  | 10. Restored | `/credit/transactions/:id` | Receipt with animated result, reference, available credit after. A processing payment is polled in the background. |
+
+  The next screen is read from the server's `next_step` (`DECLARE_PURPOSE`,
+  `ACTIVATE`, `UNBLOCK`, `NONE`), not inferred by the client.
+
+  **State machines.**
+
+  ```
+  Application:  DRAFT → KYC_PENDING → UNDER_REVIEW ─┬→ APPROVED
+                              │                     └→ REJECTED
+                              └──────── WITHDRAWN (applicant, before decision)
+
+  Account:      PENDING_PURPOSE → PENDING_ACTIVATION → ACTIVE ⇄ BLOCKED → CLOSED
+
+  Transaction:  PENDING / PROCESSING → SUCCEEDED | FAILED | CANCELLED ;  SUCCEEDED → REVERSED (full refund)
+
+  Statement:    UNPAID → PARTIALLY_PAID → PAID
+                  └──────→ OVERDUE ;  older still-owing statements → CARRIED_FORWARD
+  ```
+
+  **Decision rules (`credit_engine.assess`).**
+
+  | Rule | Value |
+  |---|---|
+  | KYC tier NONE | Not decided — `KYC_INCOMPLETE` |
+  | Disposable income | monthly income − existing EMI outflow; ≤ 0 → `OBLIGATIONS_TOO_HIGH` |
+  | Offer | 3 × disposable income |
+  | Thin file (Student / Other) | capped at ₹20,000 |
+  | Requested limit | honoured if lower; never raises the offer |
+  | Tier cap | ₹50,000 (Minimum KYC) / ₹2,00,000 (Full KYC) |
+  | Offer above ₹50,000 on Minimum KYC | `FULL_KYC_REQUIRED` — told to upgrade, not silently capped |
+  | Floor | below ₹5,000 → `INCOME_BELOW_FLOOR` |
+  | Rounding | down to the nearest ₹500 |
+  | Admin override | may decline, or grant a different amount **within the tier cap**; never above |
+
+  **Spending & billing settings** (admin-configurable, seeded defaults):
 
   | Parameter | Value |
   |---|---|
-  | Minimum transfer | ₹1,000 |
-  | Maximum single | ₹50,000 (Standard KYC) / ₹1,00,000 (Enhanced KYC) |
-  | Daily cumulative | ₹1,00,000 rolling 24h |
-  | Monthly cumulative | ₹2,50,000 calendar month |
-  | Convenience fee | 1.95% of principal |
-  | GST | 18% on the fee only |
-  | Disclosure | Non-skippable breakdown before 3DS auth |
+  | Daily spend limit | ₹1,00,000 |
+  | Monthly spend limit | ₹2,50,000 |
+  | Minimum payment | ₹1 |
+  | Statement cycle day | 1st of the month |
+  | Grace period | 18 days |
+  | Minimum due | 5% of closing balance, plus any missed minimum from an overdue previous statement; whole balance if below ₹1 |
+  | Late payment fee | ₹500, charged **once** per statement when the minimum due is not met by the due date |
 
-  **Failure circuit breaker (PRD §9.4).** Card charged but IMPS payout fails → 3 retries
-  with exponential backoff (2min, 5min, 15min) → `REVERSAL_INIT` → automatic inbound
-  refund to source card → high-priority user alert explaining exactly what happened.
+  **Balance rules.**
+  - Invariant after every movement: `available_credit + current_outstanding == credit_limit`.
+  - Every balance change re-reads the account under `SELECT … FOR UPDATE` (with
+    `populate_existing()`) inside one transaction.
+  - **Credit balances are kept, as on a real card.** A refund after the bill is paid,
+    or a payment that crosses a refund, leaves `current_outstanding` negative and
+    available credit above the limit; the next spend uses it first. Never floored at
+    zero. The API sends `credit_balance` as a positive figure.
+  - A statement opens at the previous **full** closing balance. Older statements still
+    owing become `CARRIED_FORWARD`, so one unpaid balance is never fee'd twice.
+  - Fully refunded purchases (REVERSED) stay in the statement sweep alongside their
+    refund row.
+  - Refunds are admin-only (L2/L3, reason required), partial allowed, total never
+    exceeds the purchase.
+
+  **Bill payment — verified at the gateway (two halves).**
+
+  ```
+  POST /credit/payments ──► PROCESSING row + gateway order   (no balance touched)
+         │
+         ├─ /payments/{id}/verify   (browser)  ┐
+         ├─ Razorpay webhook                   ├─► ask gateway ─► captured? ─► SUCCEEDED, credit restored (once)
+         └─ credit_bill_payment_poll (2 min)   ┘                   └─ not paid ─► FAILED / CANCELLED
+  /payments/{id}/cancel asks the gateway first (the payer may have paid and closed checkout).
+  Unpaid after 30 min with no live attempt → closed as timed out.
+  ```
+
+  - One payment in flight per account (checked with a locking read).
+  - Methods: UPI intent / collect (UPI, Google Pay, PhonePe, Paytm), net banking (bank
+    logos; chosen bank is passed to Checkout), debit card. **Never a credit card.**
+  - Amount may not exceed the outstanding, except that the ₹1 minimum may be paid
+    against a smaller balance (the excess becomes credit).
+  - **The simulator is refused when `ENV_NAME=production`**, whatever
+    `USE_SANDBOX_ADAPTERS` says — the simulator reports every order paid, which would
+    be free credit.
+  - Dev builds show a simulated gateway sheet: approve, decline, close checkout, timeout.
 
   ### 10.2 Manual EMI payment lifecycle (PRD §11.1)
 
@@ -404,9 +528,13 @@
                 (poll 15min, 24h)
   ```
 
-  **Hard rule (PRD §11.1, FR-008).** Credit cards are blocked as a payment instrument
-  for loan EMIs — RBI prohibits servicing debt with a revolving credit line. Permitted:
-  UPI, netbanking, debit card. Enforced server-side, not just hidden in the UI.
+  Collected through Razorpay; confirmed by re-reading the payment from the gateway
+  before the ledger moves, under a row lock (browser, webhook and poller can arrive
+  together).
+
+  **Hard rule (PRD §11.1, FR-008).** Credit cards — including the CashU credit line —
+  are blocked as a payment instrument for loan EMIs. `CREDIT_CARD` is absent from the
+  `PaymentMode` vocabulary, so there is no value a caller could pass to select it.
 
   ### 10.3 Auto-pay retry ladder (PRD §12.3)
 
@@ -421,28 +549,60 @@
                   └─ fail → disable auto-pay for cycle, flag OVERDUE, prompt manual
   ```
 
-  **Mandate cap rule:** must be ≥110% of the monthly EMI to absorb interest adjustments
-  while still bounding arbitrary debits.
+  **Mandate cap rule:** ≥110% of the monthly EMI. UPI AutoPay up to ₹15,000;
+  e-NACH up to ₹10,00,000. Pre-debit notice 48h before.
+
+  ### 10.4 Scan & Pay (UPI QR)
+
+  ```
+  Scan (/scan) → decode → confirm payee + amount → Razorpay UPI → verify at gateway → receipt
+  ```
+
+  - The QR is hostile input: only `upi://pay` deep links are parsed; `pa` is required,
+    every kept field is validated, unknown fields are dropped, raw text is never echoed.
+    `sign`/`orgid` are ignored rather than pretending to verify them.
+  - If the QR has no amount (a reused shop sticker), the payer enters it.
+  - Money leaves the user's **bank** via UPI — not the credit line. KYC (Minimum) required.
+  - Same confirmation rules as EMI: gateway re-read, row lock, ledger posted once.
+
+  ### 10.5 Failed payments & support
+
+  Every failed payment (EMI, QR, credit bill, declined purchase) is recorded in
+  `TransactionErrors` with a catalogued cause. The support assistant is **scripted, not
+  generative**: each reply is assembled from the recorded failure, so it never invents
+  a reason. The user can escalate to a ticket; L1–L3 see the error centre and resolve.
+
+  ### 10.6 Retired — credit-to-bank transfer
+
+  The FR-006 state machine (INITIATED → … → SUCCEEDED / REVERSED_TO_CARD), its fee
+  (1.95% + 18% GST), limits, payout circuit breaker, risk engine and screens were
+  removed in `5b64317`. Historical rows remain in the ledger.
 
   ---
 
   ## 11. Notification matrix (PRD §14)
 
-  | Trigger | Channels | Priority | Regulatory |
-  |---|---|---|---|
-  | New card linked | In-App, Push, SMS | High | RBI Cyber Security Mandate |
-  | Transfer initiated | In-App, Push | Medium | UX |
-  | Transfer succeeded | In-App, Push, SMS, Email | High | Audit / consumer protection |
-  | Transfer failed / reversal | In-App, Push, SMS | High | Consumer Protection Act |
-  | EMI due T-7 | Push, In-App | Low | Proactive |
-  | EMI due T-1 | Push, SMS, WhatsApp | High | Proactive |
-  | **Auto-pay pre-debit T-2** | **SMS, Email, Push** | **Critical** | **Mandatory — RBI E-Mandate Framework** |
-  | Auto-pay debit succeeded | Push, SMS, Email | High | Statutory |
-  | Auto-pay debit failed | Push, SMS, WhatsApp | Critical | Immediate alert |
-  | Suspicious login / new device | SMS, Email, Push | Critical | RBI Cyber Security Mandate |
+  Events are written to the `domain_events` outbox by `audit.emit()` and dispatched by
+  `notify.dispatch()` (channel routing lives in `notify.py`).
 
-  **Transactional alerts (OTP, payment confirmations, pre-debit notices) cannot be
-  disabled by the user.** Preference controls apply to marketing and low-priority only.
+  | Trigger | Priority | Status |
+  |---|---|---|
+  | New card linked | High | ✅ Sent |
+  | Bank account verified | Medium | ✅ Sent |
+  | KYC approved / rejected | High | ✅ Sent |
+  | Suspicious login / new device | Critical | ✅ Sent |
+  | **Auto-pay pre-debit T-2** | **Critical — RBI e-Mandate** | ✅ Sent |
+  | Auto-pay debit succeeded / failed | High / Critical | ✅ Sent |
+  | EMI due T-7 / T-1 | Low / High | ⚠ **Templates defined, nothing sends them** — the 09:00 job only flags overdue EMIs |
+  | Credit application decided | High | ⛔ **Not built** |
+  | Statement generated / payment due | High | ⛔ **Not built** |
+  | Credit purchase / bill payment / late fee | High | ⛔ **Not built** |
+  | ~~Transfer succeeded / failed~~ | — | Retired (templates `CASHU_TXF_*` still seeded) |
+
+  Push (FCM/APNS) is P1. **Transactional alerts cannot be disabled by the user.**
+
+  > **Gap.** `credit_engine` writes audit rows but emits no notification events, and EMI
+  > due reminders are never scheduled. Both are the next notification work items.
 
   ---
 
@@ -450,20 +610,23 @@
 
   | Capability | User | L1 Support | L2 Risk/Recon | L3 Super Admin |
   |---|:--:|:--:|:--:|:--:|
-  | View own dashboard & cards | ✅ | ❌ | ❌ | ❌ |
-  | Add / delete own cards & accounts | ✅ | ❌ | ❌ | ❌ |
-  | Initiate transfers & EMI payments | ✅ | ❌ | ❌ | ❌ |
-  | View masked user profiles & logs | ❌ | ✅ | ✅ | ✅ |
+  | Own dashboard, cards, EMIs, credit line | ✅ | ❌ | ❌ | ❌ |
+  | Apply, spend, pay bill, block/unblock own card | ✅ | ❌ | ❌ | ❌ |
+  | View masked users, credit applications, credit accounts, transaction errors | ❌ | ✅ | ✅ | ✅ |
   | View raw PII / KYC documents | ❌ | ❌ | ✅ *(audited)* | ✅ *(audited)* |
-  | Trigger manual reversals | ❌ | ❌ | ✅ | ✅ |
-  | Override recon discrepancy | ❌ | ❌ | ✅ | ✅ |
-  | Manage API keys & partners | ❌ | ❌ | ❌ | ✅ |
+  | Review KYC, freeze/unfreeze users | ❌ | ❌ | ✅ | ✅ |
+  | **Approve / reject credit applications** | ❌ | ❌ | ✅ | ✅ |
+  | **Block a credit account, refund a purchase** | ❌ | ❌ | ✅ | ✅ |
+  | **Cut an out-of-cycle statement** | ❌ | ❌ | ❌ | ✅ |
+  | Reconciliation, self-audit, audit logs | ❌ | ❌ | ✅ | ✅ |
+  | Settings & feature flags | ❌ | ❌ | ❌ | ✅ |
   | Direct production DB access | ❌ | ❌ | ❌ | **❌ (zero-DB)** |
-  | View system audit logs | ❌ | ❌ | ✅ | ✅ |
 
-  Admin modules: user 360° viewer · transaction telemetry · failed-transaction &
-  reversal queue *(maker-checker mandatory above ₹25,000)* · reconciliation console ·
-  fraud & risk rules · immutable audit log viewer.
+  An admin can approve a credit line but **cannot declare a purpose or activate on the
+  applicant's behalf**. Maker-checker threshold remains ₹25,000.
+
+  Admin UI modules: dashboard · users · KYC queue + document viewer · reconciliation ·
+  settings. *(Credit application queue is API-only today.)*
 
   ---
 
@@ -471,136 +634,153 @@
 
   ### 13.1 Non-negotiable rules
 
-  1. **Zero raw card storage.** No PAN, CVV, or PIN ever enters CashU — not in the
-    database, not in logs, not in an exception trace. Tokenization happens
-    client → licensed Token Requestor, never through the backend.
-  2. **Payments are credited only on a verified gateway signature.** Never on client
-    assertion. *(This exact vulnerability existed in the stockverse wallet and was
-    patched — it must not be reintroduced here.)*
-  3. **Third-party bank transfers are prohibited.** Destination accounts must be
-    penny-drop verified as belonging to the authenticated user (PMLA).
-  4. **Credit cards cannot pay loan EMIs.** Server-enforced.
-  5. **Idempotency key required** on every money-moving request, `UNIQUE`-enforced.
-  6. **Financial rows are append-only.** Corrections are compensating entries.
-  7. **PII encrypted at rest** — AES-256-GCM field-level (PAN, Aadhaar, account numbers,
-    card tokens, cardholder name).
-  8. **Every admin mutation writes an audit row** with actor, IP, timestamp, before/after.
+  1. **Zero raw card storage.** No PAN, CVV, or PIN ever enters CashU. External cards
+     are stored as BIN + last 4. The issued CashU card is generated as BIN + last 4
+     only — the middle digits are never composed. `static_audit` asserts no such column
+     exists, against both models and the live schema.
+  2. **Money is credited only on a gateway-verified status.** A signature proves a
+     message wasn't forged, not that money moved — every caller re-reads the payment
+     from the gateway before the ledger or a credit balance moves.
+  3. **The simulator is refused in production** for credit bill payments.
+  4. **Bank accounts must be penny-drop verified** as belonging to the user (PMLA).
+  5. **Credit cannot pay loan EMIs.** Structurally enforced.
+  6. **Idempotency key required** on every money-moving request, `UNIQUE`-enforced.
+  7. **Financial rows are append-only.** Corrections are compensating entries.
+  8. **Clients never supply a limit or a balance.** Only `credit_engine` computes them.
+  9. **PII encrypted at rest** — AES-256-GCM field-level.
+  10. **Every admin mutation writes an audit row** with actor, IP, timestamp, before/after.
+  11. **Test cards and test spends are dev-only** — refused in production and outside
+      sandbox adapters; test rows carry `is_test`.
 
   ### 13.2 Rate limits (PRD §17.1)
 
   | Endpoint class | Limit |
   |---|---|
   | Public auth | 5 req/min per IP |
-  | Transaction initiation | 3 req/min per user |
-  | OTP resend | 3 per 15-min rolling window per IP/device |
-  | Velocity guard | >3 transfers in 1 hour → throttle + security alert (ERR-011) |
+  | OTP resend | 3 per 15-min window per IP/device; OTP expires in 180s |
+  | Failed auth | 3 attempts → 30-min lockout |
+  | Payment velocity | >3 payments in 1 hour → 30-min throttle + security alert (ERR-011) |
+  | Credit spend | ₹1,00,000/day, ₹2,50,000/month (summed from rows under the account lock) |
 
   ### 13.3 Compliance checklist (PRD §18)
 
   | Area | Requirement | v1 status |
   |---|---|---|
-  | RBI CoFT | Network tokenization via licensed requestor | Adapter built; **vendor unsigned** |
-  | Credit Card Master Direction | Approved MCC / merchant model for transfers | **⛔ UNRESOLVED — see §16** |
-  | DPDPA 2023 | Granular consent, right to erasure, data localization | Consent + erasure in v1 |
-  | PCI DSS v4.0 | SAQ-A profile (no cardholder data touched) | Architecturally satisfied |
-  | KYC / AML | Min KYC to onboard; Full KYC before transfers >₹10,000 | Tiering in v1 |
-  | NPCI e-Mandate | AFA at registration, T-24h pre-debit notice, user pause/cancel | In v1 |
-  | BBPS | Route via licensed BBPOU or registered Agent Institution | Adapter built; **vendor unsigned** |
-  | PA/PG licensing | Partner with licensed PA; hold no client funds | Architecture holds no funds ✅ |
+  | Credit Card Master Direction | Card issuance only by/with a licensed issuer; no cash cycling | Transfers removed ✅; **issuing partner ⛔ unsigned** |
+  | DPDPA 2023 | Granular consent, right to erasure, data localization | Export + erasure in v1 |
+  | PCI DSS v4.0 | SAQ-A profile | Architecturally satisfied — no PAN anywhere |
+  | KYC / AML | Min KYC to use; Full KYC for credit limits above ₹50,000 | Tiering in v1; manual review queue |
+  | NPCI e-Mandate | AFA at registration, pre-debit notice, pause/cancel | In v1 (sandbox rail) |
+  | NPCI UPI | Scan & Pay via a licensed PA | Razorpay; **UPI not yet enabled on the merchant account** |
+  | BBPS | Via licensed BBPOU or Agent Institution | Adapter built; **vendor unsigned** |
+  | PA/PG licensing | Partner with licensed PA; hold no client funds | Razorpay + Cashfree; no funds held ✅ |
 
   ---
 
   ## 14. Vendor adapter seams
 
-  All nine PRD §21 integrations are **"To Be Confirmed"**. v1 therefore builds every
-  external dependency behind an interface with a sandbox implementation, following the
-  `EMIProviderAdapter` pattern the PRD already mandates (§10.1).
+  Selected in `adapters.py` by `USE_SANDBOX_ADAPTERS` **and** whether credentials are
+  present — a half-configured environment degrades to the simulator instead of failing
+  mid-payment.
 
-  | Interface | Sandbox v1 behaviour | Real candidates |
+  | Seam | Sandbox behaviour | Live |
   |---|---|---|
-  | `TokenRequestorAdapter` | Generates a fake token ref; derives issuer/network from BIN table; simulates 3DS | Juspay Hyperswitch, Razorpay TokenHQ, Cashfree |
-  | `PaymentGatewayAdapter` | Simulated 3DS challenge + signed webhook | Razorpay, Cashfree, Juspay, PayU |
-  | `PayoutAdapter` | Simulated IMPS with synthetic UTR; configurable failure injection | ICICI Composite, Cashfree Payouts, Decentro, Setu |
-  | `PennyDropAdapter` | Returns a configurable CBS name to exercise match/mismatch paths | Decentro, Setu, Cashfree, Karza |
-  | `EMIProviderAdapter` | Bajaj Finance sandbox — biller lookup, dues, payment ack | BBPS BOU, Bajaj B2B direct |
-  | `MandateAdapter` | Simulated UMN issue, scheduled debit, bounce injection | Razorpay AutoPay, Cashfree, NPCI ONMAG |
-  | `KYCAdapter` | Manual admin review queue | Bureau.id, Karza, Signzy, IDfy |
-  | `SMSAdapter` | Console/log sink | Gupshup, Exotel, Karix |
-  | `PushAdapter` | No-op in v1 (P1 feature) | FCM, OneSignal |
+  | Collection (credit bill, EMI, Scan & Pay) | Simulated order; injectable DECLINE / ABANDON / TIMEOUT | **Razorpay** Checkout + webhook |
+  | Penny drop / IFSC | Configurable CBS name for match/mismatch | **Cashfree** Verification Suite |
+  | EMI biller | Bajaj Finance sandbox | BBPS BOU / Bajaj B2B — unsigned |
+  | Mandate | Simulated UMN, scheduled debit, bounce injection | Razorpay AutoPay / Cashfree / NPCI — unsigned |
+  | KYC | Manual admin review queue | Bureau.id, Karza, Signzy, IDfy — unsigned |
+  | Card issuance | Internal (BIN + last 4) | **Issuing partner — unsigned** |
+  | SMS / Email | Console sink / Flask-Mail | Gupshup, Exotel, Karix |
+  | Push | No-op (P1) | FCM, OneSignal |
 
-  **Design constraint:** swapping a sandbox for a live vendor must touch exactly one
-  adapter file plus configuration. If it touches a route or a model, the seam was wrong.
-
-  **Failure injection is a v1 requirement**, not a testing luxury — the PRD's §20 error
-  matrix and §9.4 circuit breaker cannot be verified any other way.
+  **Design constraint:** swapping a sandbox for a live vendor touches one adapter file
+  plus configuration. **Failure injection is a v1 requirement.**
 
   ---
 
-  ## 15. Build order
+  ## 15. Build order & status
 
-  | Phase | Deliverable | Vendor-blocked? |
+  | Phase | Deliverable | Status |
   |---|---|---|
-  | **0** | Skeleton: `portal/` package, config, extensions, logger, health, Docker up, seeders | No |
-  | **1** | Identity: roles, users, OTP, MPIN, JWT, device binding, sessions, rate limits | No |
-  | **2** | Profile + KYC tiering + admin review queue | No |
-  | **3** | **Ledger engine + master transactions + self-audit job** — *before any money moves* | No |
-  | **4** | Card linking via `TokenRequestorAdapter` sandbox; card detail; unlink | Sandbox |
-  | **5** | Bank accounts + penny-drop sandbox + name matching | Sandbox |
-  | **6** | Home dashboard aggregation (FR-002) | No |
-  | **7** | Transfer engine: fee calc, risk/velocity, state machine, idempotency, circuit breaker | Sandbox |
-  | **8** | EMI registry + Bajaj sandbox adapter + manual payment | Sandbox |
-  | **9** | Mandate engine + pre-debit scheduler + retry ladder | Sandbox |
-  | **10** | Notification engine + templates + preferences | Partial |
-  | **11** | Transaction history, receipts, reconciliation console | No |
-  | **12** | Admin console + RBAC + audit viewer | No |
-  | **13** | Frontend polish — motion, empty states, error copy, success moment | No |
-  | **14** | Test suite against §25 Gherkin criteria + §20 error matrix | No |
-  | **15** | Production hardening — only once vendors are signed | **Yes** |
-
-  **Phase 3 before Phase 4 is deliberate.** The ledger must exist and be provably correct
-  before anything writes to it.
+  | 0 | Skeleton, config, logger, health, Docker, seeders | ✅ |
+  | 1 | Identity: OTP, MPIN, JWT, device binding, sessions, rate limits | ✅ |
+  | 2 | Profile + KYC tiering + admin review queue | ✅ |
+  | 3 | Ledger engine + master transactions + self-audit | ✅ |
+  | 4 | External card tracking | ✅ |
+  | 5 | Bank accounts + penny drop + IFSC | ✅ |
+  | 6 | Dashboard aggregation (FR-002) | ✅ |
+  | 7 | ~~Transfer engine~~ → **Credit line backend** (`0f20029`, `28c6286`, `a1d426c`) | ✅ |
+  | 7b | **Credit line UI** — 9 screens, nav history (`ef02c50`, `f182906`) | ✅ |
+  | 8 | EMI registry + Bajaj sandbox + manual payment (Razorpay) | ✅ |
+  | 8b | Scan & Pay (UPI QR) | ✅ |
+  | 9 | Mandate engine + pre-debit + retry ladder | ✅ (sandbox) |
+  | 10 | Notification engine | ⚠ credit-line events missing |
+  | 11 | Transaction history, receipts, reconciliation | ✅ |
+  | 12 | Admin console + RBAC + audit | ✅ (credit application queue UI pending) |
+  | 13 | Frontend polish — motion, empty/error states, receipt moment | ✅ |
+  | 14 | Test suites (§17) | ✅ — 3 suites carry a known BLOCKED check |
+  | 15 | Production hardening — once vendors are signed | ⛔ Blocked |
 
   ---
 
-  ## 16. Open decisions — blocking
-
-  Carried from PRD §27. Items 1 and 4 block *launch*, not development.
+  ## 16. Open decisions
 
   | # | Decision | Impact | Status |
   |---|---|---|---|
-  | 1 | **Transfer merchant model** — which MCC and legal construct? Escrow, rental/vendor pay with invoice proof, or NBFC co-lending? | **Legal — the whole FR-006 pillar** | ⛔ Open |
-  | 2 | BBPS integration — direct Agent Institution via licensed BBPOU, or Bajaj B2B tie-up? | Regulatory / Ops | ⛔ Open |
-  | 3 | Token Requestor partner — must support all four networks | Architecture | ⛔ Open |
-  | 4 | KYC tiering — is Min KYC acceptable up to ₹10,000, or Full eKYC before any payout? | Compliance | ⛔ Open |
-  | 5 | Fee absorption — pass 1.95% through, or zero-fee first ₹5,000 for acquisition? | Unit economics | ⛔ Open |
+  | 1 | ~~Transfer merchant model~~ → **Credit line issuing partner** — bank co-brand or NBFC co-lending? Who owns the book? | **Legal — the whole credit pillar** | ⛔ Open |
+  | 2 | BBPS integration — direct AI via BBPOU, or Bajaj B2B? | Regulatory / Ops | ⛔ Open |
+  | 3 | ~~Token Requestor partner~~ | — | ✅ Closed — no tokenisation needed; only BIN + last 4 stored |
+  | 4 | KYC tiering — is Min KYC acceptable for limits up to ₹50,000? | Compliance | ⛔ Open (implemented as yes) |
+  | 5 | ~~Fee absorption on transfers~~ | — | ✅ Closed — transfers removed |
   | 6 | Cross-border / NRI cards | Legal | ✅ Closed — domestic INR only |
-  | 7 | Chargeback liability post-IMPS payout — recovery mechanism? | Risk / Finance | ⛔ Open |
-
-  **Additional decisions this document raises:**
-
-  | # | Decision | Recommendation |
-  |---|---|---|
-  | 8 | MySQL vs PostgreSQL (⚑ D1) | MySQL per your call. Revisit only if the self-audit job shows ledger drift under load. |
-  | 9 | Redis in v1 (⚑ D2) | Skip. The `UNIQUE` idempotency index is stronger than a Redis TTL. Add Redis when read latency demands it. |
-  | 10 | UUID vs integer PKs (⚑ D6) | UUID on financial entities. Diverges from stockverse, but enumerable transfer IDs are a real leak. |
+  | 7 | ~~Chargeback liability post-IMPS payout~~ | — | ✅ Closed — transfers removed |
+  | 8 | MySQL vs PostgreSQL (⚑ D1) | Revisit only if the self-audit shows drift | MySQL |
+  | 9 | Redis in v1 (⚑ D2) | Skip; UNIQUE idempotency is stronger | No Redis |
+  | 10 | UUID vs integer PKs (⚑ D6) | UUID on financial entities | UUID |
+  | 11 | **Interest on revolving balances** | Revenue / disclosure | ⛔ Open — v1 charges only a late fee |
+  | 12 | **Enable UPI on the Razorpay merchant account** | Scan & Pay, UPI bill pay live | ⛔ Open |
 
   ---
 
-  ## 17. Acceptance criteria
+  ## 17. Acceptance criteria & tests
 
-  v1 is done when the PRD §25 Gherkin scenarios pass against the sandbox adapters:
+  ### 17.1 Acceptance criteria
 
-  - **AC-001** Tokenized card linking — token ref received, **zero raw PAN/CVV in the
-    database**, masked card appears, confirmation SMS dispatched
-  - **AC-002** Transfer with fee disclosure — ₹10,000 principal shows ₹200 fee + ₹36 GST
-    = ₹10,236 charged, ₹10,000 disbursed, `INITIATED → SUCCEEDED`, ledger entry written
-  - **AC-003** Pre-debit notification — T-48h SMS + Email containing UMN, amount, date,
-    biller name; audit row recorded
-  - **AC-004** Idempotency — duplicate key within 60s returns the original transaction,
-    **no second card charge**
+  - **AC-001** External card linking — only BIN + last 4 stored, **zero raw PAN/CVV in
+    the database**, masked card shown.
+  - ~~**AC-002** Transfer with fee disclosure~~ — retired with FR-006.
+  - **AC-003** Pre-debit notification — T-48h SMS + Email with UMN, amount, date,
+    biller; audit row recorded.
+  - **AC-004** Idempotency — a duplicate key returns the original transaction, **no
+    second charge** (EMI, QR, credit purchase, bill payment).
+  - **AC-005** Credit line journey — apply → KYC → approve → purpose → activate →
+    spend → statement → pay → credit restored, with the invariant holding after
+    every movement.
+  - **AC-006** Bill payment restores credit **only after the gateway reports capture**;
+    concurrent verify / webhook / poller restore it exactly once.
+  - **AC-007** Concurrent purchases on one account never exceed available credit and
+    each records a distinct running balance.
+  - **AC-008** Statements across cycles: no double-counted payments, refunds kept as
+    credit, carried-forward statements not fee'd twice.
 
-  Plus: all 11 §20 error scenarios reproducible via failure injection, and the nightly
-  ledger self-audit passing on a seeded dataset with reversals.
+  ### 17.2 Suites (`backend/tests/run_all.py`)
+
+  `run_all.py` clears throttle counters between suites (running them back to back
+  otherwise trips the OTP limiter and fails misleadingly) and knows which suites end on
+  a deliberate BLOCKED check.
+
+  | Suite | Covers |
+  |---|---|
+  | `static_audit` | JWT coverage, no PAN/CVV columns (model + live schema) |
+  | `validation_audit` | Input validation, raw-text amounts |
+  | `credit_lifecycle` | Full credit journey + API field contract |
+  | `credit_concurrency` | Racing purchases, racing bill-payment opens, verify storms |
+  | `credit_statement_cycles` | Multi-cycle statements, refunds as credit, carry-forward |
+  | `upi_payment_flow`, `upi_webhook` | Scan & Pay + Razorpay webhook (gateway-signature checks skipped while UPI is off) |
+  | `smoke_flow`, `test_card_flow`, `error_support_flow` | ⚠ One known BLOCKED check each — their money leg was the transfer; to be retargeted onto credit purchases |
+  | `frontend/scripts/ui-audit.mjs` | Route and navigation-target resolution |
+  | Browser e2e | puppeteer-core + installed Chrome against Vite :3000, at 320 / 375 / 768 / 1280px — 71 checks, no horizontal scroll, no console errors |
 
   ---
 
@@ -616,11 +796,13 @@
   | Frontend | http://localhost:3000 |
   | API | http://localhost:5050/v1 |
   | Swagger | http://localhost:5050/v1/doc/ |
-  | MySQL | `localhost:3307` — root / Mahesh2605 / `cashu_db` |
+  | MySQL (compose) | `localhost:3307` — root / Mahesh2605 / `cashu_db` |
 
-  MySQL binds host port **3307**, not 3306, because 3306 is already taken by the native
-  install serving the stockverse project.
+  Compose binds MySQL to host port **3307** because the native MySQL install used for
+  local (non-Docker) dev already holds 3306. `USE_SANDBOX_ADAPTERS=True` by default;
+  set `ENV_NAME=production` in any real deployment so the simulator is refused for
+  bill payments.
 
   ---
 
-  *End of CashU Version 1 Specification. Derived from PRD v1.0.0-PROD-SPEC.*
+  *End of CashU Version 1 Specification, revision 2. Derived from PRD v1.0.0-PROD-SPEC.*
