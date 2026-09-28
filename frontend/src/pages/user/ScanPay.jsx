@@ -171,7 +171,10 @@ export default function ScanPay() {
           />
 
           <div className="px-4">
-            <div className="relative aspect-square w-full overflow-hidden rounded-3xl bg-ink">
+            {/* Capped by width *and* by screen height. Full-width on a laptop
+                made an 670px square: the bottom bar covered it, and the manual
+                entry link and the header's back button fell off screen. */}
+            <div className="relative mx-auto aspect-square w-full max-w-[min(100%,26rem,52vh)] overflow-hidden rounded-3xl bg-ink shadow-lift">
               <video
                 ref={scanner.videoRef}
                 playsInline
