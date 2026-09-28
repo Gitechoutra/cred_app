@@ -256,7 +256,7 @@ function Phone({ className, style }) {
             </p>
             <div className="space-y-1.5">
               {[
-                { label: 'Transfer to bank', amount: '−₹15,000' },
+                { label: 'Blue Tokai Coffee · Card', amount: '−₹450' },
                 { label: 'Bajaj EMI · Auto-pay', amount: '−₹4,250' },
               ].map((row) => (
                 <div key={row.label} className="flex items-center gap-2 px-1">
@@ -363,8 +363,8 @@ export default function Showcase({ className }) {
               </svg>
             </span>
             <div>
-              <p className="text-[10px] font-bold text-ink">Transfer complete</p>
-              <p className="money text-[9px] text-slate">₹10,000 · UTR 4471…</p>
+              <p className="text-[10px] font-bold text-ink">Bill paid</p>
+              <p className="money text-[9px] text-slate">₹10,000 · credit restored</p>
             </div>
           </div>
         </div>

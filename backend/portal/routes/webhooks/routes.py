@@ -199,9 +199,8 @@ class WebhookHealth(Resource):
         """
         return success({
             'endpoints': [
-                '/v1/webhooks/cashfree/payments',
-                '/v1/webhooks/cashfree/payouts',
                 '/v1/webhooks/cashfree/verification',
+                '/v1/webhooks/razorpay',
             ],
             'signature_verification': 'enabled',
             'credentials_configured': cashfree.is_configured(),

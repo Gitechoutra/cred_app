@@ -136,8 +136,8 @@ export default function Hub() {
       {!quickActions.needs_kyc && quickActions.needs_bank_account && (
         <SetupBanner
           icon={<IconBank className="h-5 w-5 text-ink" />}
-          title="Add and verify a payout bank account"
-          description="Link an account via penny-drop verification to receive card-to-bank settlement funds."
+          title="Add and verify your bank account"
+          description="Your salary account, verified by penny drop. Needed to apply for credit and to set up EMI auto-pay."
           cta="Add bank account"
           onClick={() => navigate('/banks/add')}
         />
@@ -337,7 +337,7 @@ export default function Hub() {
           <QuickActionBtn
             icon={IconBank}
             title="Add Bank"
-            hint="Payout account"
+            hint="Salary account"
             onClick={() => navigate('/banks/add')}
           />
         </div>

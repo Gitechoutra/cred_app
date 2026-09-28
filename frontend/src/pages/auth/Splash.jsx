@@ -248,8 +248,8 @@ function Hero({ navigate }) {
             style={{ animationDelay: '380ms' }}
           >
             Track what you owe across every credit card and loan, pay it without
-            hunting through six different portals, and turn credit headroom into
-            bank liquidity — with the fee shown before you authorise.
+            hunting through six different portals, and get a CashU credit card
+            with a limit worked out from your salary and credit score.
           </p>
 
           <div
@@ -323,7 +323,7 @@ const STATS = [
   { value: 48, suffix: 'h', label: 'Notice before any auto-debit', hint: 'RBI asks for 24' },
   { value: 0, suffix: '', label: 'Card numbers stored', hint: 'Tokenised, never held' },
   { value: 100, suffix: '%', label: 'Ledger re-verified nightly', hint: 'Double-entry, append-only' },
-  { value: 1, prefix: '₹', suffix: '', label: 'Penny-drop name check', hint: 'Before any payout' },
+  { value: 1, prefix: '₹', suffix: '', label: 'Penny-drop name check', hint: 'On every bank account' },
 ];
 
 function Stats() {

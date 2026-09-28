@@ -385,53 +385,6 @@ def reverse(
 # The double-entry shape of each money movement, in one place, so a route never
 # has to reason about debits and credits.
 
-def entries_for_transfer_charge(principal, fee, gst, total_charged, card_ref, bank_ref):
-    """
-    Card charged for a credit-to-bank transfer (PRD AC-002).
-
-    The card is charged principal + fee + GST. CashU owes the user the
-    principal, keeps the fee as income, and holds the GST for the state.
-    """
-    return [
-        {
-            'account': Account.GATEWAY_RECEIVABLE,
-            'debit': total_charged,
-            'narration': f'Card charge {card_ref}',
-        },
-        {
-            'account': Account.USER_PAYABLE,
-            'credit': principal,
-            'narration': f'Payable to {bank_ref}',
-        },
-        {
-            'account': Account.FEE_INCOME,
-            'credit': fee,
-            'narration': 'Convenience fee',
-        },
-        {
-            'account': Account.GST_PAYABLE,
-            'credit': gst,
-            'narration': 'GST on convenience fee',
-        },
-    ]
-
-
-def entries_for_transfer_payout(principal, bank_ref):
-    """Payout dispatched: the liability to the user becomes cash in transit."""
-    return [
-        {
-            'account': Account.USER_PAYABLE,
-            'debit': principal,
-            'narration': f'Payout dispatched to {bank_ref}',
-        },
-        {
-            'account': Account.PAYOUT_CLEARING,
-            'credit': principal,
-            'narration': 'IMPS payout in flight',
-        },
-    ]
-
-
 def entries_for_emi_payment(amount, source_ref, biller_ref):
     """
     EMI collected from the user and owed onward to the biller.
@@ -638,7 +591,6 @@ def self_audit(limit: int = 5000) -> dict:
             'credits': float(credits),
         })
         db.session.add(ReconciliationDiscrepancies(
-            run_id=None,
             transaction_id=txn_id,
             discrepancy_type=DiscrepancyType.UNBALANCED_LEDGER,
             expected_amount=debits,
@@ -652,7 +604,6 @@ def self_audit(limit: int = 5000) -> dict:
             'type': DiscrepancyType.LEDGER_MISSING,
         })
         db.session.add(ReconciliationDiscrepancies(
-            run_id=None,
             transaction_id=txn_id,
             discrepancy_type=DiscrepancyType.LEDGER_MISSING,
             details='Settled transaction has no double-entry ledger rows.',

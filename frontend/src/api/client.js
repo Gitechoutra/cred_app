@@ -279,10 +279,8 @@ export const endpoints = {
   },
   me: {
     get: () => api.get('/users/me'),
-    update: (data) => api.patch('/users/me', data),
     security: (data) => api.patch('/users/me/security', data),
     loginHistory: () => api.get('/users/me/login-history'),
-    exportData: () => api.post('/users/me/export'),
   },
   kyc: {
     status: () => api.get('/kyc/status'),
@@ -290,7 +288,6 @@ export const endpoints = {
   },
   dashboard: {
     get: () => api.get('/dashboard'),
-    activity: () => api.get('/dashboard/activity'),
   },
   cards: {
     list: () => api.get('/cards'),
@@ -306,7 +303,6 @@ export const endpoints = {
   credit: {
     // -- Application ----------------------------------------------------
     eligibility: () => api.get('/credit/eligibility'),
-    applications: () => api.get('/credit/applications'),
     // Multipart: the application carries the income proof document.
     apply: (form) => api.upload('/credit/applications', form),
     application: (id, opts = {}) => api.get(`/credit/applications/${id}`, opts),
@@ -356,11 +352,9 @@ export const endpoints = {
     get: (id) => api.get(`/qr-payments/${id}`),
     verify: (id, data) => api.post(`/qr-payments/${id}/verify`, data),
     cancel: (id) => api.post(`/qr-payments/${id}/cancel`),
-    list: () => api.get('/qr-payments'),
   },
   banks: {
     list: () => api.get('/bank-accounts'),
-    get: (id) => api.get(`/bank-accounts/${id}`),
     add: (data) => api.post('/bank-accounts', data),
     remove: (id) => api.del(`/bank-accounts/${id}`),
     verify: (id) => api.post(`/bank-accounts/${id}/verify`),
@@ -374,12 +368,10 @@ export const endpoints = {
     get: (id) => api.get(`/emi/${id}`),
     lookup: (data) => api.post('/emi/lookup', data),
     add: (data) => api.post('/emi', data),
-    update: (id, data) => api.patch(`/emi/${id}`, data),
     remove: (id) => api.del(`/emi/${id}`),
   },
   emiPayments: {
     methods: () => api.get('/emi-payments/methods'),
-    list: (emiId) => api.get(`/emi-payments${emiId ? `?emi_id=${emiId}` : ''}`),
     pay: (data) => api.pay('/emi-payments', data),
     confirm: (id) => api.post(`/emi-payments/${id}/confirm`),
     // Hands Razorpay Checkout's signed handler payload to the server, which
@@ -388,12 +380,9 @@ export const endpoints = {
     verify: (id, data) => api.post(`/emi-payments/${id}/verify`, data),
     cancel: (id) => api.post(`/emi-payments/${id}/cancel`),
     get: (id) => api.get(`/emi-payments/${id}`),
-    receipt: (id) => api.get(`/emi-payments/${id}/receipt`),
   },
   mandates: {
-    list: () => api.get('/mandates'),
     preview: (emiId) => api.get(`/mandates/preview?emi_id=${emiId}`),
-    get: (id) => api.get(`/mandates/${id}`),
     create: (data) => api.post('/mandates', data),
     activate: (id) => api.post(`/mandates/${id}/activate`),
     pause: (id, reason) => api.post(`/mandates/${id}/pause`, { reason }),
@@ -435,17 +424,11 @@ export const endpoints = {
     reviewCreditApplication: (id, data) => api.post(
       `/admin/credit/applications/${id}/review`, data,
     ),
-    creditAccount: (id) => api.get(`/admin/credit/accounts/${id}`),
-    blockCreditAccount: (id, reason) => api.post(
-      `/admin/credit/accounts/${id}/block`, { reason },
-    ),
-    cutStatement: (id) => api.post(`/admin/credit/accounts/${id}/statement`),
     reconciliation: () => api.get('/admin/reconciliation'),
     selfAudit: () => api.post('/admin/reconciliation/self-audit'),
     settings: () => api.get('/admin/settings'),
     updateSetting: (key, value) => api.patch(`/admin/settings/${key}`, { value }),
     flags: () => api.get('/admin/feature-flags'),
     updateFlag: (key, data) => api.patch(`/admin/feature-flags/${key}`, data),
-    auditLogs: (params = '') => api.get(`/admin/audit-logs${params}`),
   },
 };

@@ -83,8 +83,7 @@ def init_app(app):
             AdminSettings, SettingDataType, FeatureFlags, FlagRolloutType,
         )
         from .reconciliation import (
-            ReconciliationRuns, ReconciliationDiscrepancies,
-            ReconRunStatus, DiscrepancyType, DiscrepancyResolution,
+            ReconciliationDiscrepancies, DiscrepancyType, DiscrepancyResolution,
         )
         from .support_messages import (
             SupportTickets, SupportMessages, SupportSenderRole,
@@ -94,4 +93,3 @@ def init_app(app):
             TransactionErrors, ErrorType,
         )
         from .qr_payments import QRPayments, QRPaymentState  # noqa: F401
-        from .platform_statistics import PlatformStatistics

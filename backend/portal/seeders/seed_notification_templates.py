@@ -31,30 +31,8 @@ TEMPLATES = [
      'you, lock your account immediately.',
      'CASHU_CARD_LINK', 'RBI Cyber Security Mandate'),
 
-    (E.TRANSFER_INITIATED, C.IN_APP, P.MEDIUM, 'Transfer processing',
-     'Transfer of Rs. {amount} to A/c ending {account} is processing.',
-     None, 'Standard UX'),
 
-    (E.TRANSFER_SUCCEEDED, C.IN_APP, P.HIGH, 'Transfer successful',
-     'Rs. {amount} has been credited to your account ending {account}. '
-     'UTR: {utr}.', None, 'Audit trail / consumer protection'),
-    (E.TRANSFER_SUCCEEDED, C.SMS, P.HIGH, 'Transfer successful',
-     'Transfer of Rs. {amount} to A/c ending {account} successful. '
-     'IMPS UTR: {utr}. - CashU',
-     'CASHU_TXF_OK', 'Audit trail / consumer protection'),
-    (E.TRANSFER_SUCCEEDED, C.EMAIL, P.HIGH, 'Your CashU transfer receipt',
-     'Your transfer of Rs. {amount} to the account ending {account} completed '
-     'successfully.\n\nIMPS UTR: {utr}\n\nYour receipt is available in the '
-     'CashU app under Transactions.',
-     None, 'Audit trail / consumer protection'),
 
-    (E.TRANSFER_FAILED, C.IN_APP, P.HIGH, 'Transfer failed',
-     'Your transfer of Rs. {amount} could not be completed. The charge has '
-     'been reversed to your card.', None, 'Consumer Protection Act'),
-    (E.TRANSFER_FAILED, C.SMS, P.HIGH, 'Transfer failed',
-     'Transfer of Rs. {amount} failed. Card charge reversed to your issuer '
-     'bank. Refund SLA: T+2 days. - CashU',
-     'CASHU_TXF_FAIL', 'Consumer Protection Act'),
 
     (E.EMI_DUE_T7, C.IN_APP, P.LOW, 'EMI due in 7 days',
      'Reminder: your {provider} EMI of Rs. {amount} is due on {due_date}.',

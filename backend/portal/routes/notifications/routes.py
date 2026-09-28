@@ -156,8 +156,8 @@ class Preferences(Resource):
                     'reason': 'Required by the RBI e-Mandate framework.',
                 },
                 {
-                    'event': 'TRANSFER_SUCCEEDED',
-                    'label': 'Payment confirmations',
+                    'event': 'CREDIT_APPROVED',
+                    'label': 'Credit decisions',
                     'reason': 'Required for your transaction records.',
                 },
                 {

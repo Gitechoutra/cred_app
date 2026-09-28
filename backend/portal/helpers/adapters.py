@@ -39,7 +39,6 @@ class Simulate:
 
     DECLINE = 'SIMDECLINE'         # issuer declines the charge (ERR-003)
     TIMEOUT = 'SIMTIMEOUT'         # gateway times out (ERR-005)
-    PAYOUT_FAIL = 'SIMPAYOUTFAIL'  # charge succeeds, settlement fails (ERR-006)
     NAME_MISMATCH = 'SIMNAMEMM'    # penny-drop name mismatch (ERR-004)
     TOKEN_EXPIRED = 'SIMTOKENEXP'  # expired card token (ERR-009)
     BILLER_DOWN = 'SIMBILLERDOWN'  # BBPS biller offline (ERR-010)

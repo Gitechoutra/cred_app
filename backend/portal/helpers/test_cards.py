@@ -35,13 +35,8 @@ class Scenario:
     INSUFFICIENT_LIMIT = 'INSUFFICIENT_LIMIT'
     PENDING = 'PENDING'
     TOKEN_EXPIRED = 'TOKEN_EXPIRED'
-    #: Charged, then refused downstream, so the reversal and refund path runs.
-    SETTLEMENT_FAIL = 'SETTLEMENT_FAIL'
 
-    CHOICES = [
-        SUCCESS, DECLINE, INSUFFICIENT_LIMIT, PENDING, TOKEN_EXPIRED,
-        SETTLEMENT_FAIL,
-    ]
+    CHOICES = [SUCCESS, DECLINE, INSUFFICIENT_LIMIT, PENDING, TOKEN_EXPIRED]
 
 
 #: The catalogue. Every number is Luhn-valid, so client-side card validation
@@ -106,16 +101,6 @@ TEST_CARDS = [
         'issuer_bank': 'Kotak Mahindra',
         'brand_color': '#ED1C24',
         'limit': Decimal('75000.00'),
-    },
-    {
-        'number': '5105105105105100',
-        'scenario': Scenario.SETTLEMENT_FAIL,
-        'label': 'Charge succeeds, settlement fails',
-        'description': 'The card is charged but the payment fails to settle, so the reversal and refund path runs.',
-        'network': 'MASTERCARD',
-        'issuer_bank': 'IndusInd Bank',
-        'brand_color': '#7B2D8E',
-        'limit': Decimal('120000.00'),
     },
 ]
 
@@ -243,7 +228,6 @@ _SIMULATION_TOKENS = {
     # SIMDECLINE refuses at order creation and never reaches a payment screen.
     Scenario.DECLINE: 'SIMAUTHDECL',
     Scenario.PENDING: 'SIMTIMEOUT',
-    Scenario.SETTLEMENT_FAIL: 'SIMPAYOUTFAIL',
     Scenario.TOKEN_EXPIRED: 'SIMTOKENEXP',
 }
 

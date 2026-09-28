@@ -92,9 +92,6 @@ _CATALOG = {
     'ERR-005': (ErrorType.NETWORK,
                 'The payment gateway did not respond in time. We are confirming '
                 'what happened before anything is charged again.'),
-    'ERR-006': (ErrorType.GATEWAY,
-                'Your card was charged but the transfer to your bank could not '
-                'be completed. The amount is being returned to your card.'),
     'ERR-007': (ErrorType.DUPLICATE,
                 'This payment has already been made.'),
     'ERR-008': (ErrorType.INSUFFICIENT,
@@ -111,7 +108,7 @@ _CATALOG = {
 
     # -- internal --------------------------------------------------------
     'LIMIT_EXCEEDED': (ErrorType.LIMIT,
-                       'This amount is above your transfer limit.'),
+                       'This amount is above your limit.'),
     'VALIDATION_ERROR': (ErrorType.INSTRUMENT,
                          'Some of the payment details were not valid.'),
     'KYC_REQUIRED': (ErrorType.COMPLIANCE,

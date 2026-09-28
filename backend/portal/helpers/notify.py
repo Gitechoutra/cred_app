@@ -34,19 +34,6 @@ _MATRIX = {
         [NotificationChannel.IN_APP, NotificationChannel.PUSH, NotificationChannel.SMS],
         NotificationPriority.HIGH,
     ),
-    NotificationEvent.TRANSFER_INITIATED: (
-        [NotificationChannel.IN_APP, NotificationChannel.PUSH],
-        NotificationPriority.MEDIUM,
-    ),
-    NotificationEvent.TRANSFER_SUCCEEDED: (
-        [NotificationChannel.IN_APP, NotificationChannel.PUSH,
-         NotificationChannel.SMS, NotificationChannel.EMAIL],
-        NotificationPriority.HIGH,
-    ),
-    NotificationEvent.TRANSFER_FAILED: (
-        [NotificationChannel.IN_APP, NotificationChannel.PUSH, NotificationChannel.SMS],
-        NotificationPriority.HIGH,
-    ),
     NotificationEvent.EMI_DUE_T7: (
         [NotificationChannel.PUSH, NotificationChannel.IN_APP],
         NotificationPriority.LOW,
@@ -103,20 +90,6 @@ _COPY = {
         'Card linked',
         'Card ending in {last4} was successfully linked to your CashU account. '
         'If this was not you, lock your account.',
-    ),
-    NotificationEvent.TRANSFER_INITIATED: (
-        'Transfer processing',
-        'Transfer of Rs. {amount} to A/c ending {account} is processing.',
-    ),
-    NotificationEvent.TRANSFER_SUCCEEDED: (
-        'Transfer successful',
-        'Transfer of Rs. {amount} to A/c ending {account} successful. '
-        'IMPS UTR: {utr}. Receipt attached.',
-    ),
-    NotificationEvent.TRANSFER_FAILED: (
-        'Transfer failed',
-        'Transfer of Rs. {amount} failed. Card charge reversed to your issuer '
-        'bank. SLA: T+2 days.',
     ),
     NotificationEvent.EMI_DUE_T7: (
         'EMI due in 7 days',

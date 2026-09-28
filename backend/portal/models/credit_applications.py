@@ -96,10 +96,6 @@ class CreditApplications(db.Model, TimestampMixin, CRUDMixin):
     employment_type = db.Column(db.String(20), nullable=False)
     monthly_income = db.Column(db.Numeric(12, 2), nullable=False)
     existing_emi_outflow = db.Column(db.Numeric(12, 2), default=0, nullable=False)
-    #: Retired. Applicants used to name the limit they wanted; the limit is now
-    #: decided entirely from salary and credit score. Kept only so older
-    #: applications still read back as they were made. Nothing writes it.
-    requested_limit = db.Column(db.Numeric(12, 2), nullable=True)
 
     # -- Employment -------------------------------------------------------
     #: Employer, or the business name for the self-employed. Required for both;
