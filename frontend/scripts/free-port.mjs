@@ -87,13 +87,30 @@ for (const pid of pids) {
   const name = processName(pid);
 
   if (name.toLowerCase().includes('docker')) {
+    // Most likely CashU's own frontend container from an older
+    // docker-compose.yml, which published it on 3000 (it is on 8080 now) and
+    // restarts with Docker. That one is safe to stop - `docker compose up -d`
+    // brings it back on its new port. Any other container is left alone.
+    const containers = run(`docker ps --filter publish=${PORT} --format "{{.Names}}"`)
+      .split('\n')
+      .map((c) => c.trim())
+      .filter(Boolean);
+    const ours = containers.filter((c) => c.startsWith('cashu-'));
+
+    if (ours.length && ours.length === containers.length) {
+      for (const container of ours) run(`docker stop ${container}`);
+      freed += 1;
+      console.log(
+        `  Freed port ${PORT} — stopped the old Docker container ${ours.join(', ')}.\n` +
+          '  (The Docker stack now runs on 8080; `docker compose up -d` recreates it there.)',
+      );
+      continue;
+    }
+
     console.warn(
-      `\n  Port ${PORT} is held by Docker (PID ${pid}) - the cashu-frontend container\n` +
-        '  from an older docker-compose.yml, which published it on 3000.\n' +
-        '  From the repo root, either recreate it on its new port (8080):\n' +
-        '      docker compose up -d\n' +
-        '  or stop it:\n' +
-        '      docker compose stop frontend\n',
+      `\n  Port ${PORT} is held by Docker (PID ${pid})` +
+        (containers.length ? `, container ${containers.join(', ')}.\n` : '.\n') +
+        '  Leaving it alone — stop that container, or change the port in vite.config.js.\n',
     );
     continue;
   }
