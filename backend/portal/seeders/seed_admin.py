@@ -53,15 +53,38 @@ def seed_admin():
     if not (mpin.isdigit() and len(mpin) == 6):
         raise RuntimeError('ADMIN_SEED_MPIN must be 6 digits.')
 
+    email = (os.getenv('ADMIN_SEED_EMAIL') or '').strip() or None
+
     existing = Users.query.filter_by(phone=phone).first()
     if existing:
         _sync(existing, mpin)
         return
 
+    # A new ADMIN_SEED_PHONE with the same ADMIN_SEED_EMAIL is the existing
+    # administrator changing number, not a second administrator - creating one
+    # would also collide with the first on the unique email.
+    holder = Users.query.filter_by(email=email).first() if email else None
+    if holder:
+        if not holder.is_admin:
+            logger.error(
+                f'[Seeders] seed_admin: ADMIN_SEED_EMAIL {email} belongs to a '
+                'non-admin account. The administrator was not created or updated.'
+            )
+            return
+        old = holder.phone
+        holder.phone = phone
+        db.session.commit()
+        logger.warning(
+            f'[Seeders] seed_admin: administrator {email} moved from '
+            f'******{old[-4:]} to ******{phone[-4:]} (ADMIN_SEED_PHONE in .env).'
+        )
+        _sync(holder, mpin)
+        return
+
     admin = Users(
         role_id=role.role_id,
         phone=phone,
-        email=os.getenv('ADMIN_SEED_EMAIL') or None,
+        email=email,
         full_name=os.getenv('ADMIN_SEED_NAME') or 'CashU Administrator',
         mpin_hash=hash_secret(mpin),
         kyc_tier=KYCTier.FULL,
