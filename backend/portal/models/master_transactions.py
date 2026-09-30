@@ -22,6 +22,11 @@ class TransactionType:
     CREDIT_REFUND = "CREDIT_REFUND"
     #: A late payment fee charged on an overdue statement.
     CREDIT_LATE_FEE = "CREDIT_LATE_FEE"
+    #: Pay Bills: credit drawn for a declared bill and paid out to the
+    #: holder's own verified bank account. Its own type, not a purchase,
+    #: because the destination is a bank account rather than a merchant and
+    #: it carries a fee and GST that a purchase never does.
+    CREDIT_BILL_PAY = "CREDIT_BILL_PAY"
 
     #: Retired with the credit-to-bank transfer product. The ledger is
     #: append-only, so rows of this type still exist and must still validate.
@@ -31,7 +36,7 @@ class TransactionType:
         EMI_MANUAL_PAY, EMI_AUTO_PAY, FEE_DEBIT, REVERSAL_REFUND, PENNY_DROP,
         QR_UPI_PAYMENT,
         CREDIT_PURCHASE, CREDIT_BILL_PAYMENT, CREDIT_REFUND, CREDIT_LATE_FEE,
-        CARD_TO_BANK_TRANSFER,
+        CREDIT_BILL_PAY, CARD_TO_BANK_TRANSFER,
     ]
 
 

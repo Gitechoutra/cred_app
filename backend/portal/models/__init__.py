@@ -59,6 +59,10 @@ def init_app(app):
             CreditTransactions, CreditTransactionType, CreditTransactionStatus,
             MerchantCategory,
         )
+        # Pay Bills after the credit line and bank accounts it points at.
+        from .bill_payments import (  # noqa: F401
+            BillPayments, BillPaymentStatus, BillCategory, BillPurpose,
+        )
 
         # -- EMI -----------------------------------------------------------
         from .emi_providers import EMIProviders, ProviderIntegrationMode

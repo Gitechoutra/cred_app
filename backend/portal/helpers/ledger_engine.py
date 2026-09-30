@@ -518,6 +518,64 @@ def entries_for_late_fee(amount, card_ref):
     ]
 
 
+def entries_for_bill_pay_draw(bill_amount, fee, gst, card_ref, bank_ref):
+    """
+    Pay Bills, first leg: the credit line is drawn for bill + fee + GST.
+
+    The holder now owes the platform the total. Of that, the bill is owed onward
+    to the holder's own bank account until the payout leg moves it, the fee is
+    earned, and the GST on the fee is owed to the state. A zero fee or GST posts
+    no line rather than an empty one.
+    """
+    total = money(bill_amount) + money(fee) + money(gst)
+    entries = [
+        {
+            'account': Account.CREDIT_RECEIVABLE,
+            'debit': total,
+            'narration': f'Pay Bills draw on credit line {card_ref}',
+        },
+        {
+            'account': Account.USER_PAYABLE,
+            'credit': money(bill_amount),
+            'narration': f'Bill amount owed to {bank_ref}',
+        },
+    ]
+    if money(fee) > 0:
+        entries.append({
+            'account': Account.FEE_INCOME,
+            'credit': money(fee),
+            'narration': 'Pay Bills processing fee',
+        })
+    if money(gst) > 0:
+        entries.append({
+            'account': Account.GST_PAYABLE,
+            'credit': money(gst),
+            'narration': 'GST on Pay Bills processing fee',
+        })
+    return entries
+
+
+def entries_for_bill_pay_payout(bill_amount, bank_ref):
+    """
+    Pay Bills, second leg: the bill amount is handed to the payout partner.
+
+    Posted against the draw's transaction with post_entries, so the holder sees
+    one payment in their history while the ledger keeps both legs.
+    """
+    return [
+        {
+            'account': Account.USER_PAYABLE,
+            'debit': money(bill_amount),
+            'narration': f'Paid out to {bank_ref}',
+        },
+        {
+            'account': Account.PAYOUT_CLEARING,
+            'credit': money(bill_amount),
+            'narration': 'Pay Bills payout with partner',
+        },
+    ]
+
+
 def entries_for_penny_drop(amount, bank_ref):
     """The 1 INR verification debit - a real payout, so it is a real posting."""
     return [

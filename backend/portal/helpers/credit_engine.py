@@ -2149,6 +2149,240 @@ def refund(*, purchase_txn: CreditTransactions, amount=None,
     return record
 
 
+# ── Pay Bills ──────────────────────────────────────────────────────────────
+#
+# Credit drawn for a declared bill and paid out to the holder's own verified
+# bank account. bill_pay_engine owns the request's lifecycle - eligibility,
+# pricing, consent, OTP, the payout and its status - and calls in here only for
+# the two steps that move the balance, because this module is the only thing
+# permitted to.
+#
+#   draw_for_bill_pay     takes bill + fee + GST off available credit, under the
+#                         same lock, limit check and velocity caps as a purchase
+#   restore_bill_pay      gives the whole draw back when the payout fails or the
+#                         bank returns it
+
+def draw_for_bill_pay(*, account: CreditAccounts, bill_amount, fee, gst,
+                      merchant_category: str, description: str, bank_ref: str,
+                      idempotency_key: str):
+    """
+    Draw the credit line for a Pay Bills request.
+
+    Returns (credit_transaction, master_transaction). The master row is left
+    PROCESSING: the draw is certain, the payout is not, and History must not
+    call it complete until the payout is confirmed.
+
+    Counted as a PURCHASE on the line, so the daily and monthly spend caps and
+    the statement treat it exactly like any other use of the credit. The total
+    - fee and GST included - is what is checked against available credit.
+    """
+    bill_amount, fee, gst = money(bill_amount), money(fee), money(gst)
+    total = bill_amount + fee + gst
+    if bill_amount <= ZERO:
+        raise CreditError(
+            ErrorCode.VALIDATION_ERROR, 'Amount must be greater than zero.',
+        )
+
+    existing = CreditTransactions.query.filter_by(
+        idempotency_key=idempotency_key,
+    ).first()
+    if existing:
+        raise DuplicateSpend(existing)
+
+    try:
+        with ledger_engine.atomic():
+            locked = _lock(account.credit_account_id)
+
+            if not locked.can_spend:
+                raise CreditError(
+                    ErrorCode.FORBIDDEN,
+                    _not_spendable_message(locked.status),
+                    recovery=_not_spendable_recovery(locked.status),
+                )
+
+            if total > money(locked.available_credit):
+                raise CreditError(
+                    'INSUFFICIENT_CREDIT',
+                    f'This payment needs Rs. {total:,.2f} including fees, but only '
+                    f'Rs. {money(locked.available_credit):,.2f} of your credit '
+                    f'limit is available.',
+                    recovery='Enter a smaller amount, or pay your card bill to '
+                             'free up credit.',
+                )
+
+            _check_velocity(locked, total)
+
+            outstanding = money(locked.current_outstanding) + total
+            available = money(locked.credit_limit) - outstanding
+            _assert_invariant(locked, available, outstanding)
+
+            txn = ledger_engine.post(
+                user_id=locked.user_id,
+                transaction_type=TransactionType.CREDIT_BILL_PAY,
+                gross_amount=total,
+                net_amount=bill_amount,
+                fee_amount=fee,
+                tax_amount=gst,
+                source_type=SourceType.CREDIT_LINE,
+                source_masked_ref=locked.masked_number,
+                dest_type=DestType.BANK_ACCOUNT_IMPS,
+                dest_masked_ref=bank_ref[:150],
+                gateway_provider=GatewayProvider.SANDBOX,
+                idempotency_key=idempotency_key,
+                status=TransactionStatus.PROCESSING,
+                entries=ledger_engine.entries_for_bill_pay_draw(
+                    bill_amount, fee, gst, locked.masked_number, bank_ref,
+                ),
+                commit=False,
+            )
+
+            locked.current_outstanding = outstanding
+            locked.available_credit = available
+
+            record = CreditTransactions(
+                credit_account_id=locked.credit_account_id,
+                user_id=locked.user_id,
+                transaction_id=txn.transaction_id,
+                transaction_type=CreditTransactionType.PURCHASE,
+                status=CreditTransactionStatus.SUCCEEDED,
+                amount=total,
+                balance_after=outstanding,
+                available_after=available,
+                merchant_name=f'Pay Bills · {bank_ref}'[:120],
+                merchant_category=merchant_category,
+                description=(description or '')[:200] or None,
+                idempotency_key=idempotency_key,
+                settled_at=utcnow(),
+            )
+            db.session.add(record)
+    except IntegrityError:
+        db.session.rollback()
+        original = CreditTransactions.query.filter_by(
+            idempotency_key=idempotency_key,
+        ).first()
+        if original:
+            raise DuplicateSpend(original)
+        raise
+
+    audit.record(
+        action='CREDIT_BILL_PAY_DRAW',
+        entity_type='CreditTransactions',
+        entity_id=record.credit_transaction_id,
+        actor_user_id=record.user_id,
+        after={
+            'bill_amount': float(bill_amount),
+            'fee': float(fee),
+            'gst': float(gst),
+            'total': float(total),
+            'destination': bank_ref,
+            'outstanding': float(record.balance_after),
+        },
+    )
+    return record, txn
+
+
+def restore_bill_pay(*, draw: CreditTransactions, reason: str, code: str,
+                     returned: bool, idempotency_key: str) -> CreditTransactions:
+    """
+    Give a Pay Bills draw back to the credit line, in full.
+
+    `returned` distinguishes the two ways it happens. False: the payout never
+    completed, so the draw is marked FAILED in History. True: it completed and
+    the bank sent it back, so it is marked REVERSED. Either way the fee and GST
+    are restored with the bill - the holder is not charged for a payment that
+    did not reach them.
+
+    Idempotent: a second call for the same draw returns the first restoring row.
+    The poller and a manual status check can both arrive here.
+    """
+    if draw.status == CreditTransactionStatus.REVERSED:
+        existing = CreditTransactions.query.filter_by(
+            reverses_credit_transaction_id=draw.credit_transaction_id,
+            transaction_type=CreditTransactionType.REFUND,
+        ).first()
+        if existing:
+            return existing
+
+    master = None
+    if draw.transaction_id:
+        from portal.models.master_transactions import MasterTransactions
+        master = MasterTransactions.query.filter_by(
+            transaction_id=draw.transaction_id,
+        ).first()
+
+    amount = money(draw.amount)
+
+    try:
+        with ledger_engine.atomic():
+            locked = _lock(draw.credit_account_id)
+
+            outstanding = money(locked.current_outstanding) - amount
+            available = money(locked.credit_limit) - outstanding
+
+            reversal = None
+            if master is not None:
+                reversal = ledger_engine.reverse(
+                    master, reason=reason, idempotency_key=idempotency_key,
+                    commit=False,
+                )
+                reversal.status = TransactionStatus.SUCCEEDED
+                # reverse() marks the original REVERSED. A payout that never
+                # completed did not reverse anything - it failed - and History
+                # should say so, with the reason.
+                master.status = (
+                    TransactionStatus.REVERSED if returned else TransactionStatus.FAILED
+                )
+                master.failure_code = code[:50]
+                master.failure_reason = reason[:500]
+
+            locked.current_outstanding = outstanding
+            locked.available_credit = available
+
+            record = CreditTransactions(
+                credit_account_id=locked.credit_account_id,
+                user_id=locked.user_id,
+                transaction_id=reversal.transaction_id if reversal else None,
+                transaction_type=CreditTransactionType.REFUND,
+                status=CreditTransactionStatus.SUCCEEDED,
+                amount=amount,
+                balance_after=outstanding,
+                available_after=available,
+                merchant_name=draw.merchant_name,
+                merchant_category=draw.merchant_category,
+                description=(
+                    'Pay Bills returned by bank' if returned
+                    else 'Pay Bills payout failed - credit restored'
+                ),
+                idempotency_key=idempotency_key,
+                reverses_credit_transaction_id=draw.credit_transaction_id,
+                settled_at=utcnow(),
+            )
+            db.session.add(record)
+            draw.status = CreditTransactionStatus.REVERSED
+    except IntegrityError:
+        db.session.rollback()
+        original = CreditTransactions.query.filter_by(
+            idempotency_key=idempotency_key,
+        ).first()
+        if original:
+            return original
+        raise
+
+    audit.record(
+        action='CREDIT_BILL_PAY_RESTORE',
+        entity_type='CreditTransactions',
+        entity_id=record.credit_transaction_id,
+        actor_user_id=record.user_id,
+        after={
+            'restored': float(amount),
+            'returned_by_bank': returned,
+            'reason': reason,
+            'outstanding': float(record.balance_after),
+        },
+    )
+    return record
+
+
 # ── Internals ──────────────────────────────────────────────────────────────
 
 def _lock(credit_account_id: str) -> CreditAccounts:

@@ -12,6 +12,7 @@ from flask_jwt_extended import jwt_required
 from flask_restx import Resource
 
 from portal import db
+from portal.helpers import bill_pay_engine
 from portal.helpers.helpers import iso, success, to_float
 from portal.helpers.jwt import active_user_required, current_user
 from portal.models.auto_pay_mandates import AutoPayMandates, MandateStatus
@@ -124,6 +125,7 @@ class Dashboard(Resource):
         recent = MasterTransactions.query.filter_by(
             user_id=user.user_id
         ).order_by(MasterTransactions.created_on.desc()).limit(5).all()
+        bills = bill_pay_engine.summaries_for([t.transaction_id for t in recent])
 
         verified_accounts = BankAccounts.query.filter_by(
             user_id=user.user_id,
@@ -202,6 +204,7 @@ class Dashboard(Resource):
                 'destination': t.dest_masked_ref,
                 'created_on': iso(t.created_on),
                 'utr': t.bank_rrn_utr,
+                'bill_payment': bills.get(t.transaction_id),
             } for t in recent],
 
             'quick_actions': {

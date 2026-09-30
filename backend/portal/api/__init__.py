@@ -35,6 +35,7 @@ def init_app(app):
     from portal.routes.dashboard import ns as dashboard_ns
     from portal.routes.cards import ns as cards_ns
     from portal.routes.credit import ns as credit_ns
+    from portal.routes.bill_payments import ns as bill_payments_ns
     from portal.routes.bank_accounts import ns as bank_accounts_ns
     from portal.routes.emi import ns as emi_ns
     from portal.routes.emi_payments import ns as emi_payments_ns
@@ -53,6 +54,7 @@ def init_app(app):
     api.add_namespace(dashboard_ns, path='/dashboard')
     api.add_namespace(cards_ns, path='/cards')
     api.add_namespace(credit_ns, path='/credit')
+    api.add_namespace(bill_payments_ns, path='/bill-payments')
     api.add_namespace(bank_accounts_ns, path='/bank-accounts')
     api.add_namespace(emi_ns, path='/emi')
     api.add_namespace(emi_payments_ns, path='/emi-payments')

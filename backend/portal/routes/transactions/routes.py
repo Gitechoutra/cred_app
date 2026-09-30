@@ -8,6 +8,7 @@ append-only, and corrections are compensating entries posted by the engines.
 from flask_jwt_extended import jwt_required
 from flask_restx import Resource, reqparse
 
+from portal.helpers import bill_pay_engine
 from portal.helpers.helpers import (
     ErrorCode, failure, iso, paginated, success, to_float,
 )
@@ -30,7 +31,8 @@ list_parser.add_argument('to_date', type=str, required=False, location='args')
 list_parser.add_argument('search', type=str, required=False, location='args')
 
 
-def transaction_dict(txn: MasterTransactions, detailed: bool = False) -> dict:
+def transaction_dict(txn: MasterTransactions, detailed: bool = False,
+                     bill_payments: dict = None) -> dict:
     data = {
         'transaction_id': txn.transaction_id,
         'type': txn.transaction_type,
@@ -50,6 +52,11 @@ def transaction_dict(txn: MasterTransactions, detailed: bool = False) -> dict:
         'failure_reason': txn.failure_reason,
         'created_on': iso(txn.created_on),
     }
+
+    if txn.transaction_type == TransactionType.CREDIT_BILL_PAY:
+        if bill_payments is None:
+            bill_payments = bill_pay_engine.summaries_for([txn.transaction_id])
+        data['bill_payment'] = bill_payments.get(txn.transaction_id)
 
     if detailed:
         data['gateway_provider'] = txn.gateway_provider
@@ -118,8 +125,12 @@ class TransactionList(Resource):
             MasterTransactions.created_on.desc()
         ).paginate(page=page, per_page=per_page, error_out=False)
 
+        bills = bill_pay_engine.summaries_for(
+            [t.transaction_id for t in pagination.items
+             if t.transaction_type == TransactionType.CREDIT_BILL_PAY]
+        )
         return paginated(
-            [transaction_dict(t) for t in pagination.items],
+            [transaction_dict(t, bill_payments=bills) for t in pagination.items],
             page, per_page, pagination.total,
             filters={
                 'types': TransactionType.CHOICES,

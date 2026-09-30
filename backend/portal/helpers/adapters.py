@@ -394,6 +394,98 @@ def penny_drop(
     return {'ok': False, 'error': result['error']}
 
 
+# ── Payouts (Pay Bills) ────────────────────────────────────────────────────
+# The rail that pays a Pay Bills draw out to the holder's verified account.
+#
+# Sandbox only. The live IMPS payout integration was removed with the
+# credit-to-bank product (5b64317), and Pay Bills does not bring it back: a real
+# payout needs the licensed partner PRD open decision #1 has not named. So the
+# live branch refuses rather than guessing at an API - a deployment that turns
+# the sandbox off gets a clear "unavailable", never a simulated success.
+#
+# The sandbox is stateless, so the outcome a later status poll should report is
+# carried in the payout reference itself.
+
+#: Development outcomes for a payout, chosen by the caller.
+PAYOUT_OUTCOMES = ('SUCCESS', 'FAIL', 'PENDING', 'PENDING_FAIL', 'REVERSE')
+
+_PAYOUT_TAG = {
+    'PENDING': 'PENDOK',
+    'PENDING_FAIL': 'PENDFAIL',
+    'REVERSE': 'REVERSE',
+}
+
+
+def payout_provider() -> str:
+    return 'SANDBOX' if _use_sandbox() else 'UNAVAILABLE'
+
+
+def dispatch_payout(*, reference: str, account_number: str, ifsc: str,
+                    beneficiary_name: str, amount, outcome: str = 'SUCCESS') -> dict:
+    """
+    Hand a payout to the rail.
+
+    Returns {'ok': True, 'status': 'SUCCESS'|'PENDING', 'payout_reference',
+    'utr'} when the rail accepted it, or {'ok': False, 'code', 'error'} when it
+    refused. A refusal means no money left: the caller restores the credit.
+    """
+    if not _use_sandbox():
+        return {
+            'ok': False,
+            'code': 'PAYOUT_RAIL_UNAVAILABLE',
+            'error': 'Bank payouts are not available yet.',
+        }
+
+    outcome = outcome if outcome in PAYOUT_OUTCOMES else 'SUCCESS'
+    tag = _PAYOUT_TAG.get(outcome, 'OK')
+    payout_reference = f'po_sbx_{tag}_{uuid.uuid4().hex[:12]}'
+
+    if outcome == 'FAIL':
+        return {
+            'ok': False,
+            'code': 'BENEFICIARY_BANK_DECLINED',
+            'error': 'The beneficiary bank declined the credit. The account may be '
+                     'frozen or closed.',
+            'payout_reference': payout_reference,
+        }
+
+    if outcome in ('PENDING', 'PENDING_FAIL'):
+        return {
+            'ok': True, 'status': 'PENDING',
+            'payout_reference': payout_reference, 'utr': None,
+        }
+
+    # SUCCESS and REVERSE both land first; REVERSE is returned by the bank later.
+    return {
+        'ok': True, 'status': 'SUCCESS',
+        'payout_reference': payout_reference, 'utr': _fake_utr(),
+    }
+
+
+def get_payout_status(payout_reference: str) -> dict:
+    """
+    Ask the rail what became of a payout.
+
+    Returns {'ok': True, 'status': 'SUCCESS'|'PENDING'|'FAILED'|'REVERSED',
+    'utr', 'reason'}.
+    """
+    if not _use_sandbox() or not (payout_reference or '').startswith('po_sbx_'):
+        return {'ok': False, 'error': 'Payout status is not available.'}
+
+    tag = payout_reference.split('_')[2] if payout_reference.count('_') >= 3 else 'OK'
+    if tag == 'PENDFAIL':
+        return {
+            'ok': True, 'status': 'FAILED', 'utr': None,
+            'reason': 'The beneficiary bank did not accept the credit in time.',
+        }
+    if tag == 'REVERSE':
+        return {
+            'ok': True, 'status': 'REVERSED', 'utr': None,
+            'reason': 'The beneficiary bank returned the credit.',
+        }
+    return {'ok': True, 'status': 'SUCCESS', 'utr': _fake_utr(), 'reason': None}
+
+
 def lookup_ifsc(ifsc: str) -> dict:
     """Resolve an IFSC to bank and branch, identifying official bank/institution names."""
     from portal.helpers import bank_ifsc_service

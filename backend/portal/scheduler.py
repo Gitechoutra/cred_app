@@ -82,6 +82,16 @@ def _poll_credit_bill_payments():
     return credit_engine.poll_processing_bill_payments()
 
 
+def _poll_bill_pay_payouts():
+    """
+    Settle Pay Bills payouts still in flight, watch recent ones for a bank
+    return, and expire requests never authenticated. Frequent for the same
+    reason as the card bill poll: someone is usually waiting on the screen.
+    """
+    from portal.helpers import bill_pay_engine
+    return bill_pay_engine.poll()
+
+
 # -- Credit line billing ---------------------------------------------------
 
 def _cut_credit_statements():
@@ -260,6 +270,8 @@ def init_scheduler(app):
         ('payment_status_poll', _poll_pending_payments,
          IntervalTrigger(minutes=15)),
         ('credit_bill_payment_poll', _poll_credit_bill_payments,
+         IntervalTrigger(minutes=2)),
+        ('bill_pay_payout_poll', _poll_bill_pay_payouts,
          IntervalTrigger(minutes=2)),
 
         # -- Outbox ------------------------------------------------------

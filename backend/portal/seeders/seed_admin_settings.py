@@ -51,6 +51,26 @@ SETTINGS = [
      'A credit limit above this amount requires full KYC verification.',
      '1000', '200000', True),
 
+    # -- Pay Bills ---------------------------------------------------------
+    (Key.BILL_PAY_FEE_PERCENT, '1.5', D.DECIMAL, 'PRICING',
+     'Pay Bills Processing Fee (%)',
+     'Charged on the bill amount of a Pay Bills draw. GST applies to the fee.',
+     '0', '5', True),
+    (Key.BILL_PAY_MIN_AMOUNT, '100', D.DECIMAL, 'CREDIT',
+     'Pay Bills Minimum', 'Smallest bill that may be paid from credit.',
+     '1', '10000', True),
+    (Key.BILL_PAY_MAX_PER_TXN, '50000', D.DECIMAL, 'CREDIT',
+     'Pay Bills Maximum per Bill',
+     'Largest single bill that may be paid from credit.',
+     '1000', '500000', True),
+    (Key.BILL_PAY_MAX_PER_DAY, '3', D.INTEGER, 'RISK',
+     'Pay Bills per Day', 'Pay Bills requests a holder may make per day.',
+     '1', '20', True),
+    (Key.BILL_PAY_FULL_KYC_ABOVE, '10000', D.DECIMAL, 'COMPLIANCE',
+     'Pay Bills Full KYC Above',
+     'A bill above this amount needs full KYC before credit reaches a bank.',
+     '1000', '200000', True),
+
     # -- Statement and billing ---------------------------------------------
     (Key.STATEMENT_CYCLE_DAY, '1', D.INTEGER, 'BILLING',
      'Statement Cycle Day',

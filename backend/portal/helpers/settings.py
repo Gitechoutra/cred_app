@@ -38,6 +38,19 @@ class Key:
     #: A credit limit above this needs full KYC, not just minimum KYC.
     FULL_KYC_REQUIRED_ABOVE = 'FULL_KYC_REQUIRED_ABOVE'
 
+    # -- Pay Bills ------------------------------------------------------------
+    #: Processing fee on a Pay Bills draw, as a percentage of the bill. GST
+    #: (GST_PERCENT) is charged on this fee, never on the bill.
+    BILL_PAY_FEE_PERCENT = 'BILL_PAY_FEE_PERCENT'
+    BILL_PAY_MIN_AMOUNT = 'BILL_PAY_MIN_AMOUNT'
+    #: Largest single bill that may be paid from credit.
+    BILL_PAY_MAX_PER_TXN = 'BILL_PAY_MAX_PER_TXN'
+    #: Pay Bills requests allowed per calendar day (IST-agnostic UTC day).
+    BILL_PAY_MAX_PER_DAY = 'BILL_PAY_MAX_PER_DAY'
+    #: A bill above this needs full KYC, not minimum KYC (PRD section 18: full
+    #: KYC before credit reaches a bank account above 10,000).
+    BILL_PAY_FULL_KYC_ABOVE = 'BILL_PAY_FULL_KYC_ABOVE'
+
     # -- Statement and billing ----------------------------------------------
     #: Day of the month the statement is cut. Due date follows it by the grace
     #: period below.
@@ -96,6 +109,11 @@ _DEFAULTS = {
     Key.CREDIT_DAILY_SPEND_LIMIT: '100000',
     Key.CREDIT_MONTHLY_SPEND_LIMIT: '250000',
     Key.FULL_KYC_REQUIRED_ABOVE: '50000',
+    Key.BILL_PAY_FEE_PERCENT: '1.5',
+    Key.BILL_PAY_MIN_AMOUNT: '100',
+    Key.BILL_PAY_MAX_PER_TXN: '50000',
+    Key.BILL_PAY_MAX_PER_DAY: '3',
+    Key.BILL_PAY_FULL_KYC_ABOVE: '10000',
     Key.STATEMENT_CYCLE_DAY: '1',
     Key.STATEMENT_GRACE_DAYS: '18',
     Key.MINIMUM_DUE_PERCENT: '5',
