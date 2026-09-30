@@ -37,7 +37,7 @@ IFSC_INSTITUTION_MAP = {
         'city': 'Gurugram',
         'state': 'Haryana',
     },
-    'AXIS': {
+    'UTIB': {   # Axis Bank's IFSC prefix (UTI Bank, its former name)
         'bank_name': 'Axis Bank',
         'short_name': 'Axis',
         'type': 'PRIVATE_BANK',
@@ -166,7 +166,7 @@ IFSC_INSTITUTION_MAP = {
         'city': 'Chennai',
         'state': 'Tamil Nadu',
     },
-    'PAYT': {
+    'PYTM': {
         'bank_name': 'Paytm Payments Bank',
         'short_name': 'Paytm',
         'type': 'PAYMENTS_BANK',

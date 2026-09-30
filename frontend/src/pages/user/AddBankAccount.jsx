@@ -16,6 +16,9 @@ import { money } from '../../utils/format';
  * loudly, it sends money to a real stranger. CashU then verifies ownership by
  * depositing ₹1 and comparing the name the bank returns against the KYC name.
  */
+const IFSC_FORMAT_ERROR =
+  'IFSC is 11 characters: 4 letters, then 0, then 6 letters or digits (e.g. UTIB0000100).';
+
 export default function AddBankAccount() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -57,6 +60,12 @@ export default function AddBankAccount() {
     if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) {
       setBank(null);
       setMatchedAccount(null);
+      setLookingUp(false);
+      // Full length but the wrong shape: say so, or the disabled button is
+      // the only sign anything is wrong.
+      if (ifsc.length === 11) {
+        setErrors((current) => ({ ...current, ifsc_code: IFSC_FORMAT_ERROR }));
+      }
       return undefined;
     }
 
@@ -191,7 +200,15 @@ export default function AddBankAccount() {
                 ? `${bank.bank_name}${bank.branch ? ` · ${bank.branch}` : ''}`
                 : 'Found on your cheque book or bank app.'
             }
-            onChange={(event) => update('ifsc_code', event.target.value.toUpperCase().slice(0, 11))}
+            onChange={(event) =>
+              update('ifsc_code', event.target.value.replace(/[^a-z0-9]/gi, '').toUpperCase().slice(0, 11))
+            }
+            onBlur={() => {
+              const length = form.ifsc_code.length;
+              if (length > 0 && length < 11) {
+                setErrors((current) => ({ ...current, ifsc_code: IFSC_FORMAT_ERROR }));
+              }
+            }}
           />
 
           <div>
