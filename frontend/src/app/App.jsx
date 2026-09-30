@@ -20,6 +20,8 @@ import AdminLogin from '../pages/auth/AdminLogin';
 import Home from '../pages/user/Home';
 import Hub from '../pages/user/Hub';
 import ScanPay from '../pages/user/ScanPay';
+import PayBills from '../pages/paybills/PayBills';
+import PayBillStatus from '../pages/paybills/PayBillStatus';
 import Cards from '../pages/user/Cards';
 import CardDetail from '../pages/user/CardDetail';
 import CreditHome from '../pages/credit/CreditHome';
@@ -184,6 +186,10 @@ export default function App() {
       <Route path="/banks/add" element={<RequireAuth><Shell><AddBankAccount /></Shell></RequireAuth>} />
 
       <Route path="/scan" element={<RequireAuth><Shell><ScanPay /></Shell></RequireAuth>} />
+
+      {/* Pay Bills: the steps live in ?step=, the result and History detail at /:id. */}
+      <Route path="/pay-bills" element={<RequireAuth><Shell><PayBills /></Shell></RequireAuth>} />
+      <Route path="/pay-bills/:billPaymentId" element={<RequireAuth><Shell><PayBillStatus /></Shell></RequireAuth>} />
 
       <Route path="/emi" element={<RequireAuth><Shell><EmiList /></Shell></RequireAuth>} />
       <Route path="/emi/add" element={<RequireAuth><Shell><AddEmi /></Shell></RequireAuth>} />

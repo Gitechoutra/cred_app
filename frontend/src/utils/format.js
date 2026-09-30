@@ -178,6 +178,11 @@ const TRANSACTION_LABELS = {
   // Retired product. The ledger is append-only, so rows of this type still
   // exist and still need a label a support agent can read.
   CARD_TO_BANK_TRANSFER: 'Transfer to bank (retired)',
+  CREDIT_BILL_PAY: 'Bill payment',
+  CREDIT_PURCHASE: 'Card payment',
+  CREDIT_BILL_PAYMENT: 'Card bill payment',
+  CREDIT_REFUND: 'Refund to card',
+  CREDIT_LATE_FEE: 'Late fee',
 };
 
 export function transactionLabel(type) {

@@ -241,6 +241,7 @@ export function EmiRow({ emi, onClick }) {
 export function TransactionRow({ transaction, onClick }) {
   const tone = statusTone(transaction.status);
   const credit = transaction.type === 'REVERSAL_REFUND';
+  const bill = transaction.bill_payment;
 
   return (
     <button
@@ -268,10 +269,13 @@ export function TransactionRow({ transaction, onClick }) {
 
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-ink">
-          {transactionLabel(transaction.type)}
+          {/* A Pay Bills row names the bill, not the ledger type. */}
+          {bill ? bill.title : transactionLabel(transaction.type)}
         </p>
         <p className="truncate text-xs text-slate">
-          {transaction.destination || transaction.source}
+          {bill
+            ? `Credit → Bank · ${statusLabel(transaction.status === 'SUCCEEDED' ? 'SUCCESSFUL' : transaction.status)}`
+            : transaction.destination || transaction.source}
         </p>
       </div>
 
@@ -283,7 +287,9 @@ export function TransactionRow({ transaction, onClick }) {
           )}
         >
           {credit ? '+' : '−'}
-          {money(transaction.gross_amount ?? transaction.amount, { symbol: true }).replace('₹', '₹')}
+          {/* Pay Bills lists the bill amount; the fee and GST on top are on
+              its detail page as "credit utilised". */}
+          {money(bill ? bill.bill_amount : (transaction.gross_amount ?? transaction.amount), { symbol: true })}
         </p>
         <p className="text-2xs text-slate">{fmtDate(transaction.created_on, { withYear: false })}</p>
       </div>

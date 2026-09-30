@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom';
+import { Navigate, useParams } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
 import { PageHeader } from '../../components/layout/AppShell';
@@ -34,6 +34,12 @@ export default function TransactionDetail() {
         <EmptyState title="Transaction not found" />
       </div>
     );
+  }
+
+  // A Pay Bills row has its own detail page - bill, purpose, fee, bank and
+  // status - which is what History promises when the row is opened.
+  if (transaction.bill_payment?.bill_payment_id) {
+    return <Navigate to={`/pay-bills/${transaction.bill_payment.bill_payment_id}`} replace />;
   }
 
   const tone = statusTone(transaction.status);

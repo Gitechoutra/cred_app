@@ -6,6 +6,7 @@ import { CardTile, DueItem, EmiRow, TransactionRow } from '../../components/doma
 import {
   IconAlert,
   IconBank,
+  IconBill,
   IconCard,
   IconChart,
   IconCheck,
@@ -308,7 +309,9 @@ export default function Hub() {
           </span>
         </div>
 
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5 sm:gap-3">
+        {/* Six actions: one row on desktop, three a row on tablets, the
+            existing two-column grid on phones. */}
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-6">
           <QuickActionBtn
             icon={IconPay}
             title="Credit"
@@ -337,8 +340,14 @@ export default function Hub() {
           <QuickActionBtn
             icon={IconBank}
             title="Add Bank"
-            hint="Salary account"
+            hint="Payout account"
             onClick={() => navigate('/banks/add')}
+          />
+          <QuickActionBtn
+            icon={IconBill}
+            title="Pay Bills"
+            hint="Pay from credit"
+            onClick={() => navigate('/pay-bills')}
           />
         </div>
       </section>

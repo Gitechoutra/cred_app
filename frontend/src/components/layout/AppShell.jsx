@@ -443,6 +443,17 @@ export function IconReceipt(props) {
   );
 }
 
+/** A utility bill: a document with a rupee mark, for Pay Bills. */
+export function IconBill(props) {
+  return (
+    <svg {...base(props)}>
+      <path d="M6 3h9l4 4v14H6z" />
+      <path d="M15 3v4h4" />
+      <path d="M9.5 11h5M9.5 13.5h5M12.5 11c1.4 0 2 .9 2 1.9s-.8 1.6-2 1.6h-3l4 3" />
+    </svg>
+  );
+}
+
 export function IconLock(props) {
   return (
     <svg {...base(props)}>

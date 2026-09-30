@@ -343,6 +343,20 @@ export const endpoints = {
     currentStatement: () => api.get('/credit/statements/current'),
     statement: (id) => api.get(`/credit/statements/${id}`),
   },
+  // Pay Bills: credit drawn for a declared bill and paid out to the holder's
+  // own verified bank account. The server prices every request; nothing here
+  // sends a fee or a total.
+  billPay: {
+    eligibility: () => api.get('/bill-payments/eligibility'),
+    quote: (amount) => api.post('/bill-payments/quote', { amount }, { background: true }),
+    create: (data, key) => api.pay('/bill-payments', data, key),
+    resendOtp: (id) => api.post(`/bill-payments/${id}/otp`),
+    confirm: (id, data) => api.post(`/bill-payments/${id}/confirm`, data),
+    cancel: (id) => api.post(`/bill-payments/${id}/cancel`),
+    get: (id, opts = {}) => api.get(`/bill-payments/${id}`, opts),
+    byTransaction: (transactionId) => api.get(`/bill-payments/by-transaction/${transactionId}`),
+    list: (page = 1) => api.get(`/bill-payments?page=${page}`),
+  },
   qrPayments: {
     // The scanned string is validated server-side; the client never parses it.
     decode: (payload) => api.post('/qr-payments/decode', { payload }),

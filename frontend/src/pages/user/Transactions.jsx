@@ -11,6 +11,7 @@ import { date, money } from '../../utils/format';
 const FILTERS = [
   { value: '', label: 'All' },
   { value: 'EMI_MANUAL_PAY', label: 'EMIs' },
+  { value: 'CREDIT_BILL_PAY', label: 'Pay Bills' },
 ];
 
 export default function Transactions() {
@@ -94,7 +95,11 @@ export default function Transactions() {
                       <TransactionRow
                         key={transaction.transaction_id}
                         transaction={transaction}
-                        onClick={() => navigate(`/transactions/${transaction.transaction_id}`)}
+                        onClick={() => navigate(
+                          transaction.bill_payment
+                            ? `/pay-bills/${transaction.bill_payment.bill_payment_id}`
+                            : `/transactions/${transaction.transaction_id}`,
+                        )}
                       />
                     ))}
                   </Card>
