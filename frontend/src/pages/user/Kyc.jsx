@@ -232,9 +232,13 @@ export default function Kyc() {
                     label="Aadhaar number"
                     placeholder="1234 5678 9012"
                     inputMode="numeric"
-                    value={aadhaar}
-                    maxLength={12}
-                    onChange={(event) => setAadhaar(event.target.value.replace(/\D/g, ''))}
+                    // Shown as 1234 5678 9012; the state keeps the 12 bare
+                    // digits, which is what is validated and submitted.
+                    value={aadhaar.replace(/(\d{4})(?=\d)/g, '$1 ')}
+                    maxLength={14}
+                    onChange={(event) =>
+                      setAadhaar(event.target.value.replace(/\D/g, '').slice(0, 12))
+                    }
                   />
 
                   <FileField
