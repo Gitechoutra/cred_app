@@ -39,7 +39,7 @@ from portal.models.auto_pay_mandates import AutoPayMandates, MandateStatus
 from portal.models.bank_accounts import BankAccounts
 from portal.models.base import utcnow
 from portal.models.cards import Cards, CardStatus
-from portal.models.credit_accounts import CreditAccounts
+from portal.models.credit_accounts import CreditAccounts, CreditAccountStatus
 from portal.models.credit_applications import (
     ApplicationStatus, CreditApplications, IncomeProofType,
 )
@@ -163,7 +163,21 @@ class AdminDashboard(Resource):
             resolution=DiscrepancyResolution.OPEN
         ).count()
 
+        # Applications a person has to decide: KYC is done, the score is in.
+        credit_to_review = CreditApplications.query.filter_by(
+            status=ApplicationStatus.UNDER_REVIEW
+        ).count()
+
         return success({
+            'credit': {
+                'applications_to_review': credit_to_review,
+                'applications_kyc_pending': CreditApplications.query.filter_by(
+                    status=ApplicationStatus.KYC_PENDING
+                ).count(),
+                'active_accounts': CreditAccounts.query.filter_by(
+                    status=CreditAccountStatus.ACTIVE
+                ).count(),
+            },
             'users': {
                 'total': total_users,
                 'active': active_users,
@@ -201,11 +215,12 @@ class AdminDashboard(Resource):
                     penny_drop_status='VERIFIED', deleted_at=None
                 ).count(),
             },
-            'alerts': _operational_alerts(stuck, open_discrepancies, pending_kyc),
+            'alerts': _operational_alerts(stuck, open_discrepancies, pending_kyc,
+                                          credit_to_review),
         })
 
 
-def _operational_alerts(stuck, discrepancies, pending_kyc) -> list:
+def _operational_alerts(stuck, discrepancies, pending_kyc, credit_to_review=0) -> list:
     """Surface what actually needs someone's attention, worst first."""
     alerts = []
 
@@ -226,6 +241,12 @@ def _operational_alerts(stuck, discrepancies, pending_kyc) -> list:
             'severity': 'info',
             'message': f'{pending_kyc} KYC submission(s) are awaiting review.',
             'action': 'kyc',
+        })
+    if credit_to_review:
+        alerts.append({
+            'severity': 'warning',
+            'message': f'{credit_to_review} credit application(s) are waiting for a decision.',
+            'action': 'credit',
         })
 
     return alerts

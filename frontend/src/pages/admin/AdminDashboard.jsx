@@ -102,6 +102,39 @@ export default function AdminDashboard() {
         </div>
       </section>
 
+      {/* ── Credit applications ─────────────────────────────────────── */}
+      {data.credit && (
+        <section className="mb-5">
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate">
+            Credit
+          </h2>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <button
+              type="button"
+              onClick={() => navigate('/admin/credit')}
+              className="rounded-2xl text-left transition hover:shadow-card"
+            >
+              <StatCard
+                label="Applications to review"
+                value={data.credit.applications_to_review}
+                hint="Open the credit queue →"
+                tone={data.credit.applications_to_review > 0 ? 'alert' : 'neutral'}
+              />
+            </button>
+            <StatCard
+              label="Waiting on KYC"
+              value={data.credit.applications_kyc_pending}
+            />
+            <StatCard
+              label="Active credit lines"
+              value={data.credit.active_accounts}
+              tone="good"
+            />
+          </div>
+        </section>
+      )}
+
       {/* ── Users ───────────────────────────────────────────────────── */}
       <section className="mb-5">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate">
