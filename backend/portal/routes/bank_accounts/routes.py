@@ -347,44 +347,19 @@ class BankAccountDetail(Resource):
     @jwt_required()
     @active_user_required
     def delete(self, bank_account_id):
-        """Soft-delete an account, refusing while a mandate depends on it."""
-        user = current_user()
-        account = BankAccounts.query.filter_by(
-            bank_account_id=bank_account_id, user_id=user.user_id, deleted_at=None
-        ).first()
+        """
+        Refused: a linked bank account stays linked.
 
-        if not account:
-            return failure(ErrorCode.NOT_FOUND, 'Bank account not found.', 404)
-
-        from portal.models.auto_pay_mandates import AutoPayMandates, MandateStatus
-
-        active_mandates = AutoPayMandates.query.filter(
-            AutoPayMandates.bank_account_id == account.bank_account_id,
-            AutoPayMandates.status.in_(
-                [MandateStatus.ACTIVE, MandateStatus.PENDING_AFA]
-            ),
-        ).count()
-        if active_mandates:
-            return failure(
-                ErrorCode.CONFLICT,
-                'An auto-pay mandate uses this account. Please reassign the '
-                'mandate before removing it.',
-                409,
-            )
-
-        account.deleted_at = utcnow()
-        account.is_active = False
-        account.is_primary = False
-        db.session.commit()
-
-        audit.record(
-            action='BANK_ACCOUNT_REMOVED',
-            entity_type='BankAccounts',
-            entity_id=account.bank_account_id,
-            actor_user_id=str(user.user_id),
+        Mandates, credit applications and payouts all point at the account, so
+        it is never taken away from under them. Answered explicitly rather
+        than left as a 405, so an old client is told why.
+        """
+        return failure(
+            ErrorCode.FORBIDDEN,
+            'Linked bank accounts cannot be removed.',
+            403,
+            recovery='Contact support if this account should no longer be used.',
         )
-
-        return success(None, 'Bank account removed.')
 
 
 @ns.route('/<string:bank_account_id>/verify')

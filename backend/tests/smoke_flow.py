@@ -65,6 +65,32 @@ def patch(path, body, token):
     return requests.patch(f'{BASE}{path}', json=body, headers=headers, timeout=TIMEOUT)
 
 
+def seed_credit_profile(user_id, *, score, monthly_income):
+    """
+    Put a salary and a bureau score on file, as a finished credit application
+    would. Written to the database directly: walking the whole application
+    (income proof, bureau consent, review) is credit_apply.py's job, and the
+    card limit only reads its outcome.
+    """
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from portal import InitApp, db
+    from portal.models.base import utcnow
+    from portal.models.credit_applications import (
+        ApplicationStatus, CreditApplications, EmploymentType,
+    )
+
+    with InitApp().app().app_context():
+        db.session.add(CreditApplications(
+            user_id=user_id,
+            status=ApplicationStatus.WITHDRAWN,
+            employment_type=EmploymentType.SALARIED,
+            monthly_income=monthly_income,
+            credit_score=score,
+            credit_score_fetched_at=utcnow(),
+        ))
+        db.session.commit()
+
+
 def main():
     phone = f'9{random.randint(100000000, 999999999)}'
     print(f'\nCashU smoke test - phone {phone}\n' + '=' * 60)
@@ -174,16 +200,32 @@ def main():
         check('Issuer identified',
               response.json()['data']['issuer_bank'] == 'HDFC Bank')
 
-    response = post('/cards', {
+    card_payload = {
         'bin': '455614',
         'last4': '4821',
         'expiry_month': '12',
         'expiry_year': '2030',
         'cardholder_name': 'VIKRAM SHARMA',
-        'card_limit': 300000,
+        # Ignored: the limit is the server's to work out, never the client's.
+        'card_limit': 9999999,
         'due_day': 10,
-    }, token=token)
+    }
 
+    # No salary or credit score on file yet, so no limit - and no card.
+    response = post('/cards', card_payload, token=token)
+    check('Card refused without income and score', response.status_code == 422,
+          response.text[:300])
+
+    user_id = get('/users/me', token=token).json()['data']['user_id']
+    seed_credit_profile(user_id, score=760, monthly_income=50000)
+
+    response = get('/cards/limit', token=token)
+    check('Limit preview from score and salary',
+          response.status_code == 200
+          and response.json()['data']['limit'] == 200000.0,
+          response.text[:300])
+
+    response = post('/cards', card_payload, token=token)
     card_ok = check('Card linked', response.status_code == 201, response.text[:300])
     if not card_ok:
         return finish()
@@ -192,6 +234,19 @@ def main():
     card_id = card['card_id']
     check('Masked PAN only', card['masked_pan'] == '**** **** **** 4821',
           card['masked_pan'])
+    # 760 is in the 750+ band: 4x a Rs. 50,000 salary.
+    check('Limit computed, not taken from client', card['card_limit'] == 200000.0,
+          str(card['card_limit']))
+
+    # Once linked, a card is read-only and permanent.
+    response = patch(f'/cards/{card_id}', {'card_limit': 1}, token=token)
+    check('Card edit refused', response.status_code == 403, response.text[:200])
+    response = requests.delete(
+        f'{BASE}/cards/{card_id}',
+        headers={'Authorization': f'Bearer {token}', 'X-Device-UUID': 'smoke-test-device'},
+        timeout=TIMEOUT,
+    )
+    check('Card removal refused', response.status_code == 403, response.text[:200])
 
     # ERR-001: prepaid/debit must be refused.
     response = post('/cards', {
@@ -231,6 +286,14 @@ def main():
         'ifsc_code': 'HDFC0001234',
     }, token=token)
     check('Mismatched account numbers refused', response.status_code == 400)
+
+    # A linked account stays linked, even for its owner.
+    response = requests.delete(
+        f'{BASE}/bank-accounts/{bank_account_id}',
+        headers={'Authorization': f'Bearer {token}', 'X-Device-UUID': 'smoke-test-device'},
+        timeout=TIMEOUT,
+    )
+    check('Bank account removal refused', response.status_code == 403, response.text[:200])
 
     # AC-002 (fee arithmetic) and FR-006 (the transfer itself) covered the
     # credit-to-bank product. That product has been removed; a purchase
@@ -364,7 +427,7 @@ def main():
         data = response.json()['data']
         check('Summary present', 'summary' in data)
         check('Aggregate limit computed',
-              data['summary']['total_credit_limit'] == 300000.0,
+              data['summary']['total_credit_limit'] == 200000.0,
               str(data['summary']['total_credit_limit']))
         check('Utilization badge', 'utilization_badge' in data['summary'])
         check('Cards listed', len(data['cards']) == 1)

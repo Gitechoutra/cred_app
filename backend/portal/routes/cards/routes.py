@@ -13,13 +13,12 @@ from flask_jwt_extended import jwt_required
 from flask_restx import Resource, reqparse
 
 from portal import db
-from portal.helpers import adapters, audit, settings, test_cards
+from portal.helpers import adapters, audit, card_limit, settings, test_cards
 from portal.helpers.encryption import encrypt, mask_pan
 from portal.helpers.helpers import ErrorCode, failure, iso, success, to_float
 from portal.helpers.jwt import active_user_required, current_user
 from portal.helpers.validators import (
-    ValidationError, sanitize_text, validate_amount, validate_day_of_month,
-    validate_expiry,
+    ValidationError, sanitize_text, validate_day_of_month, validate_expiry,
 )
 from portal.models.base import utcnow
 from portal.models.card_networks import CardNetworks
@@ -38,21 +37,10 @@ link_parser.add_argument('expiry_month', type=str, required=True, location='json
 link_parser.add_argument('expiry_year', type=str, required=True, location='json')
 link_parser.add_argument('cardholder_name', type=str, required=False, location='json')
 link_parser.add_argument('nickname', type=str, required=False, location='json')
-link_parser.add_argument('card_limit', type=float, required=False, location='json')
 link_parser.add_argument('statement_day', type=int, required=False, location='json')
 link_parser.add_argument('due_day', type=int, required=False, location='json')
 link_parser.add_argument('issuer_bank', type=str, required=False, location='json')
 link_parser.add_argument('brand_color', type=str, required=False, location='json')
-
-update_parser = reqparse.RequestParser()
-update_parser.add_argument('nickname', type=str, required=False, location='json')
-update_parser.add_argument('card_limit', type=float, required=False, location='json')
-update_parser.add_argument('outstanding_amount', type=float, required=False, location='json')
-update_parser.add_argument('current_due_amount', type=float, required=False, location='json')
-update_parser.add_argument('minimum_due_amount', type=float, required=False, location='json')
-update_parser.add_argument('statement_day', type=int, required=False, location='json')
-update_parser.add_argument('statement_day', type=int, required=False, location='json')
-update_parser.add_argument('due_day', type=int, required=False, location='json')
 
 def card_dict(card: Cards, detailed: bool = False) -> dict:
     data = {
@@ -173,6 +161,25 @@ class CardList(Resource):
                 recovery='Use a real card, or enable test mode in development.',
             )
 
+        # The limit is ours to work out, from the holder's credit score and
+        # salary, and is settled before anything is tokenised: a card that
+        # cannot be given a limit is not linked. A simulated card keeps its
+        # catalogue limit, which is what produces its scenario.
+        if test_card:
+            limit = test_card['limit']
+        else:
+            assessment = card_limit.assess(user)
+            if not assessment['eligible']:
+                return failure(
+                    ErrorCode.KYC_REQUIRED
+                    if assessment['reason'] != card_limit.Reason.SCORE_TOO_LOW
+                    else ErrorCode.ERR_001_INVALID_CARD,
+                    assessment['message'],
+                    422,
+                    details={'reason': assessment['reason']},
+                )
+            limit = assessment['limit']
+
         try:
             expiry_month, expiry_year = validate_expiry(
                 args['expiry_month'], args['expiry_year']
@@ -286,20 +293,12 @@ class CardList(Resource):
             # NULL on every real card. Its presence is what marks a card as
             # simulated, both to the payment path and to the UI badge.
             test_scenario=test_card['scenario'] if test_card else None,
+            card_limit=limit,
+            available_limit=limit,
+            outstanding_amount=0,
         )
 
         try:
-            if args.get('card_limit'):
-                card.card_limit = validate_amount(args['card_limit'], 'card_limit')
-                card.available_limit = card.card_limit
-                card.outstanding_amount = 0
-            elif test_card:
-                # The catalogue's limit, so the insufficient-limit card really
-                # is short. That scenario is produced by the ordinary balance
-                # check meeting a small limit, not by a special case.
-                card.card_limit = test_card['limit']
-                card.available_limit = test_card['limit']
-                card.outstanding_amount = 0
             if args.get('statement_day'):
                 card.statement_day = validate_day_of_month(
                     args['statement_day'], 'statement_day'
@@ -351,120 +350,52 @@ class CardDetail(Resource):
 
         return success(card_dict(card, detailed=True))
 
+    # A linked card is permanent and read-only: its number, expiry, due day,
+    # name and limit are fixed when it is linked, and the limit is ours rather
+    # than the holder's to set. Both verbs are answered explicitly, so a client
+    # still calling them is told why instead of meeting a bare 405. A lost card
+    # or a wrong entry goes through support.
     @ns.doc('update_card', security='Bearer')
     @jwt_required()
     @active_user_required
     def patch(self, card_id):
-        """
-        Update user-maintained card details.
-
-        Automated statement sync is Phase 2 (Account Aggregator), so in v1 the
-        limit, outstanding balance and billing cycle are whatever the user
-        tells us.
-        """
-        args = update_parser.parse_args()
-        user = current_user()
-
-        card = Cards.query.filter_by(card_id=card_id, user_id=user.user_id).first()
-        if not card or card.status == CardStatus.DELETED:
-            return failure(ErrorCode.NOT_FOUND, 'Card not found.', 404)
-
-        before = card_dict(card)
-
-        try:
-            if args.get('nickname') is not None:
-                card.nickname = sanitize_text(args['nickname'], 100) or None
-            if args.get('card_limit') is not None:
-                card.card_limit = validate_amount(args['card_limit'], 'card_limit')
-            if args.get('outstanding_amount') is not None:
-                card.outstanding_amount = validate_amount(
-                    args['outstanding_amount'], 'outstanding_amount'
-                )
-            if args.get('current_due_amount') is not None:
-                card.current_due_amount = validate_amount(
-                    args['current_due_amount'], 'current_due_amount'
-                )
-            if args.get('minimum_due_amount') is not None:
-                card.minimum_due_amount = validate_amount(
-                    args['minimum_due_amount'], 'minimum_due_amount'
-                )
-            if args.get('statement_day') is not None:
-                card.statement_day = validate_day_of_month(
-                    args['statement_day'], 'statement_day'
-                )
-            if args.get('due_day') is not None:
-                card.due_day = validate_day_of_month(args['due_day'], 'due_day')
-                card.next_due_date = _next_due_date(card.due_day)
-        except ValidationError as exc:
-            return failure(ErrorCode.VALIDATION_ERROR, exc.message, 400,
-                           details={'field': exc.field})
-
-        if card.card_limit is not None:
-            card.available_limit = max(
-                0, float(card.card_limit) - float(card.outstanding_amount or 0)
-            )
-
-        card.last_synced_at = utcnow()
-        db.session.commit()
-
-        audit.record(
-            action='CARD_UPDATED',
-            entity_type='Cards',
-            entity_id=card.card_id,
-            actor_user_id=str(user.user_id),
-            before=before,
-            after=card_dict(card),
-        )
-
-        return success(card_dict(card, detailed=True), 'Card updated.')
+        return _card_locked()
 
     @ns.doc('unlink_card', security='Bearer')
     @jwt_required()
     @active_user_required
     def delete(self, card_id):
+        return _card_locked()
+
+
+def _card_locked():
+    return failure(
+        ErrorCode.FORBIDDEN,
+        'Linked cards cannot be edited or removed.',
+        403,
+        recovery='Contact support for a lost card or a wrong entry.',
+    )
+
+
+@ns.route('/limit')
+class CardLimit(Resource):
+    @ns.doc('card_limit', security='Bearer')
+    @jwt_required()
+    @active_user_required
+    def get(self):
         """
-        Unlink a card and revoke its token upstream (PRD 8.3).
+        The limit a card linked now would be given, or why none can be.
 
-        Refused while an auto-pay mandate depends on it - the PRD requires the
-        user to reassign the mandate first, because silently orphaning a
-        standing instruction would bounce their next EMI.
+        Lets the Add Card screen say what is missing before the user types a
+        card number, rather than after.
         """
-        user = current_user()
-
-        card = Cards.query.filter_by(card_id=card_id, user_id=user.user_id).first()
-        if not card or card.status == CardStatus.DELETED:
-            return failure(ErrorCode.NOT_FOUND, 'Card not found.', 404)
-
-        revocation = adapters.revoke_card_token(card.token_reference_id)
-
-        if not revocation.get('ok'):
-            # Do not soft-delete a card whose token is still live upstream -
-            # that would leave a chargeable token CashU can no longer see.
-            logger.error(
-                f'Token revocation failed for card {card.card_id}: '
-                f'{revocation.get("error")}'
-            )
-            return failure(
-                ErrorCode.PROVIDER_ERROR,
-                'We could not remove this card right now. Please try again '
-                'shortly.',
-                502,
-            )
-
-        card.status = CardStatus.DELETED
-        card.deleted_at = utcnow()
-        card.token_revoked_at = utcnow()
-        db.session.commit()
-
-        audit.record(
-            action='CARD_UNLINKED',
-            entity_type='Cards',
-            entity_id=card.card_id,
-            actor_user_id=str(user.user_id),
-            after={'masked_pan': card.masked_pan},
-        )
-
-        return success(None, 'Card removed successfully.')
+        assessment = card_limit.assess(current_user())
+        return success({
+            'eligible': assessment['eligible'],
+            'limit': to_float(assessment['limit']),
+            'reason': assessment['reason'],
+            'message': assessment['message'],
+        })
 
 
 @ns.route('/test-cards')

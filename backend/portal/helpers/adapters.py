@@ -150,23 +150,6 @@ def tokenize_card(
     }
 
 
-def revoke_card_token(token_reference_id: str) -> dict:
-    """
-    De-register a token upstream (PRD 8.3).
-
-    Unlinking must invalidate the token at the network, not just hide the row -
-    otherwise a token CashU can no longer see remains chargeable.
-    """
-    if _use_sandbox():
-        return {'ok': True, 'revoked': True, 'reference': _ref('rvk_sbx')}
-
-    return {
-        'ok': False,
-        'error_code': 'PROVIDER_NOT_CONFIGURED',
-        'error': 'Token requestor is not configured.',
-    }
-
-
 # ── Payment gateway: inbound charge (PRD FR-006, FR-008) ───────────────────
 
 def create_payment_order(

@@ -293,12 +293,10 @@ export const endpoints = {
     list: () => api.get('/cards'),
     get: (id) => api.get(`/cards/${id}`),
     lookupBin: (bin) => api.get(`/cards/networks/lookup/${bin}`, { background: true }),
-    // Predefined dummy cards. 404s when test mode is off, which is how the UI
-    // knows not to show the picker at all.
-    testCards: () => api.get('/cards/test-cards'),
+    // The limit a card linked now would get, worked out by the server from
+    // the holder's credit score and salary - or why it cannot be linked yet.
+    limit: () => api.get('/cards/limit'),
     link: (data) => api.post('/cards', data),
-    update: (id, data) => api.patch(`/cards/${id}`, data),
-    unlink: (id) => api.del(`/cards/${id}`),
   },
   credit: {
     // -- Application ----------------------------------------------------
@@ -356,7 +354,6 @@ export const endpoints = {
   banks: {
     list: () => api.get('/bank-accounts'),
     add: (data) => api.post('/bank-accounts', data),
-    remove: (id) => api.del(`/bank-accounts/${id}`),
     verify: (id) => api.post(`/bank-accounts/${id}/verify`),
     setPrimary: (id) => api.post(`/bank-accounts/${id}/primary`),
     lookupIfsc: (ifsc) => api.get(`/bank-accounts/ifsc/${ifsc}`),

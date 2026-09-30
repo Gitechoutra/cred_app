@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
 import { BankLogo } from '../../components/domain';
@@ -7,7 +7,7 @@ import { PageHeader, IconLock, IconChevron, IconPlus } from '../../components/la
 import { Button, Input, cx } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
 import { SUPPORTED_BANKS, searchBanks } from '../../data/supportedBanks';
-import { groupCardNumber } from '../../utils/format';
+import { groupCardNumber, money } from '../../utils/format';
 
 function IconSearch(props) {
   return (
@@ -58,7 +58,6 @@ export default function AddCard() {
   const [number, setNumber] = useState('');
   const [expiry, setExpiry] = useState('');
   const [name, setName] = useState('');
-  const [limit, setLimit] = useState('');
   const [dueDay, setDueDay] = useState('');
   const [issuer, setIssuer] = useState(null);
   const [issuerError, setIssuerError] = useState('');
@@ -67,35 +66,24 @@ export default function AddCard() {
 
   const digits = number.replace(/\D/g, '');
 
-  // Absent in production - the endpoint 404s, so the picker simply never
-  // renders and nothing else on this screen changes.
-  const [testCards, setTestCards] = useState(null);
+  // What the server will give this card as a limit, or why it cannot be
+  // linked yet. Fetched up front so a user without a credit score or salary on
+  // file is told before typing a card number, not after.
+  const [limitCheck, setLimitCheck] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
     endpoints.cards
-      .testCards()
-      .then((response) => !cancelled && setTestCards(response.data))
+      .limit()
+      .then((response) => !cancelled && setLimitCheck(response.data))
       .catch(() => {
-        /* Test mode is off. Not an error worth showing anyone. */
+        /* The link call re-checks and reports the reason itself. */
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  /** Fill the form from a catalogue card, so nobody retypes sixteen digits. */
-  function useTestCard(card) {
-    setNumber(card.formatted);
-    setExpiry(`${card.expiry_month}/${String(card.expiry_year).slice(-2)}`);
-    setName(card.cardholder_name);
-    setLimit(String(card.card_limit));
-    setSelectedBank({
-      name: card.issuer_bank,
-      brandColor: card.brand_color,
-      sampleBin: card.bin,
-    });
-  }
   const debounce = useRef();
 
   // Filter banks based on search input (returns empty array if no query)
@@ -171,7 +159,8 @@ export default function AddCard() {
     expMonth?.length === 2 &&
     expYear?.length === 2 &&
     isCardSupported &&
-    !issuerError;
+    !issuerError &&
+    limitCheck?.eligible !== false;
 
   function onExpiryChange(value) {
     const raw = value.replace(/\D/g, '').slice(0, 4);
@@ -191,7 +180,6 @@ export default function AddCard() {
         expiry_month: expMonth,
         expiry_year: `20${expYear}`,
         cardholder_name: name.trim() || undefined,
-        card_limit: limit ? Number(limit) : undefined,
         due_day: dueDay ? Number(dueDay) : undefined,
         issuer_bank: issuer?.issuer_bank || selectedBank?.name || undefined,
         brand_color: issuer?.brand_color || selectedBank?.brandColor || undefined,
@@ -531,57 +519,21 @@ export default function AddCard() {
             </div>
           </div>
 
-          {/* Test mode. Rendered only when the server says so, and stated
-              plainly rather than tucked away - somebody looking at this screen
-              should never be unsure whether a real card is about to be
-              charged. */}
-          {testCards?.cards?.length > 0 && (
-            <div className="mb-5 overflow-hidden rounded-2xl border border-amber-300 bg-amber-50">
-              <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-100/70 px-4 py-2.5">
-                <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md bg-amber-500 text-white">
-                  <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path d="M12 9v4M12 17h.01" strokeLinecap="round" />
-                    <path d="M10.3 3.9L2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" strokeLinejoin="round" />
-                  </svg>
-                </span>
-                <p className="text-2xs font-bold uppercase tracking-[0.14em] text-amber-900">
-                  Test mode — simulated cards
-                </p>
-              </div>
-
-              <div className="px-4 py-3.5">
-                <p className="text-xs leading-relaxed text-amber-900/80">
-                  {testCards.notice}
-                </p>
-
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  {testCards.cards.map((card) => (
-                    <button
-                      key={card.number}
-                      type="button"
-                      onClick={() => useTestCard(card)}
-                      className={cx(
-                        'group rounded-xl border border-amber-200 bg-canvas p-3 text-left',
-                        'transition-all duration-base ease-glide',
-                        'hover:-translate-y-0.5 hover:border-amber-400 hover:shadow-card',
-                        'active:translate-y-0 active:scale-[0.98]',
-                      )}
-                    >
-                      <p className="text-xs font-bold text-ink">{card.label}</p>
-                      <p className="money mt-1 text-2xs tracking-wider text-slate">
-                        {card.formatted}
-                      </p>
-                      <p className="mt-1.5 text-2xs leading-relaxed text-slate">
-                        {card.description}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-
-                <p className="mt-3 text-2xs text-amber-900/70">
-                  CVV {testCards.cards[0]?.cvv} for every card. Pick one to fill
-                  the form.
-                </p>
+          {limitCheck && !limitCheck.eligible && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3.5">
+              <p className="text-xs leading-relaxed text-amber-900">
+                {limitCheck.message}
+              </p>
+              <div className="mt-2 flex gap-4">
+                {limitCheck.reason === 'KYC_INCOMPLETE' ? (
+                  <Link to="/kyc" className="text-xs font-semibold text-mint-700 hover:underline">
+                    Complete KYC
+                  </Link>
+                ) : limitCheck.reason !== 'SCORE_TOO_LOW' && (
+                  <Link to="/credit/apply" className="text-xs font-semibold text-mint-700 hover:underline">
+                    Add income details
+                  </Link>
+                )}
               </div>
             </div>
           )}
@@ -631,15 +583,12 @@ export default function AddCard() {
             onChange={(event) => setName(event.target.value.toUpperCase())}
           />
 
-          <Input
-            label="Credit limit"
-            hint="Helps us show your utilisation. You can add it later."
-            inputMode="numeric"
-            prefix="₹"
-            placeholder="300000"
-            value={limit}
-            onChange={(event) => setLimit(event.target.value.replace(/\D/g, ''))}
-          />
+          {limitCheck?.eligible && (
+            <p className="text-xs leading-relaxed text-slate">
+              Your credit limit is set from your credit score and salary:{' '}
+              <span className="money font-semibold text-ink">{money(limitCheck.limit)}</span>.
+            </p>
+          )}
 
           <div className="flex items-start gap-2.5 rounded-xl bg-mist px-3.5 py-3 border border-line/60">
             <IconLock className="mt-0.5 h-4 w-4 shrink-0 text-slate" />

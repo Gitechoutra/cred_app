@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
 import { BankRow } from '../../components/domain';
@@ -133,21 +133,6 @@ export default function BankAccounts() {
                   Make primary
                 </Button>
               )}
-
-              <Button
-                variant="ghost"
-                size="lg"
-                full
-                loading={working}
-                onClick={() =>
-                  act(
-                    () => endpoints.banks.remove(selected.bank_account_id),
-                    'Account removed.',
-                  )
-                }
-              >
-                Remove account
-              </Button>
             </div>
           )
         }
@@ -187,6 +172,14 @@ export default function BankAccounts() {
                 </p>
               </div>
             )}
+
+            {/* Linked accounts are not removable, so point at the way out. */}
+            <p className="mt-3 text-center text-xs text-slate">
+              Need to stop using this account?{' '}
+              <Link to="/support" className="font-semibold text-mint-700 hover:underline">
+                Contact support
+              </Link>
+            </p>
           </div>
         )}
       </Sheet>
