@@ -57,4 +57,8 @@ if __name__ == '__main__':
     app.logger.info(f'  Health   http://localhost:{port}/health')
     app.logger.info(f'  Webhooks http://localhost:{port}/v1/webhooks/cashfree/health')
 
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    # Watch .env too, so saving it restarts the dev server - and the restart
+    # re-runs the seeders, which sync the admin's phone and MPIN from it.
+    env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+    app.run(host='0.0.0.0', port=port, debug=debug,
+            extra_files=[env_file] if os.path.isfile(env_file) else None)

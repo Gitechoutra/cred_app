@@ -20,6 +20,9 @@ verify because the column holds a salted PBKDF2 hash, not the MPIN itself.
 
 import logging
 import os
+from pathlib import Path
+
+from dotenv import dotenv_values
 
 from portal import db
 from portal.helpers.encryption import hash_secret, verify_secret
@@ -31,6 +34,25 @@ from portal.models.users import KYCTier, UserStatus, Users
 
 logger = logging.getLogger('cashu')
 
+#: backend/.env
+ENV_FILE = Path(__file__).resolve().parents[2] / '.env'
+
+
+def _setting(key: str) -> str:
+    """
+    An ADMIN_SEED_* value, read from backend/.env itself on every run.
+
+    Not os.getenv alone: load_dotenv never overwrites a variable that is
+    already set, and the debug reloader's child processes inherit the values
+    the parent loaded at first start - so an edited .env would otherwise go
+    unseen until a full stop and start. The process environment is still the
+    fallback, for Docker, where the values arrive via env_file with no .env.
+    """
+    value = dotenv_values(ENV_FILE).get(key) if ENV_FILE.is_file() else None
+    if value is None:
+        value = os.getenv(key)
+    return (value or '').strip()
+
 
 def seed_admin():
     role = Roles.query.filter_by(role_name=RoleTypes.L3_SUPER_ADMIN).first()
@@ -39,8 +61,8 @@ def seed_admin():
             'L3_SUPER_ADMIN role is missing - seed_roles must run first.'
         )
 
-    phone = (os.getenv('ADMIN_SEED_PHONE') or '').strip()
-    mpin = (os.getenv('ADMIN_SEED_MPIN') or '').strip()
+    phone = _setting('ADMIN_SEED_PHONE')
+    mpin = _setting('ADMIN_SEED_MPIN')
 
     if not phone or not mpin:
         logger.error(
@@ -53,7 +75,7 @@ def seed_admin():
     if not (mpin.isdigit() and len(mpin) == 6):
         raise RuntimeError('ADMIN_SEED_MPIN must be 6 digits.')
 
-    email = (os.getenv('ADMIN_SEED_EMAIL') or '').strip() or None
+    email = _setting('ADMIN_SEED_EMAIL') or None
 
     existing = Users.query.filter_by(phone=phone).first()
     if existing:
@@ -85,7 +107,7 @@ def seed_admin():
         role_id=role.role_id,
         phone=phone,
         email=email,
-        full_name=os.getenv('ADMIN_SEED_NAME') or 'CashU Administrator',
+        full_name=_setting('ADMIN_SEED_NAME') or 'CashU Administrator',
         mpin_hash=hash_secret(mpin),
         kyc_tier=KYCTier.FULL,
         status=UserStatus.ACTIVE,
@@ -134,3 +156,15 @@ def _sync(user: Users, mpin: str):
         f'[Seeders] seed_admin: administrator ******{user.phone[-4:]} MPIN updated '
         'from ADMIN_SEED_MPIN in .env, and its lockout cleared.'
     )
+
+
+if __name__ == '__main__':
+    # Sync the admin from backend/.env without starting the server:
+    #     cd backend && python -m portal.seeders.seed_admin
+    from portal import InitApp
+
+    with InitApp().app().app_context():
+        from portal.seeders.seed_roles import seed_roles
+        seed_roles()
+        seed_admin()
+        print('Administrator synced from backend/.env.')
