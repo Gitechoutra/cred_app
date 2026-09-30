@@ -1371,3 +1371,159 @@ class CancelBillPayment(Resource):
                 )
 
         return _payment_response(record, user)
+
+
+# ── Credit score (the user's own look-up) ──────────────────────────────────
+
+score_check_parser = reqparse.RequestParser()
+score_check_parser.add_argument('consent', type=inputs.boolean, required=True,
+                                location='json')
+
+
+def _score_dict(*, score, no_history, fetched_at, source, is_demo,
+                provider=None, report=None) -> dict:
+    return {
+        'score': score,
+        'no_history': bool(no_history),
+        'band': 'New to credit' if no_history else credit_engine.score_band(score),
+        'min_score': 300,
+        'max_score': 900,
+        'fetched_at': iso(fetched_at),
+        # CHECK: from the Credit Score screen. APPLICATION: pulled for a credit
+        # application, which carries no report.
+        'source': source,
+        'provider': provider,
+        'is_demo': bool(is_demo),
+        'report': report,
+    }
+
+
+def _latest_score(user) -> dict | None:
+    """The newest score on file, from either kind of pull."""
+    from portal.models.credit_score_checks import CreditScoreChecks, ScoreCheckStatus
+
+    check = CreditScoreChecks.query.filter_by(
+        user_id=user.user_id, status=ScoreCheckStatus.SUCCESS,
+    ).order_by(CreditScoreChecks.fetched_at.desc()).first()
+
+    application = CreditApplications.query.filter(
+        CreditApplications.user_id == user.user_id,
+        CreditApplications.credit_score_fetched_at.isnot(None),
+    ).order_by(CreditApplications.credit_score_fetched_at.desc()).first()
+
+    if check and (not application
+                  or check.fetched_at >= application.credit_score_fetched_at):
+        return _score_dict(
+            score=check.score, no_history=check.no_history,
+            fetched_at=check.fetched_at, source='CHECK', is_demo=check.is_demo,
+            provider=check.provider, report=check.report,
+        )
+    if application:
+        return _score_dict(
+            score=application.credit_score,
+            no_history=application.credit_no_history,
+            fetched_at=application.credit_score_fetched_at,
+            source='APPLICATION',
+            # The sandbox bureau is the only one there is.
+            is_demo=adapters._use_sandbox(),
+        )
+    return None
+
+
+@ns.route('/score')
+class CreditScore(Resource):
+    @ns.doc('credit_score', security='Bearer')
+    @jwt_required()
+    @active_user_required
+    def get(self):
+        """The user's latest credit score, or null if none has been pulled."""
+        user = current_user()
+        profile = user.profile
+        return success({
+            'score': _latest_score(user),
+            # A check needs the PAN, which KYC collects.
+            'can_check': bool(profile and profile.pan_number_enc),
+            'bureau_connected': not adapters._use_sandbox(),
+        })
+
+
+@ns.route('/score/check')
+class CreditScoreCheck(Resource):
+    @ns.doc('check_credit_score', security='Bearer')
+    @jwt_required()
+    @active_user_required
+    def post(self):
+        """
+        Pull the user's score and report from the bureau, with their consent.
+
+        A soft enquiry: it does not affect the score. Refused without explicit
+        consent, and without a PAN on file.
+        """
+        from portal.helpers.encryption import decrypt
+        from portal.models.base import utcnow
+        from portal.models.credit_score_checks import (
+            CreditScoreChecks, ScoreCheckStatus,
+        )
+        from portal import db
+
+        args = score_check_parser.parse_args()
+        user = current_user()
+
+        if not args['consent']:
+            return failure(
+                ErrorCode.VALIDATION_ERROR,
+                'Please agree to the credit bureau check to see your score.',
+                400, details={'field': 'consent'},
+            )
+
+        profile = user.profile
+        pan = None
+        if profile is not None and profile.pan_number_enc:
+            try:
+                pan = decrypt(profile.pan_number_enc)
+            except Exception:     # noqa: BLE001 - an unreadable PAN is a missing one
+                pan = None
+        if not pan:
+            return failure(
+                ErrorCode.KYC_REQUIRED,
+                'Complete KYC with your PAN to check your credit score.',
+                422,
+            )
+
+        check = CreditScoreChecks(user_id=user.user_id, consent_at=utcnow(),
+                                  status=ScoreCheckStatus.FAILED)
+        db.session.add(check)
+        db.session.flush()
+
+        result = adapters.fetch_credit_report(
+            reference=f'CASHUCHK{check.check_id.replace("-", "")[:16]}',
+            pan=pan, full_name=user.full_name, phone=user.phone,
+        )
+
+        if not result.get('ok'):
+            check.error = (result.get('error') or 'Bureau unavailable')[:255]
+            db.session.commit()
+            logger.warning(f'[credit-score] check failed for {user.user_id}: '
+                           f'{check.error}')
+            return failure(
+                result.get('error_code', ErrorCode.PROVIDER_ERROR),
+                'We could not get your credit score right now. Please try '
+                'again later.',
+                503,
+            )
+
+        check.status = ScoreCheckStatus.SUCCESS
+        check.score = result.get('score')
+        check.no_history = bool(result.get('no_history'))
+        check.provider = result.get('provider')
+        check.bureau_reference = (result.get('reference') or '')[:64] or None
+        check.is_demo = bool(result.get('is_demo'))
+        check.report = result.get('report')
+        check.fetched_at = utcnow()
+        db.session.commit()
+
+        return success({
+            'score': _latest_score(user),
+            'can_check': True,
+            'bureau_connected': not adapters._use_sandbox(),
+        }, 'Credit score updated.')

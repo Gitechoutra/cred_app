@@ -34,7 +34,8 @@ import {
 } from '../../components/ui';
 import { useFetch, useProfile } from '../../hooks/useProfile';
 import { Reveal } from '../../hooks/useReveal';
-import { money, moneyCompact } from '../../utils/format';
+import { date, money, moneyCompact } from '../../utils/format';
+import ScoreMeter from '../../components/credit/ScoreMeter';
 
 /**
  * Premium CashU Logged-In User Home Experience.
@@ -346,11 +347,14 @@ export default function Hub() {
           <QuickActionBtn
             icon={IconBill}
             title="Pay Bills"
-            hint="Pay from credit"
+            hint="Pay eligible bills"
             onClick={() => navigate('/pay-bills')}
           />
         </div>
       </section>
+
+      {/* ── Credit score ──────────────────────────────────────────────── */}
+      <CreditScoreCard onOpen={() => navigate('/credit-score')} />
 
       {/* ── 4. Monthly Commitment & Balance Strip ─────────────────────── */}
       <div className="grid gap-3 sm:grid-cols-3">
@@ -617,6 +621,33 @@ export default function Hub() {
 }
 
 /* ── UI Building Blocks ─────────────────────────────────────────────────── */
+
+function CreditScoreCard({ onOpen }) {
+  // Its own request, so a slow or failed score never holds up the dashboard.
+  const { data } = useFetch(() => endpoints.creditScore.get(), []);
+  const score = data?.score;
+
+  return (
+    <section className="flex flex-col items-center gap-4 rounded-3xl border border-line/80 bg-canvas p-5 shadow-card sm:flex-row sm:p-6">
+      <ScoreMeter score={score?.score} band={score?.band} size="sm" />
+      <div className="flex-1 text-center sm:text-left">
+        <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+          <h2 className="text-base font-bold tracking-tight text-ink">Your Credit Score</h2>
+          {score?.is_demo && <Badge tone="warn">Demo data</Badge>}
+        </div>
+        <p className="mt-1 text-sm text-slate">
+          {score
+            ? <>CIBIL Score: <span className="font-semibold text-ink">{score.no_history ? 'New to credit' : score.score}</span>
+                {score.band && !score.no_history ? ` (${score.band})` : ''} · updated {date(score.fetched_at)}</>
+            : 'Not checked yet. See your score, accounts, utilisation and enquiries.'}
+        </p>
+        <Button variant="mint" size="sm" className="mt-3" onClick={onOpen}>
+          Check CIBIL Score
+        </Button>
+      </div>
+    </section>
+  );
+}
 
 function QuickActionBtn({ icon: Icon, title, hint, onClick, primary = false }) {
   return (

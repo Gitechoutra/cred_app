@@ -63,6 +63,9 @@ def init_app(app):
         from .bill_payments import (  # noqa: F401
             BillPayments, BillPaymentStatus, BillCategory, BillPurpose,
         )
+        from .credit_score_checks import (  # noqa: F401
+            CreditScoreChecks, ScoreCheckStatus,
+        )
 
         # -- EMI -----------------------------------------------------------
         from .emi_providers import EMIProviders, ProviderIntegrationMode

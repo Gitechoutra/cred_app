@@ -20,6 +20,7 @@ import AdminLogin from '../pages/auth/AdminLogin';
 import Home from '../pages/user/Home';
 import Hub from '../pages/user/Hub';
 import ScanPay from '../pages/user/ScanPay';
+import CreditScore from '../pages/credit/CreditScore';
 import PayBills from '../pages/paybills/PayBills';
 import PayBillStatus from '../pages/paybills/PayBillStatus';
 import Cards from '../pages/user/Cards';
@@ -188,6 +189,7 @@ export default function App() {
       <Route path="/scan" element={<RequireAuth><Shell><ScanPay /></Shell></RequireAuth>} />
 
       {/* Pay Bills: the steps live in ?step=, the result and History detail at /:id. */}
+      <Route path="/credit-score" element={<RequireAuth><Shell><CreditScore /></Shell></RequireAuth>} />
       <Route path="/pay-bills" element={<RequireAuth><Shell><PayBills /></Shell></RequireAuth>} />
       <Route path="/pay-bills/:billPaymentId" element={<RequireAuth><Shell><PayBillStatus /></Shell></RequireAuth>} />
 

@@ -298,6 +298,12 @@ export const endpoints = {
     limit: () => api.get('/cards/limit'),
     link: (data) => api.post('/cards', data),
   },
+  creditScore: {
+    // The latest score on file (null when none), and whether a check can run.
+    get: () => api.get('/credit/score'),
+    // A bureau enquiry: only with the user's explicit consent.
+    check: () => api.post('/credit/score/check', { consent: true }),
+  },
   credit: {
     // -- Application ----------------------------------------------------
     eligibility: () => api.get('/credit/eligibility'),

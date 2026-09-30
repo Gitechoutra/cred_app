@@ -337,6 +337,106 @@ def fetch_credit_score(*, reference: str, pan: str, full_name: str = None,
     }
 
 
+def fetch_credit_report(*, reference: str, pan: str, full_name: str = None,
+                        phone: str = None) -> dict:
+    """
+    The score plus the report behind it: accounts, utilisation, payment history
+    and recent enquiries. For the user's own Credit Score screen.
+
+    Returns fetch_credit_score's fields plus 'report' and 'is_demo'. The
+    report's shape is what a bureau integration should map its response onto,
+    so the screen does not change when a real one is connected:
+
+        {'accounts': [{'type', 'lender', 'status', 'opened_on', 'limit',
+                       'balance'}],
+         'utilization': {'percent', 'total_limit', 'total_balance'},
+         'payment_history': {'on_time_percent', 'months_reviewed',
+                             'late_payments'},
+         'enquiries': [{'date', 'lender', 'purpose'}]}
+
+    Sandbox: the score comes from fetch_credit_score, and the report is DEMO
+    DATA - derived from the score so a better score reads as a healthier
+    report, and fixed per PAN so the screen is stable between checks. Nothing
+    in it came from a bureau, and is_demo says so.
+
+    Live: no bureau is contracted, so this refuses like fetch_credit_score.
+    """
+    scored = fetch_credit_score(reference=reference, pan=pan,
+                                full_name=full_name, phone=phone)
+    if not scored.get('ok'):
+        return scored
+
+    if not _use_sandbox():
+        # Where a real bureau's report would be fetched and mapped.
+        return {
+            'ok': False,
+            'error_code': 'BUREAU_NOT_CONFIGURED',
+            'error': 'The credit bureau is not connected yet.',
+        }
+
+    return {**scored, 'is_demo': True,
+            'report': _demo_credit_report(scored.get('score'), pan)}
+
+
+def _demo_credit_report(score, pan: str) -> dict:
+    """A plausible, clearly fictional report for the sandbox."""
+    from datetime import date, timedelta
+
+    if score is None:       # new to credit: an empty file
+        return {
+            'accounts': [],
+            'utilization': {'percent': None, 'total_limit': 0, 'total_balance': 0},
+            'payment_history': {'on_time_percent': None, 'months_reviewed': 0,
+                                'late_payments': 0},
+            'enquiries': [],
+        }
+
+    seed = sum(ord(c) for c in (pan or 'DEMO'))
+    today = date.today()
+    # Higher score, lower utilisation and fewer late payments.
+    utilization = max(8, min(85, round((900 - score) / 6) + seed % 7))
+    late = 0 if score >= 750 else (1 if score >= 700 else (3 if score >= 650 else 6))
+    months = 36
+    accounts = [
+        {'type': 'Credit card', 'lender': 'Demo Bank A', 'status': 'Active',
+         'opened_on': (today - timedelta(days=900 + seed % 200)).isoformat(),
+         'limit': 150000, 'balance': round(150000 * utilization / 100)},
+        {'type': 'Credit card', 'lender': 'Demo Bank B', 'status': 'Active',
+         'opened_on': (today - timedelta(days=500 + seed % 90)).isoformat(),
+         'limit': 80000, 'balance': round(80000 * utilization / 100)},
+        {'type': 'Personal loan', 'lender': 'Demo Finance', 'status': 'Active',
+         'opened_on': (today - timedelta(days=400)).isoformat(),
+         'limit': 200000, 'balance': 120000},
+        {'type': 'Consumer durable loan', 'lender': 'Demo NBFC', 'status': 'Closed',
+         'opened_on': (today - timedelta(days=1100)).isoformat(),
+         'limit': 30000, 'balance': 0},
+    ]
+    revolving = [a for a in accounts if a['type'] == 'Credit card']
+    enquiries = [
+        {'date': (today - timedelta(days=d)).isoformat(), 'lender': lender,
+         'purpose': purpose}
+        for d, lender, purpose in [
+            (21, 'Demo Bank C', 'Credit card'),
+            (95, 'Demo Finance', 'Personal loan'),
+            (160, 'CashU', 'Credit line'),
+        ][: 1 if score >= 750 else 3]
+    ]
+    return {
+        'accounts': accounts,
+        'utilization': {
+            'percent': utilization,
+            'total_limit': sum(a['limit'] for a in revolving),
+            'total_balance': sum(a['balance'] for a in revolving),
+        },
+        'payment_history': {
+            'on_time_percent': round((months - late) / months * 100, 1),
+            'months_reviewed': months,
+            'late_payments': late,
+        },
+        'enquiries': enquiries,
+    }
+
+
 # ── Penny drop (PRD FR-005) ────────────────────────────────────────────────
 
 def penny_drop(
