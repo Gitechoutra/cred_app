@@ -6,9 +6,14 @@
 #   docker compose down                stop (keeps data)
 #   docker compose down -v             stop AND wipe the database
 #
-# Frontend → http://localhost:3000
-# API      → http://localhost:5050/v1
-# Swagger  → http://localhost:5050/v1/doc/
+# Frontend → http://localhost:8080
+# API      → http://localhost:5051/v1
+# Swagger  → http://localhost:5051/v1/doc/
+#
+# Host ports 8080/5051, not 3000/5050: those belong to `npm run dev` and
+# `python app.py`. With restart: unless-stopped these containers come back
+# whenever Docker starts, so sharing the dev ports blocked the dev servers on
+# every machine that had ever run this stack.
 # ──────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -58,11 +63,14 @@ services:
       # Points at the compose service, overriding whatever .env carries for
       # bare-metal runs (where the host would be localhost).
       DATABASE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-Mahesh2605}@db:3306/${MYSQL_DATABASE:-cashu_db}
+      # The containerised frontend's address, for payment return links.
+      FRONTEND_BASE_URL: http://localhost:8080
+      CASHFREE_RETURN_URL: http://localhost:8080/payment/status
     env_file:
       # Secrets (JWT, Cashfree, SMTP) live here and are never baked into the image.
       - ./backend/.env
     ports:
-      - "5050:5050"
+      - "5051:5050"
     volumes:
       # Named volumes, not bind mounts: KYC documents and logs must survive a
       # rebuild without being writable from the host by accident.
@@ -75,13 +83,13 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:5050/v1}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:5051/v1}
     container_name: cashu-frontend
     restart: unless-stopped
     depends_on:
       - backend
     ports:
-      - "3000:80"
+      - "8080:80"
     networks: [cashu-net]
 
 volumes:

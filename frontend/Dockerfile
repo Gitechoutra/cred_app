@@ -2,7 +2,7 @@
 # CashU — React + Vite + Tailwind frontend
 #
 # Build:  docker build -t cashu-frontend .
-# Serves the production bundle from nginx on :80 (mapped to :3000 in compose).
+# Serves the production bundle from nginx on :80 (mapped to :8080 in compose).
 # ──────────────────────────────────────────────────────────────────────────────
 
 # ── Stage 1: build the bundle ─────────────────────────────────────────────────

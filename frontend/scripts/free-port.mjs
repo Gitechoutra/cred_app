@@ -86,6 +86,18 @@ let freed = 0;
 for (const pid of pids) {
   const name = processName(pid);
 
+  if (name.toLowerCase().includes('docker')) {
+    console.warn(
+      `\n  Port ${PORT} is held by Docker (PID ${pid}) - the cashu-frontend container\n` +
+        '  from an older docker-compose.yml, which published it on 3000.\n' +
+        '  From the repo root, either recreate it on its new port (8080):\n' +
+        '      docker compose up -d\n' +
+        '  or stop it:\n' +
+        '      docker compose stop frontend\n',
+    );
+    continue;
+  }
+
   if (!name.includes('node')) {
     console.warn(
       `\n  Port ${PORT} is held by "${name || 'an unknown process'}" (PID ${pid}), ` +

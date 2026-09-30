@@ -76,8 +76,19 @@ The dev server proxies `/v1` to Flask, so the browser sees a single origin.
 docker compose up --build
 ```
 
-Brings up MySQL 8.4, the API and an nginx-served frontend bundle. MySQL binds
-host port **3307** to avoid colliding with a native install on 3306.
+Brings up MySQL 8.4, the API and an nginx-served frontend bundle, on their own
+host ports so they never collide with the dev servers or a native MySQL:
+
+| Docker | URL |
+|---|---|
+| Frontend | http://localhost:8080 |
+| API | http://localhost:5051/v1 |
+| MySQL | localhost:3307 |
+
+The containers restart with Docker. If `npm run dev` says port 3000 is held by
+Docker, you have containers from before this change: run
+`docker compose up -d` once to recreate them on the new ports, or
+`docker compose stop` to stop them.
 
 ---
 
