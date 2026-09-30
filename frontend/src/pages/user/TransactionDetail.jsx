@@ -38,8 +38,9 @@ export default function TransactionDetail() {
 
   // A Pay Bills row has its own detail page - bill, purpose, fee, bank and
   // status - which is what History promises when the row is opened.
-  if (transaction.bill_payment?.bill_payment_id) {
-    return <Navigate to={`/pay-bills/${transaction.bill_payment.bill_payment_id}`} replace />;
+  const bill = transaction.bill_payment || transaction.restores_bill_payment;
+  if (bill?.bill_payment_id) {
+    return <Navigate to={`/pay-bills/${bill.bill_payment_id}`} replace />;
   }
 
   const tone = statusTone(transaction.status);

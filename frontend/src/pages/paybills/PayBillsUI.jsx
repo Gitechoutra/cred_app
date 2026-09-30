@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 
-import { cx } from '../../components/ui';
-import { dateTime, money } from '../../utils/format';
+import { Card, Row, cx } from '../../components/ui';
+import { money } from '../../utils/format';
 
 /**
  * Pay Bills' shared vocabulary: category icons, the OTP boxes, the status of a
@@ -43,6 +43,68 @@ export function CategoryIcon({ category, className = 'h-5 w-5' }) {
     >
       {paths.map((d) => <path key={d} d={d} />)}
     </svg>
+  );
+}
+
+/* ── Dates ──────────────────────────────────────────────────────────────── */
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * "29 Sep 2026, 11:30 AM" - the format the spec asks for, in IST.
+ *
+ * Assembled from parts rather than taken whole from toLocaleString: newer ICU
+ * data abbreviates September as "Sept" in some locales, and a receipt should
+ * not change format with the browser version.
+ */
+export function billDateTime(value) {
+  if (!value) return '-';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '-';
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      day: '2-digit', month: 'numeric', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata',
+    }).formatToParts(d).map((p) => [p.type, p.value]),
+  );
+  const month = MONTHS[Number(parts.month) - 1];
+  return `${parts.day} ${month} ${parts.year}, ${parts.hour}:${parts.minute} ${parts.dayPeriod.toUpperCase()}`;
+}
+
+/* ── Processing ─────────────────────────────────────────────────────────── */
+
+/**
+ * The in-flight screen, shown while the OTP is being confirmed and while the
+ * backend has not yet confirmed the payout. Offers nothing to click: every
+ * button here would be a way to pay twice.
+ */
+export function ProcessingPayment({ amount, bank, reference }) {
+  return (
+    <div className="mx-auto grid min-h-[60vh] w-full max-w-md place-items-center" role="status" aria-live="polite">
+      <div className="w-full text-center">
+        <span className="relative mx-auto grid h-24 w-24 place-items-center">
+          <span className="absolute inset-0 rounded-full bg-mint/20 motion-safe:animate-pulse-ring" />
+          <span className="absolute inset-2 rounded-full border-2 border-mint/25 border-t-mint-600 motion-safe:animate-spin" />
+          {/* Credit to bank: a card, an arrow, a bank. */}
+          <svg viewBox="0 0 48 48" className="relative h-10 w-10 text-ink" fill="none" aria-hidden="true">
+            <rect x="3" y="15" width="16" height="11" rx="2.5" stroke="currentColor" strokeWidth="2.2" />
+            <path d="M3 19h16" stroke="currentColor" strokeWidth="2.2" />
+            <path d="M22 20.5h6m-2.5-3l3 3-3 3" stroke="#00B386" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="motion-safe:animate-pulse" />
+            <path d="M32 18l6-3.5 6 3.5M33.5 19v8m4.5-8v8m4.5-8v8M32 29h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
+        <h1 className="mt-6 text-xl font-bold tracking-tight text-ink">Processing Payment</h1>
+        <p className="mx-auto mt-1.5 max-w-xs text-sm text-slate">
+          We&apos;re processing your bill payment request. Please don&apos;t close this page.
+        </p>
+
+        <Card className="mt-6 divide-y divide-line py-1 text-left">
+          <Row label="Amount" value={money(amount)} mono />
+          {bank && <Row label="Destination bank" value={bank} />}
+          {reference && <Row label="Transaction reference" value={reference} mono />}
+        </Card>
+      </div>
+    </div>
   );
 }
 
@@ -156,8 +218,8 @@ export function downloadReceipt(bill) {
     ['Total credit utilised', money(bill.total_amount)],
     ['Paid to', bill.bank],
     ['Bank UTR', bill.utr || '-'],
-    ['Requested', dateTime(bill.created_on)],
-    ['Completed', bill.completed_at ? dateTime(bill.completed_at) : '-'],
+    ['Requested', billDateTime(bill.created_on)],
+    ['Completed', billDateTime(bill.completed_at)],
   ];
 
   const html = `<!doctype html><html><head><meta charset="utf-8">

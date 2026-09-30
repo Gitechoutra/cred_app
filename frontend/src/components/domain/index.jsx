@@ -242,6 +242,8 @@ export function TransactionRow({ transaction, onClick }) {
   const tone = statusTone(transaction.status);
   const credit = transaction.type === 'REVERSAL_REFUND';
   const bill = transaction.bill_payment;
+  // Credit given back after a Pay Bills payout failed or was returned.
+  const restores = transaction.restores_bill_payment;
 
   return (
     <button
@@ -270,12 +272,14 @@ export function TransactionRow({ transaction, onClick }) {
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-ink">
           {/* A Pay Bills row names the bill, not the ledger type. */}
-          {bill ? bill.title : transactionLabel(transaction.type)}
+          {bill ? bill.title : restores ? 'Credit restored' : transactionLabel(transaction.type)}
         </p>
         <p className="truncate text-xs text-slate">
           {bill
             ? `Credit → Bank · ${statusLabel(transaction.status === 'SUCCEEDED' ? 'SUCCESSFUL' : transaction.status)}`
-            : transaction.destination || transaction.source}
+            : restores
+              ? `${restores.title} · ${restores.status === 'REVERSED' ? 'returned by bank' : 'payment failed'}`
+              : transaction.destination || transaction.source}
         </p>
       </div>
 

@@ -12,7 +12,7 @@ import { useFetch } from '../../hooks/useProfile';
 import { useSessionDraft } from '../../hooks/useSessionDraft';
 import { useToast } from '../../context/ToastContext';
 import { money, sanitizeAmount } from '../../utils/format';
-import { CategoryIcon, OtpBoxes } from './PayBillsUI';
+import { CategoryIcon, OtpBoxes, ProcessingPayment } from './PayBillsUI';
 
 /**
  * Pay Bills (Home -> Pay Bills).
@@ -81,6 +81,7 @@ export default function PayBills() {
   const [submitError, setSubmitError] = useState(null);
   const [busy, setBusy] = useState(false);
   const [otpMeta, setOtpMeta] = useState(navState?.otp || null);
+  const [created, setCreated] = useState(null);
 
   const attemptKey = useRef(null);
 
@@ -196,6 +197,7 @@ export default function PayBills() {
 
       attemptKey.current = null;
       setOtpMeta(res.data.otp);
+      setCreated(res.data.bill_payment);
       go('otp', { id: res.data.bill_payment.bill_payment_id });
     } catch (err) {
       if (!outcomeUnknown(err)) attemptKey.current = null;
@@ -350,6 +352,7 @@ export default function PayBills() {
         <OtpStep
           billId={billId}
           meta={otpMeta}
+          reference={created?.bill_payment_id === billId ? created.reference : null}
           maskedMobile={otpMeta?.masked_mobile || info.masked_mobile}
           sandbox={info.sandbox}
           draft={draft}
@@ -696,6 +699,7 @@ function BankStep({ banks, selected, error, onSelect, onAdd, onContinue }) {
           <button
             type="button"
             onClick={onAdd}
+            aria-label="Add Bank Account"
             className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-line p-3.5 text-sm font-medium text-slate transition-all hover:border-mint-600/40 hover:bg-mint-50/40 hover:text-ink"
           >
             <IconPlus className="h-4 w-4" /> Add Bank Account
@@ -841,7 +845,7 @@ function ConfirmStep({
 
 /* ── Step 5: OTP ────────────────────────────────────────────────────────── */
 
-function OtpStep({ billId, meta, maskedMobile, sandbox, draft, quote, bank, onMeta, onDone, onRestart }) {
+function OtpStep({ billId, meta, reference, maskedMobile, sandbox, draft, quote, bank, onMeta, onDone, onRestart }) {
   const toast = useToast();
   const length = meta?.length || 6;
   const [digits, setDigits] = useState(() => (
@@ -904,6 +908,11 @@ function OtpStep({ billId, meta, maskedMobile, sandbox, draft, quote, bank, onMe
   }
 
   const expired = errorCode === 'REQUEST_EXPIRED' || errorCode === 'CONFLICT';
+
+  // Authenticated: the credit is being drawn and the payout dispatched.
+  if (busy) {
+    return <ProcessingPayment amount={draft.amount} bank={summary.bank} reference={reference} />;
+  }
 
   return (
     <form onSubmit={verify} className="mx-auto max-w-md">

@@ -57,6 +57,14 @@ def transaction_dict(txn: MasterTransactions, detailed: bool = False,
         if bill_payments is None:
             bill_payments = bill_pay_engine.summaries_for([txn.transaction_id])
         data['bill_payment'] = bill_payments.get(txn.transaction_id)
+    elif txn.transaction_type == TransactionType.REVERSAL_REFUND and txn.reverses_transaction_id:
+        # The credit given back when a Pay Bills payout failed or was returned:
+        # named after the bill it restores, rather than as an anonymous refund.
+        if bill_payments is None:
+            bill_payments = bill_pay_engine.summaries_for([txn.reverses_transaction_id])
+        restored = bill_payments.get(txn.reverses_transaction_id)
+        if restored:
+            data['restores_bill_payment'] = restored
 
     if detailed:
         data['gateway_provider'] = txn.gateway_provider
@@ -128,6 +136,8 @@ class TransactionList(Resource):
         bills = bill_pay_engine.summaries_for(
             [t.transaction_id for t in pagination.items
              if t.transaction_type == TransactionType.CREDIT_BILL_PAY]
+            + [t.reverses_transaction_id for t in pagination.items
+               if t.transaction_type == TransactionType.REVERSAL_REFUND]
         )
         return paginated(
             [transaction_dict(t, bill_payments=bills) for t in pagination.items],

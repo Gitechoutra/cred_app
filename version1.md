@@ -18,6 +18,7 @@
   |---|---|---|
   | 1 | 2026-09-09 | Initial v1 specification from the PRD P0 slice. |
   | 2 | 2026-09-28 | **Product pivot.** Credit-to-bank transfer (FR-006) removed (`5b64317`). Replaced by a **CashU-issued credit line**: apply → KYC → review → purpose → activate → spend → statement → bill pay → credit restored (`0f20029`, `ef02c50`, `28c6286`, `f182906`, `a1d426c`). Added Scan & Pay (UPI QR), Razorpay as the collection rail, the transaction-error centre and support assistant. Sections 1, 2, 5, 6, 7, 8, 9, 10, 12–17 updated to match the code. |
+  | 3 | 2026-09-30 | **Pay Bills** (`32ed3bf`, `e7c4572`). A narrow, regulated credit-to-bank movement reinstated at the owner's request: credit drawn for a declared eligible bill and paid out to the holder's **own verified** bank account, **sandbox payout rail only**. See the ⚑ deviation under §2. Sections 1 and 2 updated. |
 
   ---
 
@@ -38,8 +39,10 @@
   banking portals.
 
   **What CashU is not.** Not a rewards or cashback app. Not a wallet — CashU holds no
-  customer funds. **It does not move credit into a bank account** — that product was
-  removed on 2026-09-24. Not a card issuer or lender *in its own right*: the credit line
+  customer funds. **It does not freely move credit into a bank account** — that product was
+  removed on 2026-09-24; the one exception is **Pay Bills** (§2 deviation), a declared,
+  priced, OTP-authenticated bill payment to the holder's own verified account that runs on
+  the sandbox rail until a licensed partner approves it. Not a card issuer or lender *in its own right*: the credit line
   must be issued through a licensed lending/issuing partner (see §16, decision 1).
 
   ---
@@ -63,6 +66,27 @@
   > credit-to-bank movement as disguised cash cycling and PRD open decision #1 (the
   > merchant model) was never resolved. The credit line only funds **merchant
   > purchases**, which is what a card is licensed to do.
+
+  > ⚑ **DEVIATION — Pay Bills (rev 3, 2026-09-30).** At the owner's request the credit
+  > line can also fund a **declared bill**, paid out to the holder's **own** penny-drop
+  > verified bank account. This is a credit-to-bank movement and carries the risk above;
+  > the alternative offered — paying the biller directly (BBPS, or the landlord's /
+  > institution's account) — keeps money off the holder's account and remains the
+  > recommended model. What is built, all enforced server-side (`bill_pay_engine`):
+  >
+  > - **Eligibility:** KYC, an ACTIVE credit line, no transaction freeze, a verified bank.
+  > - **Declaration:** one of 11 bill categories, a listed biller, the bill reference, and
+  >   a purpose that must match the category ("Other" requires a written description).
+  > - **Limits:** ₹100–₹50,000 per bill, 3 requests a day, full KYC above ₹10,000, plus the
+  >   line's own available credit and daily/monthly caps (checked under lock at the draw).
+  > - **Disclosure & consent:** 1.5% fee + 18% GST on the fee, priced by the server and
+  >   shown before a consent checkbox; consent time and disclosure version are stored.
+  > - **Authentication:** TRANSACTION OTP to the registered mobile.
+  > - **Tracking & reversal:** PROCESSING → SUCCEEDED | PENDING | FAILED, REVERSED on a bank
+  >   return; any payout that does not stand restores the whole draw, fee and GST included.
+  > - **Rail:** sandbox only. `adapters.dispatch_payout` **refuses in live mode**, and the
+  >   feature is blocked when `ENV_NAME=production`, until a licensed issuing/PA partner
+  >   settles PRD open decision #1. Do not remove that refusal to "turn it on".
 
   ---
 

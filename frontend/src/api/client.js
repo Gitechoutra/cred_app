@@ -351,7 +351,8 @@ export const endpoints = {
     quote: (amount) => api.post('/bill-payments/quote', { amount }, { background: true }),
     create: (data, key) => api.pay('/bill-payments', data, key),
     resendOtp: (id) => api.post(`/bill-payments/${id}/otp`),
-    confirm: (id, data) => api.post(`/bill-payments/${id}/confirm`, data),
+    // Background: the flow shows its own Processing Payment screen, not the global loader.
+    confirm: (id, data) => api.post(`/bill-payments/${id}/confirm`, data, { background: true }),
     cancel: (id) => api.post(`/bill-payments/${id}/cancel`),
     get: (id, opts = {}) => api.get(`/bill-payments/${id}`, opts),
     byTransaction: (transactionId) => api.get(`/bill-payments/by-transaction/${transactionId}`),

@@ -8,8 +8,10 @@ import { Badge, Button, Card, Row, Skeleton, cx } from '../../components/ui';
 import { ErrorCard, StatusHero } from '../../components/credit/CreditUI';
 import { useToast } from '../../context/ToastContext';
 import { useFetch } from '../../hooks/useProfile';
-import { dateTime, money } from '../../utils/format';
-import { CategoryIcon, billStatus, downloadReceipt } from './PayBillsUI';
+import { money } from '../../utils/format';
+import {
+  CategoryIcon, ProcessingPayment, billDateTime, billStatus, downloadReceipt,
+} from './PayBillsUI';
 
 /**
  * One Pay Bills request: the result screen straight after the OTP, and the
@@ -38,8 +40,10 @@ export default function PayBillStatus() {
   const [showDetails, setShowDetails] = useState(!fresh);
   const tries = useRef(0);
 
+  // Background: while the payout is in flight this page draws its own
+  // Processing Payment screen, which the global loader would otherwise cover.
   const { data, loading, error, refetch } = useFetch(
-    () => endpoints.billPay.get(billPaymentId), [billPaymentId],
+    () => endpoints.billPay.get(billPaymentId, { background: true }), [billPaymentId],
   );
 
   useEffect(() => { if (data) setBill(data); }, [data]);
@@ -89,7 +93,7 @@ export default function PayBillStatus() {
 
   /* ── Processing ─────────────────────────────────────────────────────── */
   if (polling && IN_FLIGHT.includes(bill.status)) {
-    return <Processing bill={bill} />;
+    return <ProcessingPayment amount={bill.bill_amount} bank={bill.bank} reference={bill.reference} />;
   }
 
   const home = () => navigate('/home');
@@ -154,7 +158,7 @@ export default function PayBillStatus() {
           <Row label="Bank" value={bill.bank} />
           <Row label="Amount" value={money(bill.bill_amount)} mono />
           <Row label="Credit Utilized" value={money(bill.total_amount)} mono />
-          <Row label="Date & Time" value={dateTime(bill.completed_at || bill.created_on)} />
+          <Row label="Date & Time" value={billDateTime(bill.completed_at || bill.created_on)} />
         </div>
 
         <div className="mt-6 space-y-2.5">
@@ -172,7 +176,7 @@ export default function PayBillStatus() {
 
           {bill.status === 'FAILED' && (
             <div className="grid grid-cols-2 gap-2.5">
-              <Button variant="mint" size="lg" onClick={() => navigate('/pay-bills?step=summary')}>Try Again</Button>
+              <Button variant="mint" size="lg" onClick={() => navigate({ pathname: '/pay-bills', search: '?step=summary' })}>Try Again</Button>
               <Button variant="outline" size="lg" onClick={home}>Back to Home</Button>
             </div>
           )}
@@ -201,38 +205,6 @@ export default function PayBillStatus() {
       </Card>
 
       {showDetails && <Details bill={bill} />}
-    </div>
-  );
-}
-
-/* ── Processing ─────────────────────────────────────────────────────────── */
-
-function Processing({ bill }) {
-  return (
-    <div className="mx-auto grid min-h-[60vh] w-full max-w-md place-items-center" role="status" aria-live="polite">
-      <div className="w-full text-center">
-        <span className="relative mx-auto grid h-24 w-24 place-items-center">
-          <span className="absolute inset-0 rounded-full bg-mint/20 motion-safe:animate-pulse-ring" />
-          <span className="absolute inset-2 rounded-full border-2 border-mint/25 border-t-mint-600 motion-safe:animate-spin" />
-          {/* Credit -> bank, drawn as a card sliding toward a bank. */}
-          <svg viewBox="0 0 48 48" className="relative h-10 w-10 text-ink" fill="none" aria-hidden="true">
-            <rect x="5" y="14" width="18" height="12" rx="2.5" stroke="currentColor" strokeWidth="2.2" />
-            <path d="M5 18.5h18" stroke="currentColor" strokeWidth="2.2" />
-            <path d="M27 20h8m-3-3l3 3-3 3" stroke="#00B386" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="motion-safe:animate-pulse" />
-            <path d="M37 24l5-3 5 3M38 25v7m4-7v7m4-7v7M37 33h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" transform="translate(-4 0)" />
-          </svg>
-        </span>
-        <h1 className="mt-6 text-xl font-bold tracking-tight text-ink">Processing Payment</h1>
-        <p className="mx-auto mt-1.5 max-w-xs text-sm text-slate">
-          We&apos;re processing your bill payment request. Please don&apos;t close this page.
-        </p>
-
-        <Card className="mt-6 divide-y divide-line py-1 text-left">
-          <Row label="Amount" value={money(bill.bill_amount)} mono />
-          <Row label="Destination bank" value={bill.bank} />
-          <Row label="Transaction reference" value={bill.reference} mono />
-        </Card>
-      </div>
     </div>
   );
 }
@@ -267,7 +239,7 @@ function Details({ bill }) {
           <Row label="Paid to" value={bill.bank} />
           {bill.utr && <Row label="Bank UTR" value={bill.utr} mono />}
           <Row label="Transaction ID" value={bill.reference} mono />
-          <Row label="Requested" value={dateTime(bill.created_on)} />
+          <Row label="Requested" value={billDateTime(bill.created_on)} />
         </div>
       </Card>
 
@@ -288,7 +260,7 @@ function Details({ bill }) {
       </Card>
 
       <p className="px-2 text-center text-2xs leading-relaxed text-slate">
-        Declaration accepted {dateTime(bill.consent_at)} · disclosure {bill.disclosure_version}.
+        Declaration accepted {billDateTime(bill.consent_at)} · disclosure {bill.disclosure_version}.
         Quote the transaction ID to support for any query.
       </p>
     </div>

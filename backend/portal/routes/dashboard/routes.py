@@ -125,7 +125,9 @@ class Dashboard(Resource):
         recent = MasterTransactions.query.filter_by(
             user_id=user.user_id
         ).order_by(MasterTransactions.created_on.desc()).limit(5).all()
-        bills = bill_pay_engine.summaries_for([t.transaction_id for t in recent])
+        bills = bill_pay_engine.summaries_for(
+            [t.transaction_id for t in recent] + [t.reverses_transaction_id for t in recent]
+        )
 
         verified_accounts = BankAccounts.query.filter_by(
             user_id=user.user_id,
@@ -205,6 +207,10 @@ class Dashboard(Resource):
                 'created_on': iso(t.created_on),
                 'utr': t.bank_rrn_utr,
                 'bill_payment': bills.get(t.transaction_id),
+                'restores_bill_payment': (
+                    bills.get(t.reverses_transaction_id)
+                    if t.transaction_type == 'REVERSAL_REFUND' else None
+                ),
             } for t in recent],
 
             'quick_actions': {

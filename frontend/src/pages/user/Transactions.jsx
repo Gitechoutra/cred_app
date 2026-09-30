@@ -96,8 +96,8 @@ export default function Transactions() {
                         key={transaction.transaction_id}
                         transaction={transaction}
                         onClick={() => navigate(
-                          transaction.bill_payment
-                            ? `/pay-bills/${transaction.bill_payment.bill_payment_id}`
+                          (transaction.bill_payment || transaction.restores_bill_payment)
+                            ? `/pay-bills/${(transaction.bill_payment || transaction.restores_bill_payment).bill_payment_id}`
                             : `/transactions/${transaction.transaction_id}`,
                         )}
                       />
