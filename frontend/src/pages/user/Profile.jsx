@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { ListLink } from '../../components/domain';
 import {
-  IconBank, IconCard, IconEmi, IconLock, IconReceipt, IconShield, IconUser,
+  IconBank, IconCard, IconEmi, IconLock, IconReceipt, IconShield, IconUser, PageHeader,
 } from '../../components/layout/AppShell';
 import { Badge, Button, Card, Section, Skeleton } from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
@@ -17,6 +17,7 @@ export default function Profile() {
   if (loading || !profile) {
     return (
       <div className="space-y-4 px-4 pt-5">
+        <PageHeader title="Profile" back="/home" />
         <Skeleton className="h-24 w-full rounded-2xl" />
         <Skeleton className="h-48 w-full rounded-2xl" />
         <Skeleton className="h-48 w-full rounded-2xl" />
@@ -28,9 +29,9 @@ export default function Profile() {
 
   return (
     <div className="animate-fade-up pb-6">
-      <header className="px-4 pt-5 pb-3">
-        <h1 className="text-xl font-bold text-ink">Profile</h1>
-      </header>
+      <div className="px-4 pt-5">
+        <PageHeader title="Profile" back="/home" />
+      </div>
 
       <div className="space-y-5 px-4">
         {/* ── Identity ────────────────────────────────────────────────── */}
