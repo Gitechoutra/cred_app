@@ -1,8 +1,10 @@
 /**
- * A half-circle credit score gauge, 300-900, coloured by band.
+ * A half-circle credit score gauge, 300-900.
  *
- * Bands match the backend's score_band(): below 650 poor, 650 fair, 700 good,
- * 750 very good, 800 excellent.
+ * Draws what the backend returned and nothing else: the score, and the band
+ * label from the backend's score_band(). The arc segments are only the scale's
+ * decoration; the band shown is never worked out here. With no score - new to
+ * credit, or not fetched - it reads "N/A" and the status the backend gave.
  */
 
 const MIN = 300;
@@ -16,10 +18,17 @@ export const SCORE_BANDS = [
   { from: 800, to: 900, color: '#009170' },
 ];
 
-export function scoreColor(score) {
-  if (score == null) return '#94A3A0';
-  const band = SCORE_BANDS.find((b) => score >= b.from && score < b.to);
-  return (band || SCORE_BANDS[SCORE_BANDS.length - 1]).color;
+// Keyed by the backend's band label, so a colour can never disagree with it.
+const BAND_COLORS = {
+  Poor: '#EF4444',
+  Fair: '#F59E0B',
+  Good: '#A3D94A',
+  'Very good': '#00C594',
+  Excellent: '#009170',
+};
+
+export function bandColor(band) {
+  return BAND_COLORS[band] || '#94A3A0';
 }
 
 // Angle along the arc, 180deg (left, 300) to 0deg (right, 900).
@@ -43,7 +52,7 @@ export default function ScoreMeter({ score, band, size = 'md' }) {
   return (
     <div className="mx-auto" style={{ width }}>
       <svg viewBox="0 0 200 118" className="w-full" role="img"
-        aria-label={has ? `Credit score ${score} out of ${MAX}` : 'No credit score'}
+        aria-label={has ? `Credit score ${score} out of ${MAX}` : 'Credit score not available'}
       >
         {SCORE_BANDS.map((b) => (
           <path key={b.from} d={arc(b.from + 1, b.to - 1, 80)} fill="none"
@@ -57,10 +66,10 @@ export default function ScoreMeter({ score, band, size = 'md' }) {
         <text x="100" y="92" textAnchor="middle" className="fill-ink"
           style={{ fontSize: 34, fontWeight: 700 }}
         >
-          {has ? score : '—'}
+          {has ? score : 'N/A'}
         </text>
         <text x="100" y="112" textAnchor="middle"
-          style={{ fontSize: 11, fontWeight: 600 }} fill={scoreColor(score)}
+          style={{ fontSize: 11, fontWeight: 600 }} fill={bandColor(band)}
         >
           {band || (has ? '' : 'Not checked')}
         </text>

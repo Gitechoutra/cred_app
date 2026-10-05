@@ -41,7 +41,7 @@ from portal.models.base import utcnow
 from portal.models.cards import Cards, CardStatus
 from portal.models.credit_accounts import CreditAccounts, CreditAccountStatus
 from portal.models.credit_applications import (
-    ApplicationStatus, CreditApplications, IncomeProofType,
+    ApplicationStatus, BureauStatus, CreditApplications, IncomeProofType,
 )
 from portal.models.credit_transactions import CreditTransactions
 from portal.models.emi_obligations import EMIObligations
@@ -839,18 +839,17 @@ class AdminCreditApplicationQueue(Resource):
                 ),
                 'credit_score': application.credit_score,
                 'credit_score_band': credit_engine.score_band(application.credit_score),
-                'credit_no_history': application.credit_no_history,
+                'credit_no_history': application.bureau_status == BureauStatus.NO_HISTORY,
+                'credit_status': application.bureau_status,
+                'credit_status_label': BureauStatus.LABELS[application.bureau_status],
                 # The limit approval would grant, worked out from salary and
-                # score. Null when the application is not eligible.
+                # the bureau result. Null when the application is not eligible.
                 'eligible_limit': to_float(application.offered_limit),
-                'eligible': bool(assessment and assessment['approved']),
+                'eligible': bool(assessment and assessment['eligible']),
                 'assessment_reason': assessment['reason'] if assessment else None,
                 'assessment_message': (
                     credit_engine.DecisionReason.MESSAGES.get(assessment['reason'])
-                    if assessment and not assessment['approved'] else None
-                ),
-                'full_kyc_limit': (
-                    to_float(assessment.get('full_kyc_limit')) if assessment else None
+                    if assessment and not assessment['eligible'] else None
                 ),
                 'approved_limit': to_float(application.approved_limit),
                 'decision_reason': application.decision_reason,
@@ -948,9 +947,7 @@ class AdminCreditApplicationDetail(Resource):
                 'verified_at': iso(bank.verified_at),
             } if bank else None,
             'bureau': {
-                'credit_score': application.credit_score,
-                'score_band': credit_engine.score_band(application.credit_score),
-                'no_history': application.credit_no_history,
+                **credit_engine.bureau_result(application),
                 'fetched_at': iso(application.credit_score_fetched_at),
                 'reference': application.bureau_reference,
                 'consented_at': iso(application.bureau_consent_at),
@@ -1097,6 +1094,7 @@ class AdminReviewCreditApplication(Resource):
                 'approved_limit': to_float(application.approved_limit),
                 'eligible_limit': to_float(application.offered_limit),
                 'credit_score': application.credit_score,
+                'bureau_status': application.bureau_status,
             },
         )
 

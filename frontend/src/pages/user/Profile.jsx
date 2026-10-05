@@ -67,7 +67,7 @@ export default function Profile() {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-ink">Complete your KYC</p>
               <p className="truncate text-xs text-mint-800/70">
-                Unlock a higher credit limit
+                Verify your identity to apply for credit
               </p>
             </div>
             <span className="shrink-0 text-xs font-semibold text-mint-800">Verify</span>

@@ -173,7 +173,7 @@ def verify_kyc(token, admin, name):
 
     png = b'\x89PNG\r\n\x1a\n' + b'0' * 400
     submitted = post('/kyc/submit', form={
-        'pan_number': 'ABCDE1234F', 'full_name': name,
+        'pan_number': 'ABCDE0760F', 'full_name': name,
         'requested_tier': 'MINIMUM',
     }, files={'pan_document': ('pan.png', png, 'image/png')}, token=token)
     if submitted.status_code not in (200, 201):
@@ -372,7 +372,7 @@ def main():
           f'got {response.status_code}')
 
     response = post('/kyc/submit', form={
-        'pan_number': 'ABCDE1234F', 'full_name': 'Audit Alpha',
+        'pan_number': 'ABCDE0760F', 'full_name': 'Audit Alpha',
         'requested_tier': 'MINIMUM',
     }, files={'pan_document': ('evil.exe', b'MZ\x90\x00' + b'0' * 300,
                                'application/x-msdownload')}, token=token_a)
@@ -380,7 +380,7 @@ def main():
           f'got {response.status_code}')
 
     response = post('/kyc/submit', form={
-        'pan_number': 'ABCDE1234F', 'full_name': 'Audit Alpha',
+        'pan_number': 'ABCDE0760F', 'full_name': 'Audit Alpha',
         'requested_tier': 'MINIMUM',
     }, files={'pan_document': ('big.png', b'\x89PNG\r\n\x1a\n' + b'0' * (11 * 1024 * 1024),
                                'image/png')}, token=token_a)

@@ -106,7 +106,7 @@ def admin_token():
     return data_of(response).get('access_token')
 
 
-def submit_kyc(token, name, tier='MINIMUM', pan='ABCDE1234F'):
+def submit_kyc(token, name, tier='MINIMUM', pan='ABCDE0760F'):
     """Submit KYC without approving it. True when it is (now) in review."""
     png = b'\x89PNG\r\n\x1a\n' + b'0' * 400
     files = {'pan_document': ('pan.png', png, 'image/png')}
@@ -123,7 +123,7 @@ def submit_kyc(token, name, tier='MINIMUM', pan='ABCDE1234F'):
     return response.status_code in (200, 201, 409)
 
 
-def approve_kyc(token, admin, name, tier='MINIMUM', pan='ABCDE1234F'):
+def approve_kyc(token, admin, name, tier='MINIMUM', pan='ABCDE0760F'):
     """Take a user to a verified KYC tier through the real review path."""
     user_id = (data_of(get('/users/me', token)) or {}).get('user_id')
     if not user_id:
@@ -256,7 +256,7 @@ def main():
           response.status_code == 400 and 'employer' in response.text,
           f'{response.status_code} {response.text[:160]}')
 
-    # (18,334 - 5,000) x 3 at the sandbox score of 760 = 40,002 -> 40,000.
+    # (18,334 - 5,000) x 3 at the test PAN's sandbox score of 760 = 40,002 -> 40,000.
     # requested_limit is sent to prove it is ignored: the applicant does not
     # choose a limit any more.
     response = apply_for_credit(post, token, {
@@ -1035,7 +1035,7 @@ def main():
         ),
         '/credit/eligibility': (
             get('/credit/eligibility', token),
-            ['can_apply', 'kyc_tier', 'kyc_required', 'max_limit_for_tier',
+            ['can_apply', 'kyc_tier', 'kyc_required',
              'minimum_limit', 'full_kyc_required_above', 'employment_types',
              'has_credit_line', 'open_application_id'],
         ),
@@ -1058,8 +1058,8 @@ def main():
             get(f'/credit/applications/{application_id}', token),
             ['application_id', 'status', 'employment_type', 'monthly_income',
              'existing_emi_outflow', 'eligible_limit', 'credit_score',
-             'credit_score_band', 'offered_limit',
-             'approved_limit', 'eligibility_score', 'decision_reason',
+             'credit_score_band', 'credit_status', 'credit_status_label',
+             'offered_limit', 'approved_limit', 'decision_reason',
              'decision_message', 'submitted_at', 'kyc_verified_at',
              'decided_at', 'is_open'],
         ),
@@ -1114,8 +1114,8 @@ def main():
     # ── 14. Nobody sets the limit by hand ─────────────────────────────────
     print('\n[14] The limit comes from salary and credit score only')
 
-    # Minimum KYC, high salary: eligible for far more, capped at the full-KYC
-    # threshold, and told what full KYC would unlock.
+    # Minimum KYC, high salary: income and score support far more, but the
+    # regulatory full-KYC threshold caps it. No "complete KYC for more" offer.
     _, capped = make_user('Credit Capped')
     if capped and approve_kyc(capped, admin, 'Credit Capped'):
         application = data_of(apply_for_credit(post, capped, {
@@ -1125,9 +1125,8 @@ def main():
         check('a minimum-KYC applicant is offered the full-KYC threshold',
               application.get('eligible_limit') == 10000,
               str(application.get('eligible_limit')))
-        check('and told what full KYC would unlock',
-              (application.get('full_kyc_limit') or 0) > 10000,
-              str(application.get('full_kyc_limit')))
+        check('no KYC-upgrade limit is offered',
+              'full_kyc_limit' not in application, str(application)[:200])
         response = post(
             f"/admin/credit/applications/{application['application_id']}/review",
             {'decision': 'APPROVE', 'limit': 5000000}, token=admin,

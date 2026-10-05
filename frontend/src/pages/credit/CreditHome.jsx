@@ -151,15 +151,9 @@ export default function CreditHome() {
               <p className="relative mt-2 text-2xl font-bold tracking-tight">
                 Spend now. Pay by your due date.
               </p>
-              {eligibility?.max_limit_for_tier > 0 && (
-                <p className="relative mt-2 text-sm text-white/70">
-                  Limits up to{' '}
-                  <span className="money font-semibold text-white">
-                    {money(eligibility.max_limit_for_tier, { decimals: 0 })}
-                  </span>{' '}
-                  for your KYC level
-                </p>
-              )}
+              <p className="relative mt-2 text-sm text-white/70">
+                Your limit is set from your income and credit bureau result, then reviewed by our credit team.
+              </p>
             </div>
 
             <div className="p-5 sm:p-6">

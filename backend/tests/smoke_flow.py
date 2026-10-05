@@ -142,7 +142,7 @@ def main():
     check('KYC status', response.status_code == 200, response.text[:200])
 
     response = post('/kyc/submit', form={
-        'pan_number': 'ABCDE1234F',
+        'pan_number': 'ABCDE0760F',
         'full_name': 'Vikram Sharma',
         'requested_tier': 'MINIMUM',
     }, files={'pan_document': ('pan.png', b'\x89PNG\r\n\x1a\n-smoke', 'image/png')},
@@ -156,7 +156,8 @@ def main():
     print('\n[2b] Admin KYC approval')
 
     response = post('/authentication/mpin/verify',
-                    {'phone': '9999999999', 'mpin': '135790'})
+                    {'phone': os.getenv('ADMIN_SEED_PHONE', '9999999999'),
+                     'mpin': os.getenv('ADMIN_SEED_MPIN', '135790')})
     admin_ok = check('Admin login', response.status_code == 200, response.text[:200])
 
     if admin_ok:

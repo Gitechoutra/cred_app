@@ -177,7 +177,7 @@ def main():
 
     # KYC + a payout account, so a transfer can actually be attempted.
     response = post('/kyc/submit', form={
-        'pan_number': 'ABCDE1234F', 'full_name': 'Card Tester',
+        'pan_number': 'ABCDE0760F', 'full_name': 'Card Tester',
         'requested_tier': 'MINIMUM',
     }, files={'pan_document': ('pan.png', PNG, 'image/png')}, token=token)
 

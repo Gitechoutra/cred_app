@@ -87,7 +87,7 @@ def main():
     post('/authentication/mpin/set', {'mpin': '246813'}, token=token)
 
     post('/kyc/submit', form={
-        'pan_number': 'ABCDE1234F', 'full_name': 'Error Tester',
+        'pan_number': 'ABCDE0760F', 'full_name': 'Error Tester',
         'requested_tier': 'MINIMUM',
     }, files={'pan_document': ('pan.png', PNG, 'image/png')}, token=token)
 

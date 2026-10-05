@@ -128,8 +128,8 @@ export default function Hub() {
       {quickActions.needs_kyc && (
         <SetupBanner
           icon={<IconShield className="h-5 w-5 text-ink" />}
-          title="Verify your identity to unlock full limits"
-          description="RBI compliance requires identity verification before moving funds or unlocking higher limits."
+          title="Verify your identity"
+          description="RBI compliance requires identity verification before you can apply for credit or move funds."
           cta="Verify now"
           onClick={() => navigate('/kyc')}
         />
@@ -629,7 +629,7 @@ function CreditScoreCard({ onOpen }) {
 
   return (
     <section className="flex flex-col items-center gap-4 rounded-3xl border border-line/80 bg-canvas p-5 shadow-card sm:flex-row sm:p-6">
-      <ScoreMeter score={score?.score} band={score?.band} size="sm" />
+      <ScoreMeter score={score?.score} band={score?.no_history ? 'New to credit' : score?.band} size="sm" />
       <div className="flex-1 text-center sm:text-left">
         <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
           <h2 className="text-base font-bold tracking-tight text-ink">Your Credit Score</h2>
@@ -637,7 +637,8 @@ function CreditScoreCard({ onOpen }) {
         </div>
         <p className="mt-1 text-sm text-slate">
           {score
-            ? <>CIBIL Score: <span className="font-semibold text-ink">{score.no_history ? 'New to credit' : score.score}</span>
+            ? <>CIBIL Score: <span className="font-semibold text-ink">{score.no_history ? 'Not Available' : score.score}</span>
+                {score.no_history ? ` (${score.status_label})` : ''}
                 {score.band && !score.no_history ? ` (${score.band})` : ''} · updated {date(score.fetched_at)}</>
             : 'Not checked yet. See your score, accounts, utilisation and enquiries.'}
         </p>

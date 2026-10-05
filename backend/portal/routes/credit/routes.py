@@ -38,7 +38,8 @@ from portal.helpers.validators import (
 from portal.models.bank_accounts import BankAccounts
 from portal.models.credit_accounts import CreditAccountStatus, CreditPurpose
 from portal.models.credit_applications import (
-    ApplicationStatus, CreditApplications, EmploymentType, IncomeProofType,
+    ApplicationStatus, BureauStatus, CreditApplications, EmploymentType,
+    IncomeProofType,
 )
 from portal.models.credit_statements import CreditStatements
 from portal.models.credit_transactions import (
@@ -162,13 +163,14 @@ def application_dict(application: CreditApplications) -> dict:
         credit_engine.assess(application, application.user)
         if application.is_open and application.user else None
     )
+    bureau = credit_engine.bureau_result(application)
     return {
         'assessment_reason': assessment['reason'] if assessment else None,
         'assessment_message': (
             credit_engine.DecisionReason.MESSAGES.get(assessment['reason'])
-            if assessment and not assessment['approved'] else None
+            if assessment and not assessment['eligible'] else None
         ),
-        'full_kyc_limit': to_float(assessment.get('full_kyc_limit')) if assessment else None,
+        'eligible': bool(assessment and assessment['eligible']),
         'application_id': application.application_id,
         'status': application.status,
         'employment_type': application.employment_type,
@@ -186,15 +188,21 @@ def application_dict(application: CreditApplications) -> dict:
         'eligibility_breakdown': plain(assessment['breakdown']) if assessment else None,
         'eligibility_checks': assessment['checks'] if assessment else None,
         # What the rules make this application eligible for, from salary and
-        # credit score. Null until a score exists, or when it is not eligible.
+        # the bureau result. Null until the bureau has answered, or when it is
+        # not eligible. Never granted until an administrator approves.
         'eligible_limit': to_float(application.offered_limit),
         'offered_limit': to_float(application.offered_limit),
-        'credit_score': application.credit_score,
-        'credit_score_band': credit_engine.score_band(application.credit_score),
-        'credit_no_history': application.credit_no_history,
+        # Exactly what the bureau returned. Null for new-to-credit applicants,
+        # whose status says so - never a stand-in number.
+        'credit_score': bureau['credit_score'],
+        'credit_score_band': bureau['score_band'],
+        'credit_no_history': bureau['no_history'],
+        'credit_status': bureau['status'],
+        'credit_status_label': bureau['status_label'],
+        'bureau_code': bureau['bureau_code'],
+        'bureau_is_demo': bureau['is_demo'],
         'credit_score_fetched_at': iso(application.credit_score_fetched_at),
         'approved_limit': to_float(application.approved_limit),
-        'eligibility_score': to_float(application.eligibility_score),
         'decision_reason': reason,
         # Derived from the code rather than stored, so one decision always reads
         # the same way however long ago it was made.
@@ -637,18 +645,12 @@ class CreditEligibility(Resource):
         """
         What this user could be offered, and what stands in the way.
 
-        Read-only and side-effect free, so the apply screen can show a real
-        ceiling before anyone fills a form in. The number here is the tier cap,
-        not a promise: the offer depends on declared income, which this endpoint
-        has not been given.
+        Read-only and side-effect free. No limit is offered here: a limit
+        exists only once the bureau has answered and the rules have been run on
+        a submitted application, and is granted only by an administrator.
         """
         user = current_user()
         from portal.models.users import KYCTier
-
-        tier_cap = settings.get_decimal(
-            Key.CREDIT_LIMIT_MAX_FULL_KYC if user.kyc_tier == KYCTier.FULL
-            else Key.CREDIT_LIMIT_MAX_STANDARD_KYC
-        )
 
         existing = credit_engine.account_for(user.user_id)
         open_application = credit_engine.application_for(user.user_id)
@@ -683,7 +685,6 @@ class CreditEligibility(Resource):
             'can_apply': not existing and not open_application,
             'kyc_tier': user.kyc_tier,
             'kyc_required': user.kyc_tier == KYCTier.NONE,
-            'max_limit_for_tier': to_float(tier_cap),
             'minimum_limit': to_float(settings.get_decimal(Key.CREDIT_LIMIT_MIN)),
             'full_kyc_required_above': to_float(
                 settings.get_decimal(Key.FULL_KYC_REQUIRED_ABOVE)
@@ -1385,7 +1386,11 @@ def _score_dict(*, score, no_history, fetched_at, source, is_demo,
     return {
         'score': score,
         'no_history': bool(no_history),
-        'band': 'New to credit' if no_history else credit_engine.score_band(score),
+        'status': BureauStatus.NO_HISTORY if no_history else BureauStatus.SCORED,
+        'status_label': BureauStatus.LABELS[
+            BureauStatus.NO_HISTORY if no_history else BureauStatus.SCORED
+        ],
+        'band': None if no_history else credit_engine.score_band(score),
         'min_score': 300,
         'max_score': 900,
         'fetched_at': iso(fetched_at),
@@ -1424,8 +1429,8 @@ def _latest_score(user) -> dict | None:
             no_history=application.credit_no_history,
             fetched_at=application.credit_score_fetched_at,
             source='APPLICATION',
-            # The sandbox bureau is the only one there is.
-            is_demo=adapters._use_sandbox(),
+            is_demo=application.bureau_provider == 'SANDBOX',
+            provider=application.bureau_provider,
         )
     return None
 

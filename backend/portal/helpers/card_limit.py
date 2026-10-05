@@ -33,6 +33,7 @@ class Reason:
     KYC_INCOMPLETE = 'KYC_INCOMPLETE'
     INCOME_MISSING = 'INCOME_MISSING'
     SCORE_UNAVAILABLE = 'SCORE_UNAVAILABLE'
+    NO_CREDIT_HISTORY = 'NO_CREDIT_HISTORY'
     SCORE_TOO_LOW = 'SCORE_TOO_LOW'
 
     MESSAGES = {
@@ -42,6 +43,10 @@ class Reason:
             'We could not get your credit score yet, so a limit for this card '
             'cannot be set. Complete your income details and bureau consent '
             'to link your card.'
+        ),
+        NO_CREDIT_HISTORY: (
+            'The credit bureau has no credit history for you yet (new to '
+            'credit), so a limit for this card cannot be worked out from a score.'
         ),
         SCORE_TOO_LOW: (
             f'Cards can be linked with a credit score of '
@@ -85,7 +90,14 @@ def assess(user) -> dict:
             CreditApplications.user_id == user.user_id,
             CreditApplications.monthly_income > 0,
         ).first() is not None
-        return refuse(Reason.SCORE_UNAVAILABLE if has_income else Reason.INCOME_MISSING)
+        if not has_income:
+            return refuse(Reason.INCOME_MISSING)
+        # New to credit is not a missing or low score; say which it is.
+        no_history = CreditApplications.query.filter(
+            CreditApplications.user_id == user.user_id,
+            CreditApplications.credit_no_history.is_(True),
+        ).first() is not None
+        return refuse(Reason.NO_CREDIT_HISTORY if no_history else Reason.SCORE_UNAVAILABLE)
 
     score = application.credit_score
     income = money(application.monthly_income)

@@ -113,7 +113,7 @@ def spendable_account(token, admin, name, limit):
     png = b'\x89PNG\r\n\x1a\n' + b'0' * 400
     # Full KYC, so limits above the minimum-KYC threshold are allowed.
     post('/kyc/submit', form={
-        'pan_number': 'ABCDE1234F', 'full_name': name,
+        'pan_number': 'ABCDE0760F', 'full_name': name,
         'requested_tier': 'FULL',
         'aadhaar_number': f'{random.randint(100000000000, 999999999999)}',
     }, files={

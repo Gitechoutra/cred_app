@@ -38,6 +38,32 @@ class ApplicationStatus:
     }
 
 
+class BureauStatus:
+    """
+    Where the credit bureau check stands. Derived from the stored result (see
+    CreditApplications.bureau_status), never stored on its own, so it cannot
+    disagree with the score it describes.
+    """
+
+    #: Not asked yet - the bureau is queried by PAN once KYC is verified.
+    PENDING = 'PENDING'
+    #: The bureau returned a score, 300-900.
+    SCORED = 'SCORED'
+    #: The bureau has no file on the person (NH / NA / No Hit): new to credit.
+    #: Not a score, and never converted into one.
+    NO_HISTORY = 'NO_HISTORY'
+    #: The bureau was asked and gave no usable answer: down, not connected, or
+    #: a response that was neither a score nor a no-history code.
+    UNAVAILABLE = 'UNAVAILABLE'
+
+    LABELS = {
+        PENDING: 'Credit check pending',
+        SCORED: 'Credit score received',
+        NO_HISTORY: 'New to Credit / No Credit History',
+        UNAVAILABLE: 'Credit score unavailable',
+    }
+
+
 class EmploymentType:
     SALARIED = 'SALARIED'
     SELF_EMPLOYED = 'SELF_EMPLOYED'
@@ -129,6 +155,13 @@ class CreditApplications(db.Model, TimestampMixin, CRUDMixin):
     credit_no_history = db.Column(db.Boolean, default=False, nullable=False)
     credit_score_fetched_at = db.Column(db.DateTime, nullable=True)
     bureau_reference = db.Column(db.String(64), nullable=True)
+    #: Who answered: SANDBOX, or the contracted bureau. A sandbox answer is
+    #: test data and is labelled as such wherever it is shown.
+    bureau_provider = db.Column(db.String(20), nullable=True)
+    #: The bureau's own no-history code (NH, NA), kept as returned.
+    bureau_code = db.Column(db.String(20), nullable=True)
+    #: Why the last enquiry produced nothing usable. Cleared by a good answer.
+    bureau_error = db.Column(db.String(255), nullable=True)
     #: When the applicant agreed to the bureau enquiry. A report is never pulled
     #: without it.
     bureau_consent_at = db.Column(db.DateTime, nullable=True)
@@ -137,10 +170,9 @@ class CreditApplications(db.Model, TimestampMixin, CRUDMixin):
     # Computed server-side, always. A client-supplied limit is a request, never
     # the outcome.
     approved_limit = db.Column(db.Numeric(12, 2), nullable=True)
-    #: The offer the engine computed, kept even when an admin overrides it, so
-    #: an override is visible as an override.
+    #: The eligible limit the rules give from income and the bureau result.
+    #: Not a decision: only an administrator's approval grants a limit.
     offered_limit = db.Column(db.Numeric(12, 2), nullable=True)
-    eligibility_score = db.Column(db.Numeric(5, 2), nullable=True)
     #: Machine-readable reason, from a fixed vocabulary. The message shown to
     #: the applicant is derived from this rather than stored free-text, so the
     #: same reason always reads the same way.
@@ -160,6 +192,16 @@ class CreditApplications(db.Model, TimestampMixin, CRUDMixin):
 
     def can_transition_to(self, new_status: str) -> bool:
         return new_status in ApplicationStatus.ALLOWED.get(self.status, [])
+
+    @property
+    def bureau_status(self) -> str:
+        if self.credit_score is not None:
+            return BureauStatus.SCORED
+        if self.credit_no_history:
+            return BureauStatus.NO_HISTORY
+        if self.bureau_error:
+            return BureauStatus.UNAVAILABLE
+        return BureauStatus.PENDING
 
     @property
     def is_open(self) -> bool:

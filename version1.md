@@ -484,13 +484,15 @@
   | Rule | Value |
   |---|---|
   | KYC tier NONE | Not decided — `KYC_INCOMPLETE` |
+  | Bureau result (evaluated first) | fetched from the bureau by PAN, with consent, and stored exactly as returned. Score 300–900 → `SCORED`. `NA` / `NH` / No Hit / `-1` → `NO_HISTORY`: score stays empty and is shown as "Not Available — New to Credit / No Credit History", never a number. Bureau down, not connected, or an unreadable answer → `UNAVAILABLE` → `CREDIT_SCORE_UNAVAILABLE`, no limit, cannot be approved; retried when an admin approves |
+  | Credit score | below 650 → `CREDIT_SCORE_TOO_LOW` (the no-history path has no minimum score) |
   | Disposable income | monthly income − existing EMI outflow |
   | FOIR | existing EMIs above 60% of income (or disposable ≤ 0) → `OBLIGATIONS_TOO_HIGH` |
-  | Credit score | fetched from the bureau by PAN, with consent. Below 650 → `CREDIT_SCORE_TOO_LOW`; not yet fetched → `CREDIT_SCORE_UNAVAILABLE` |
   | Offer | disposable income × 4 (score 800+), 3 (750–799), 2 (700–749), 1 (650–699); no bureau history → 1× and thin-file capped |
   | Thin file (Student / Other / no history) | capped at ₹20,000 |
   | Tier cap | `CREDIT_LIMIT_MAX_STANDARD_KYC` / `CREDIT_LIMIT_MAX_FULL_KYC` settings |
-  | Minimum KYC | capped at the full-KYC threshold (`FULL_KYC_REQUIRED_ABOVE`); the application reports what full KYC would unlock |
+  | Minimum KYC | capped at the full-KYC threshold (`FULL_KYC_REQUIRED_ABOVE`). A regulatory ceiling only: no screen offers a higher limit for completing KYC, and no form step (PAN, bank, KYC, income proof) adds to a limit |
+  | Sandbox bureau | outside production only. The test PAN's four digits pick the answer: `0300`–`0900` is the score, `0000` NH, `0001` NA, `0002` outage, `0003` unreadable; any other PAN has no file and gets no score. There is no default score |
   | Floor | below ₹5,000 → `INCOME_BELOW_FLOOR` |
   | Rounding | down to the nearest ₹500 |
   | Admin decision | approve or reject only. No amount is typed: approval grants the eligible limit re-checked at that moment, and an ineligible application cannot be approved |

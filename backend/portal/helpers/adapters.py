@@ -286,9 +286,93 @@ def refund_payment(*, order_id: str, refund_id: str, amount, note: str = None) -
 
 # ── Credit bureau (CIBIL score) ────────────────────────────────────────────
 
-#: What the sandbox returns for an ordinary PAN: a good score, in the 750-799
-#: band. Fixed rather than random so a test knows the limit it should get.
-SANDBOX_CREDIT_SCORE = 760
+#: The bureau score scale. Anything a bureau returns outside it is not a score.
+BUREAU_SCORE_MIN = 300
+BUREAU_SCORE_MAX = 900
+
+#: How bureaus say they hold no usable credit file on someone, normalised by
+#: upper-casing and dropping spaces, underscores and hyphens. CIBIL reports NH
+#: (no hit: no record at all) and NA (a record too new or thin to score); feeds
+#: also spell these out. Every one means new to credit - never a score.
+_NO_HISTORY_TOKENS = {
+    'NH': 'NH', 'NOHIT': 'NH', 'NORECORD': 'NH', 'NORECORDFOUND': 'NH',
+    'NA': 'NA', 'NOTAVAILABLE': 'NA', 'NOCREDITHISTORY': 'NA',
+    'NOHISTORY': 'NA', 'NTC': 'NA', 'NEWTOCREDIT': 'NA', 'INSUFFICIENTHISTORY': 'NA',
+}
+
+
+def interpret_bureau_score(raw) -> dict:
+    """
+    Read a bureau's score field. Every bureau response goes through this, the
+    sandbox's included, so a no-hit can never be stored as a number.
+
+    Returns {'outcome': 'SCORED' | 'NO_HISTORY' | 'INVALID', 'score', 'code'}:
+
+        a whole number 300-900      SCORED, that number
+        NA / NH / No Hit / ...      NO_HISTORY, score None, code NH or NA
+        -1 or 000-1                 NO_HISTORY (CIBIL's numeric no-hit), NH
+        1 to 5                      NO_HISTORY (CIBIL 2.0 ranks a file too
+                                    thin to score 1-5; a risk rank, not a
+                                    score), NA
+        anything else               INVALID - including 0, blanks and numbers
+                                    off the scale. Not turned into a score.
+    """
+    text = str(raw).strip() if raw is not None else ''
+    invalid = {'outcome': 'INVALID', 'score': None, 'code': None}
+    if not text:
+        return invalid
+
+    if text in ('-1', '000-1'):
+        return {'outcome': 'NO_HISTORY', 'score': None, 'code': 'NH'}
+
+    token = ''.join(ch for ch in text.upper() if ch not in ' _-/')
+    if token in _NO_HISTORY_TOKENS:
+        return {'outcome': 'NO_HISTORY', 'score': None, 'code': _NO_HISTORY_TOKENS[token]}
+
+    if text.isdigit():
+        value = int(text)
+        if BUREAU_SCORE_MIN <= value <= BUREAU_SCORE_MAX:
+            return {'outcome': 'SCORED', 'score': value, 'code': None}
+        if 1 <= value <= 5:
+            return {'outcome': 'NO_HISTORY', 'score': None, 'code': 'NA'}
+    return invalid
+
+
+def _bureau_answer(raw, *, provider: str, reference: str) -> dict:
+    """A raw bureau score field as fetch_credit_score's result."""
+    reading = interpret_bureau_score(raw)
+    if reading['outcome'] == 'INVALID':
+        return {
+            'ok': False,
+            'error_code': 'BUREAU_INVALID_RESPONSE',
+            'error': 'The credit bureau returned a response that is not a score.',
+        }
+    return {
+        'ok': True,
+        'score': reading['score'],
+        'no_history': reading['outcome'] == 'NO_HISTORY',
+        'bureau_code': reading['code'],
+        'provider': provider,
+        'reference': reference,
+    }
+
+
+def _sandbox_bureau_allowed() -> bool:
+    """
+    The sandbox bureau answers outside production only. USE_SANDBOX_ADAPTERS
+    defaults on everywhere, and a sandbox score in production would be an
+    invented score deciding a real application.
+    """
+    return current_app.config.get('ENV_NAME', 'development') != 'production'
+
+
+#: Sandbox scenarios, chosen by the four digits of a test PAN (ABCDE0680F).
+#: There is no default: a PAN that picks no scenario gets no score, because a
+#: number handed to every applicant is a fabricated score.
+SANDBOX_NO_HIT_DIGITS = '0000'          # bureau answers NH
+SANDBOX_NA_DIGITS = '0001'              # bureau answers NA
+SANDBOX_DOWN_DIGITS = '0002'            # bureau unreachable
+SANDBOX_GARBLED_DIGITS = '0003'         # bureau answers something unreadable
 
 
 def fetch_credit_score(*, reference: str, pan: str, full_name: str = None,
@@ -300,35 +384,45 @@ def fetch_credit_score(*, reference: str, pan: str, full_name: str = None,
     report without it is not permitted - and it is a soft enquiry, which does
     not itself affect the score.
 
-    Returns {'ok', 'score', 'no_history', 'provider', 'reference'}. A score of
-    None with no_history=True means the bureau has no file on the person: new to
-    credit, which is not the same as a bad score.
+    Returns {'ok', 'score', 'no_history', 'bureau_code', 'provider',
+    'reference'}, or {'ok': False, 'error_code', 'error'}. A score of None with
+    no_history=True means the bureau has no file on the person: new to credit,
+    which is not the same as a bad score, and is never given a number.
 
-    Sandbox: a PAN whose four digits are 0300-0900 returns that number as the
-    score (ABCDE0680F scores 680), and 0000 means no credit history - so every
-    band, a decline and a thin file can be walked through by hand. Any other PAN
-    scores SANDBOX_CREDIT_SCORE.
+    Sandbox (outside production only): the PAN's four digits pick the answer.
+    0300-0900 is returned as the score (ABCDE0680F scores 680); 0000 answers NH
+    and 0001 NA; 0002 is a bureau outage and 0003 an unreadable response. Any
+    other PAN has no sandbox file and gets no score.
 
     Live: no bureau vendor is contracted yet (CIBIL, Experian, CRIF and Equifax
     all need a membership agreement), so this reports the score as unavailable
-    rather than inventing one. The application then waits for review with no
-    eligible limit, and cannot be approved until a score exists.
+    rather than inventing one. A vendor client goes here, and must hand its raw
+    score field to _bureau_answer so NH/NA are read the same way.
     """
     if _use_sandbox():
-        digits = (pan or '')[5:9]
-        if digits == '0000':
+        if not _sandbox_bureau_allowed():
             return {
-                'ok': True, 'score': None, 'no_history': True,
-                'provider': 'SANDBOX', 'reference': _ref('bureau_sbx'),
+                'ok': False,
+                'error_code': 'BUREAU_NOT_CONFIGURED',
+                'error': 'The credit bureau is not connected yet.',
             }
-        if digits.isdigit() and 300 <= int(digits) <= 900:
-            score = int(digits)
-        else:
-            score = SANDBOX_CREDIT_SCORE
-        return {
-            'ok': True, 'score': score, 'no_history': False,
-            'provider': 'SANDBOX', 'reference': _ref('bureau_sbx'),
-        }
+        digits = (pan or '')[5:9]
+        sandbox_ref = _ref('bureau_sbx')
+        if digits == SANDBOX_DOWN_DIGITS:
+            return {'ok': False, 'error_code': 'BUREAU_UNAVAILABLE',
+                    'error': 'The credit bureau did not respond.'}
+        raw = {
+            SANDBOX_NO_HIT_DIGITS: 'NH',
+            SANDBOX_NA_DIGITS: 'NA',
+            SANDBOX_GARBLED_DIGITS: 'ERR#',
+        }.get(digits)
+        if raw is None and digits.isdigit() and \
+                BUREAU_SCORE_MIN <= int(digits) <= BUREAU_SCORE_MAX:
+            raw = str(int(digits))
+        if raw is None:
+            return {'ok': False, 'error_code': 'BUREAU_NO_SANDBOX_FILE',
+                    'error': 'The sandbox bureau has no test file for this PAN.'}
+        return _bureau_answer(raw, provider='SANDBOX', reference=sandbox_ref)
 
     return {
         'ok': False,

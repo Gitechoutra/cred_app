@@ -59,7 +59,10 @@ function buildTimeline(application, kyc, account) {
   const withdrawn = status === 'WITHDRAWN';
   const approved = status === 'APPROVED';
   const kycState = kycDetail(kyc);
-  const scored = application.credit_score != null || application.credit_no_history;
+  // The bureau's answer as the backend reports it: SCORED, NO_HISTORY,
+  // UNAVAILABLE or PENDING. Nothing here works out a score or a status.
+  const bureau = application.credit_status;
+  const scored = bureau === 'SCORED' || bureau === 'NO_HISTORY';
   const active = account?.status === 'ACTIVE';
 
   return [
@@ -79,13 +82,16 @@ function buildTimeline(application, kyc, account) {
       label: 'Credit check and eligibility',
       detail: scored
         ? [
-          application.credit_no_history
-            ? 'No credit history yet'
+          bureau === 'NO_HISTORY'
+            ? `Credit score: Not Available · ${application.credit_status_label}`
             : `Credit score ${application.credit_score} (${application.credit_score_band})`,
-          application.eligible_limit ? `eligible for ${money(application.eligible_limit, { decimals: 0 })}` : null,
+          application.eligible_limit ? `eligible for ${money(application.eligible_limit, { decimals: 0 })}, subject to review` : null,
         ].filter(Boolean).join(' · ')
-        : (application.kyc_verified_at ? 'Fetching your credit score' : 'After identity is verified'),
+        : bureau === 'UNAVAILABLE'
+          ? `Credit score: Not Available · ${application.credit_status_label} - we will try the bureau again before review`
+          : (application.kyc_verified_at ? 'Fetching your credit score' : 'After identity is verified'),
       done: scored || approved || rejected,
+      current: bureau === 'UNAVAILABLE' && !approved && !rejected,
     },
     {
       label: 'Reviewed by our credit team',
@@ -281,11 +287,15 @@ export default function CreditStatus() {
               <div className="rounded-2xl border border-line bg-mist/40 p-3">
                 <p className="text-2xs uppercase tracking-wider text-slate">CIBIL score</p>
                 <p className="money mt-1 text-xl font-bold text-ink">
-                  {application.credit_no_history ? 'New' : application.credit_score ?? '—'}
+                  {application.credit_score
+                    ?? (application.credit_status === 'PENDING' ? '—' : 'Not Available')}
                 </p>
                 <p className="text-2xs text-slate">
-                  {application.credit_no_history ? 'No credit history yet' : application.credit_score_band || 'Being fetched'}
+                  {application.credit_status === 'SCORED'
+                    ? application.credit_score_band
+                    : application.credit_status === 'PENDING' ? 'Being fetched' : application.credit_status_label}
                 </p>
+                {application.bureau_is_demo && <p className="text-2xs text-amber-700">Sandbox bureau</p>}
               </div>
               <div className="rounded-2xl border border-mint-200 bg-mint-50/60 p-3">
                 <p className="text-2xs uppercase tracking-wider text-slate">Eligible limit</p>
@@ -313,12 +323,6 @@ export default function CreditStatus() {
             {application.assessment_message && (
               <p className="mt-3 rounded-xl bg-amber-50 px-3.5 py-3 text-center text-xs text-amber-800">
                 {application.assessment_message}
-              </p>
-            )}
-            {application.full_kyc_limit > 0 && (
-              <p className="mt-3 text-center text-xs text-slate">
-                Complete full KYC to be eligible for up to{' '}
-                <span className="money font-semibold text-ink">{money(application.full_kyc_limit, { decimals: 0 })}</span>.
               </p>
             )}
           </>

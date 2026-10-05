@@ -53,7 +53,7 @@ from portal.models.credit_accounts import (
     CreditAccounts, CreditAccountStatus, CreditPurpose,
 )
 from portal.models.credit_applications import (
-    ApplicationStatus, CreditApplications, EmploymentType,
+    ApplicationStatus, BureauStatus, CreditApplications, EmploymentType,
 )
 from portal.models.credit_statements import CreditStatements, StatementStatus
 from portal.models.credit_transactions import (
@@ -108,6 +108,9 @@ class DecisionReason:
     message cannot accidentally change the meaning of past decisions.
     """
 
+    #: An assessment outcome: every eligibility rule passed. Not a decision -
+    #: only an administrator approves.
+    ELIGIBLE = 'ELIGIBLE'
     APPROVED = 'APPROVED'
     KYC_INCOMPLETE = 'KYC_INCOMPLETE'
     INCOME_BELOW_FLOOR = 'INCOME_BELOW_FLOOR'
@@ -118,6 +121,7 @@ class DecisionReason:
     CREDIT_SCORE_UNAVAILABLE = 'CREDIT_SCORE_UNAVAILABLE'
 
     MESSAGES = {
+        ELIGIBLE: 'Eligible - waiting for review by our credit team.',
         APPROVED: 'Your credit line has been approved.',
         KYC_INCOMPLETE: 'Complete your KYC verification before we can decide.',
         INCOME_BELOW_FLOOR: (
@@ -137,8 +141,8 @@ class DecisionReason:
             'now. Paying existing loans and cards on time raises it.'
         ),
         CREDIT_SCORE_UNAVAILABLE: (
-            'We could not get your credit score yet, so your limit has not '
-            'been worked out.'
+            'We could not get your credit score from the bureau yet, so your '
+            'eligibility has not been worked out.'
         ),
     }
 
@@ -163,9 +167,10 @@ SCORE_BANDS = (
 #: Below this, no credit line is offered at all.
 MINIMUM_CREDIT_SCORE = 650
 
-#: Applicants the bureau has no history on are assessed on salary alone, at the
-#: lowest multiple, and capped - new to credit is not a bad score, but it is no
-#: evidence either.
+#: Applicants the bureau has no history on (NH / NA) take their own path: no
+#: score is recorded or invented for them, the minimum-score rule does not
+#: apply, and they are assessed on salary alone at the lowest multiple, capped -
+#: new to credit is not a bad score, but it is no evidence either.
 NO_HISTORY_MULTIPLE = Decimal('1')
 
 #: Applicants in these categories have no assessable regular income here, and
@@ -193,15 +198,22 @@ MAX_FOIR = Decimal('60')
 
 def assess(application: CreditApplications, user) -> dict:
     """
-    Work out the eligible limit. Pure: reads, decides, writes nothing.
+    Evaluate eligibility and the eligible limit. Pure: reads, decides, writes
+    nothing.
+
+    Runs on the bureau's answer and nothing in its place. Until the bureau has
+    returned a score or a no-history response, there is no eligibility to
+    evaluate: the result is "not eligible yet", with no limit. Nothing here
+    computes, adjusts or substitutes a credit score.
 
     The limit comes from two things and nothing else: declared salary net of
-    existing EMIs, and the credit score from the bureau. The applicant does not
-    name a limit and an administrator does not set one - both used to be
-    possible, and both were a way for the number to drift from the evidence.
+    existing EMIs, and the bureau result. Completing application steps - PAN,
+    bank account, KYC, income proof - moves an application along; it never adds
+    to the limit. The applicant does not name a limit and an administrator does
+    not set one.
 
-    Separate from `decide()` so the arithmetic can be tested without a database
-    write, and so the same numbers can be shown before anyone commits to them.
+    Eligibility is not approval. `eligible` says the rules pass; only an
+    administrator's decision in `decide()` approves or rejects.
 
     Also returns `breakdown` (every figure the limit was built from) and
     `checks` (each rule, passed or not), so a reviewer can follow the number
@@ -212,7 +224,7 @@ def assess(application: CreditApplications, user) -> dict:
     disposable = income - outflow
     foir = money(outflow / income * 100) if income > ZERO else ZERO
     score = application.credit_score
-    no_history = bool(application.credit_no_history)
+    bureau = application.bureau_status
     floor = money(settings.get_decimal(Key.CREDIT_LIMIT_MIN))
 
     breakdown = {
@@ -221,9 +233,10 @@ def assess(application: CreditApplications, user) -> dict:
         'disposable_income': disposable,
         'foir_percent': foir,
         'max_foir_percent': MAX_FOIR,
+        'bureau_status': bureau,
         'credit_score': score,
         'score_band': score_band(score),
-        'no_credit_history': no_history,
+        'no_credit_history': bureau == BureauStatus.NO_HISTORY,
         'minimum_score': MINIMUM_CREDIT_SCORE,
         'kyc_tier': user.kyc_tier,
         'minimum_limit': floor,
@@ -239,10 +252,10 @@ def assess(application: CreditApplications, user) -> dict:
         checks.append({'key': key, 'label': label, 'passed': bool(passed), 'detail': detail})
         return passed
 
-    def refuse(reason, score=ZERO):
+    def refuse(reason):
         return {
-            'approved': False, 'reason': reason, 'limit': ZERO, 'score': score,
-            'full_kyc_limit': None, 'breakdown': breakdown, 'checks': checks,
+            'eligible': False, 'reason': reason, 'limit': None,
+            'breakdown': breakdown, 'checks': checks,
         }
 
     if not check('kyc', 'KYC verified', user.kyc_tier != KYCTier.NONE,
@@ -250,27 +263,29 @@ def assess(application: CreditApplications, user) -> dict:
                  else 'Not verified yet'):
         return refuse(DecisionReason.KYC_INCOMPLETE)
 
+    # The bureau result comes first: every rule after it is evaluated on it.
+    thin_file = application.employment_type in THIN_FILE_EMPLOYMENT
+    if bureau == BureauStatus.NO_HISTORY:
+        check('score', 'Credit history', True,
+              'Not Available - new to credit '
+              f'({application.bureau_code or "no bureau history"}); '
+              'assessed on income alone, and capped')
+        multiple = NO_HISTORY_MULTIPLE
+        thin_file = True
+    elif bureau != BureauStatus.SCORED:
+        check('score', 'Credit score from the bureau', False,
+              application.bureau_error or 'Not fetched from the bureau yet')
+        return refuse(DecisionReason.CREDIT_SCORE_UNAVAILABLE)
+    elif not check('score', f'Credit score at least {MINIMUM_CREDIT_SCORE}',
+                   score >= MINIMUM_CREDIT_SCORE, f'{score} ({score_band(score)})'):
+        return refuse(DecisionReason.CREDIT_SCORE_TOO_LOW)
+    else:
+        multiple = next(m for floor_, m, _ in SCORE_BANDS if score >= floor_)
+
     if not check('foir', f'Existing EMIs within {MAX_FOIR:.0f}% of income',
                  disposable > ZERO and foir <= MAX_FOIR,
                  f'{foir:.1f}% of income already goes to EMIs'):
         return refuse(DecisionReason.OBLIGATIONS_TOO_HIGH)
-
-    affordability = _score(disposable, income)
-    thin_file = application.employment_type in THIN_FILE_EMPLOYMENT
-
-    if no_history:
-        check('score', 'Credit history', True,
-              'New to credit - assessed on income alone, and capped')
-        multiple = NO_HISTORY_MULTIPLE
-        thin_file = True
-    elif score is None:
-        check('score', 'Credit score available', False, 'Not fetched from the bureau yet')
-        return refuse(DecisionReason.CREDIT_SCORE_UNAVAILABLE, score=affordability)
-    elif not check('score', f'Credit score at least {MINIMUM_CREDIT_SCORE}',
-                   score >= MINIMUM_CREDIT_SCORE, f'{score} ({score_band(score)})'):
-        return refuse(DecisionReason.CREDIT_SCORE_TOO_LOW, score=affordability)
-    else:
-        multiple = next(m for floor_, m, _ in SCORE_BANDS if score >= floor_)
 
     offer = money(disposable * multiple)
     breakdown['income_multiple'] = multiple
@@ -279,61 +294,58 @@ def assess(application: CreditApplications, user) -> dict:
         breakdown['thin_file_cap'] = THIN_FILE_CAP
         offer = min(offer, THIN_FILE_CAP)
 
+    # The KYC tier is a regulatory ceiling, never a source of credit: it can
+    # only hold the limit below what income and the bureau result support. A
+    # limit above the full-KYC threshold needs full KYC, so a minimum-KYC
+    # applicant is held at the threshold.
     tier_cap = money(settings.get_decimal(
         Key.CREDIT_LIMIT_MAX_FULL_KYC if user.kyc_tier == KYCTier.FULL
         else Key.CREDIT_LIMIT_MAX_STANDARD_KYC
     ))
-    full_kyc_above = money(settings.get_decimal(Key.FULL_KYC_REQUIRED_ABOVE))
-
-    # A limit above the full-KYC threshold needs full KYC. A minimum-KYC
-    # applicant who qualifies for more is offered the threshold, and told what
-    # full KYC would unlock. This used to decline them outright and rely on an
-    # administrator typing in a smaller limit by hand; with limits no longer set
-    # by hand, declining would turn away almost every minimum-KYC applicant.
-    full_kyc_limit = None
-    if user.kyc_tier != KYCTier.FULL and offer > full_kyc_above:
-        full_kyc_limit = _round_down_to(
-            min(offer, money(settings.get_decimal(Key.CREDIT_LIMIT_MAX_FULL_KYC))),
-            Decimal('500'),
-        )
-        offer = full_kyc_above
-        tier_cap = min(tier_cap, full_kyc_above)
-
+    if user.kyc_tier != KYCTier.FULL:
+        tier_cap = min(tier_cap, money(settings.get_decimal(Key.FULL_KYC_REQUIRED_ABOVE)))
     breakdown['kyc_cap'] = tier_cap
     offer = min(offer, tier_cap)
 
     if not check('floor', f'Limit at least Rs. {floor:,.0f}', offer >= floor,
                  f'Works out to Rs. {offer:,.0f}'):
-        return refuse(DecisionReason.INCOME_BELOW_FLOOR, score=affordability)
+        return refuse(DecisionReason.INCOME_BELOW_FLOOR)
 
     # Rounded down to a round number, the way a limit is actually granted. Down,
     # never up: rounding up would hand out credit the rule above did not.
     limit = _round_down_to(offer, Decimal('500'))
     breakdown['eligible_limit'] = limit
     return {
-        'approved': True,
-        'reason': DecisionReason.APPROVED,
+        'eligible': True,
+        'reason': DecisionReason.ELIGIBLE,
         'limit': limit,
-        'score': affordability,
-        # What the same application would be eligible for with full KYC, when
-        # that is more. None when full KYC would change nothing.
-        'full_kyc_limit': full_kyc_limit,
         'breakdown': breakdown,
         'checks': checks,
     }
 
 
-def _score(disposable: Decimal, income: Decimal) -> Decimal:
+def bureau_result(application: CreditApplications) -> dict:
     """
-    Share of declared income that is not already committed, as a percentage.
+    The bureau's answer as every screen shows it. One shape for the applicant,
+    the reviewer and the API, so none of them works out a status of its own.
 
-    A thin proxy for affordability, and labelled as such: it is recorded so a
-    reviewer can see what the automatic decision was looking at, not presented
-    as a credit score.
+    `credit_score` is exactly what the bureau returned, or None. For a
+    new-to-credit applicant it stays None: "Not Available" is shown, never a
+    number.
     """
-    if income <= ZERO:
-        return ZERO
-    return money(disposable / income * 100)
+    status = application.bureau_status
+    return {
+        'status': status,
+        'status_label': BureauStatus.LABELS[status],
+        'credit_score': application.credit_score,
+        'score_band': score_band(application.credit_score),
+        'no_history': status == BureauStatus.NO_HISTORY,
+        'bureau_code': application.bureau_code,
+        'provider': application.bureau_provider,
+        'is_demo': application.bureau_provider == 'SANDBOX',
+        'error': application.bureau_error if status == BureauStatus.UNAVAILABLE else None,
+        'fetched_at': application.credit_score_fetched_at,
+    }
 
 
 def _round_down_to(value: Decimal, step: Decimal) -> Decimal:
@@ -517,8 +529,7 @@ def kyc_completed(user) -> CreditApplications:
 def _reassess(application: CreditApplications, user) -> dict:
     """Store the eligible limit the rules give right now, and return the assessment."""
     assessment = assess(application, user)
-    application.offered_limit = assessment['limit'] if assessment['approved'] else None
-    application.eligibility_score = assessment['score']
+    application.offered_limit = assessment['limit'] if assessment['eligible'] else None
     return assessment
 
 
@@ -526,9 +537,14 @@ def _fetch_credit_score(application: CreditApplications, user) -> bool:
     """
     Ask the bureau for the applicant's score, and record it.
 
-    Never raises: a bureau that is down leaves the score empty, the application
-    stays in review showing that, and approval waits until a score exists. An
-    application must not be lost because a third party was unreachable.
+    Stores exactly what the bureau returned: a score, or a no-history answer
+    (NH / NA) with no score at all. Never a substitute for either.
+
+    Never raises: a bureau that is down, or answers with something that is not
+    a score, records why in bureau_error and leaves the score empty. The
+    application stays in review showing that, and approval waits until the
+    bureau has answered. An application must not be lost because a third party
+    was unreachable.
     """
     if not application.bureau_consent_at:
         return False
@@ -541,6 +557,7 @@ def _fetch_credit_score(application: CreditApplications, user) -> bool:
         except Exception:     # noqa: BLE001 - an unreadable PAN is a missing one
             pan = None
     if not pan:
+        application.bureau_error = 'No readable PAN on file to query the bureau with.'
         return False
 
     result = adapters.fetch_credit_score(
@@ -550,13 +567,18 @@ def _fetch_credit_score(application: CreditApplications, user) -> bool:
         phone=user.phone,
     )
     if not result.get('ok'):
+        application.bureau_error = (result.get('error') or 'The credit bureau did not answer.')[:255]
         current_app.logger.warning(
-            f'[credit] credit score unavailable: {result.get("error")}'
+            f'[credit] credit score unavailable ({result.get("error_code")}): '
+            f'{result.get("error")}'
         )
         return False
 
     application.credit_score = result.get('score')
     application.credit_no_history = bool(result.get('no_history'))
+    application.bureau_code = result.get('bureau_code')
+    application.bureau_provider = result.get('provider')
+    application.bureau_error = None
     application.credit_score_fetched_at = utcnow()
     application.bureau_reference = (result.get('reference') or '')[:64] or None
     return True
@@ -595,9 +617,10 @@ def decide(application: CreditApplications, *, user, approve: bool,
             'This application has already been decided.',
         )
 
-    # A score that could not be fetched earlier is tried again now, so a bureau
-    # outage at submission does not strand the application.
-    if approve and application.credit_score is None and not application.credit_no_history:
+    # A bureau answer that could not be fetched earlier is tried again now, so a
+    # bureau outage at submission does not strand the application.
+    if approve and application.bureau_status in (BureauStatus.PENDING,
+                                                 BureauStatus.UNAVAILABLE):
         _fetch_credit_score(application, user)
 
     assessment = _reassess(application, user)
@@ -608,7 +631,7 @@ def decide(application: CreditApplications, *, user, approve: bool,
                 ErrorCode.CONFLICT,
                 'This application is waiting for the applicant to complete KYC.',
             )
-        if not assessment['approved']:
+        if not assessment['eligible']:
             raise CreditError(
                 ErrorCode.VALIDATION_ERROR,
                 'This application is not eligible for a credit line. '

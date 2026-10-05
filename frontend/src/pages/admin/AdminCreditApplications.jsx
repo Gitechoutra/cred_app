@@ -106,13 +106,19 @@ export default function AdminCreditApplications() {
       key: 'score',
       label: 'Credit score',
       render: (row) => (
-        row.credit_no_history ? <Badge tone="neutral">New to credit</Badge>
-          : row.credit_score ? (
-            <div>
-              <p className="money font-semibold text-ink">{row.credit_score}</p>
-              <p className="text-2xs text-slate">{row.credit_score_band}</p>
-            </div>
-          ) : <span className="text-slate">—</span>
+        row.credit_no_history ? (
+          <div>
+            <p className="font-semibold text-ink">Not Available</p>
+            <Badge tone="neutral">New to credit</Badge>
+          </div>
+        ) : row.credit_score != null ? (
+          <div>
+            <p className="money font-semibold text-ink">{row.credit_score}</p>
+            <p className="text-2xs text-slate">{row.credit_score_band}</p>
+          </div>
+        ) : row.credit_status === 'UNAVAILABLE'
+          ? <Badge tone="warn">{row.credit_status_label}</Badge>
+          : <span className="text-slate">—</span>
       ),
     },
     {
@@ -406,13 +412,17 @@ export function AdminCreditApplicationReview() {
           <Panel title="Credit bureau">
             <div className="flex items-end justify-between">
               <div>
-                <p className="money text-4xl font-bold text-ink">
-                  {app.bureau?.no_history ? 'NTC' : app.bureau?.credit_score ?? '—'}
+                <p className={cx('font-bold text-ink', app.bureau?.credit_score != null ? 'money text-4xl' : 'text-2xl')}>
+                  {app.bureau?.credit_score ?? (app.bureau?.status === 'PENDING' ? '—' : 'Not Available')}
                 </p>
                 <p className="mt-1 text-xs text-slate">
-                  {app.bureau?.no_history ? 'New to credit - no bureau history'
-                    : app.bureau?.score_band || (app.status === 'KYC_PENDING' ? 'Fetched once KYC is verified' : 'Not fetched')}
+                  {app.bureau?.no_history
+                    ? `${app.bureau.status_label}${app.bureau.bureau_code ? ` (bureau: ${app.bureau.bureau_code})` : ''}`
+                    : app.bureau?.status === 'SCORED' ? app.bureau.score_band
+                      : app.bureau?.status === 'UNAVAILABLE' ? `${app.bureau.status_label}: ${app.bureau.error}`
+                        : (app.status === 'KYC_PENDING' ? 'Fetched once KYC is verified' : 'Not fetched')}
                 </p>
+                {app.bureau?.is_demo && <Badge tone="warn" className="mt-1">Sandbox bureau</Badge>}
               </div>
               {app.bureau?.credit_score != null && <ScoreBar score={app.bureau.credit_score} />}
             </div>
@@ -464,11 +474,6 @@ export function AdminCreditApplicationReview() {
                   {breakdown.thin_file_cap != null && <Row label="Thin-file cap" value={money(breakdown.thin_file_cap, { decimals: 0 })} mono />}
                   {breakdown.kyc_cap != null && <Row label={`${breakdown.kyc_tier} KYC cap`} value={money(breakdown.kyc_cap, { decimals: 0 })} mono />}
                 </div>
-              )}
-              {app.full_kyc_limit > 0 && (
-                <p className="mt-2 text-2xs text-slate">
-                  With full KYC this applicant would be eligible for {money(app.full_kyc_limit, { decimals: 0 })}.
-                </p>
               )}
             </Panel>
           ) : (

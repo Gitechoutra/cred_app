@@ -186,7 +186,13 @@ function Result({ score, onCheckAgain }) {
       {score.is_demo && <DemoNotice />}
 
       <Card className="text-center">
-        <ScoreMeter score={score.score} band={score.band} />
+        <ScoreMeter score={score.score} band={score.no_history ? 'New to credit' : score.band} />
+        {score.no_history && (
+          <div className="mt-2 space-y-0.5">
+            <p className="text-sm font-semibold text-ink">Credit Score: Not Available</p>
+            <p className="text-xs text-slate">Status: {score.status_label}</p>
+          </div>
+        )}
         {score.is_demo && (
           <div className="mt-2 flex justify-center">
             <Badge tone="warn">Demo</Badge>

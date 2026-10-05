@@ -6,7 +6,7 @@ import { PageHeader, IconCheck, IconShield } from '../../components/layout/AppSh
 import { Badge, Button, Card, Input, Skeleton, cx } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
 import { useFetch, useProfile } from '../../hooks/useProfile';
-import { money, statusLabel, statusTone } from '../../utils/format';
+import { statusLabel, statusTone } from '../../utils/format';
 
 /**
  * KYC submission (PRD FR-012, section 18).
@@ -109,12 +109,6 @@ export default function Kyc() {
               {approved ? `${kyc.kyc_tier} KYC verified` : 'Not yet verified'}
             </p>
 
-            <p className={cx('mt-1 text-xs', approved ? 'text-white/60' : 'text-slate')}>
-              Credit limit up to{' '}
-              <span className="money font-medium">
-                {money(kyc.capabilities.max_credit_limit)}
-              </span>
-            </p>
 
             {kyc.rejection_reason && (
               <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-alert">
@@ -142,10 +136,6 @@ export default function Kyc() {
                     </span>
                   )}
                 </div>
-
-                <p className="money mt-1 text-xs text-slate">
-                  Credit limit up to {money(option.max_credit_limit)}
-                </p>
 
                 <p className="mt-2 text-2xs text-slate">
                   Requires: {option.requirements.join(', ')}
@@ -192,11 +182,8 @@ export default function Kyc() {
                         <p className="text-sm font-semibold text-ink">
                           {option === 'MINIMUM' ? 'PAN only' : 'PAN + Aadhaar'}
                         </p>
-                        <p className="money mt-0.5 text-2xs text-slate">
-                          {money(
-                            kyc.tiers.find((t) => t.tier === option)?.max_credit_limit || 0,
-                          )}{' '}
-                          limit
+                        <p className="mt-0.5 text-2xs text-slate">
+                          {kyc.tiers.find((t) => t.tier === option)?.label}
                         </p>
                       </button>
                     ))}
