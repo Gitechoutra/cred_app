@@ -21,30 +21,66 @@ const OFFICIAL_BANK_LOGOS = {
   idfc: '/banks/idfc.svg',
 };
 
-// Resolves the official logo URL for a bank given its ID or Name.
-function getOfficialLogoUrl(bankId, bankName) {
+// Resolves which listed bank an ID or a free-text issuer name refers to.
+export function resolveBankId(bankId, bankName) {
   const normalizedId = (bankId || '').toLowerCase().trim();
   if (OFFICIAL_BANK_LOGOS[normalizedId]) {
-    return OFFICIAL_BANK_LOGOS[normalizedId];
+    return normalizedId === 'sbi-card' ? 'sbi'
+      : normalizedId === 'american-express' ? 'amex' : normalizedId;
   }
 
   const normalizedName = (bankName || '').toLowerCase().trim();
-  if (normalizedName.includes('sbi') || normalizedName.includes('state bank')) return OFFICIAL_BANK_LOGOS.sbi;
-  if (normalizedName.includes('hdfc')) return OFFICIAL_BANK_LOGOS.hdfc;
-  if (normalizedName.includes('icici')) return OFFICIAL_BANK_LOGOS.icici;
-  if (normalizedName.includes('axis')) return OFFICIAL_BANK_LOGOS.axis;
-  if (normalizedName.includes('kotak')) return OFFICIAL_BANK_LOGOS.kotak;
-  if (normalizedName.includes('union')) return OFFICIAL_BANK_LOGOS.union;
-  if (normalizedName.includes('amex') || normalizedName.includes('american express')) return OFFICIAL_BANK_LOGOS.amex;
-  if (normalizedName.includes('yes')) return OFFICIAL_BANK_LOGOS.yes;
-  if (normalizedName.includes('indusind')) return OFFICIAL_BANK_LOGOS.indusind;
-  if (normalizedName.includes('pnb') || normalizedName.includes('punjab')) return OFFICIAL_BANK_LOGOS.pnb;
-  if (normalizedName.includes('rbl')) return OFFICIAL_BANK_LOGOS.rbl;
-  if (normalizedName.includes('canara')) return OFFICIAL_BANK_LOGOS.canara;
-  if (normalizedName.includes('federal')) return OFFICIAL_BANK_LOGOS.federal;
-  if (normalizedName.includes('idfc')) return OFFICIAL_BANK_LOGOS.idfc;
+  if (normalizedName.includes('sbi') || normalizedName.includes('state bank')) return 'sbi';
+  if (normalizedName.includes('hdfc')) return 'hdfc';
+  if (normalizedName.includes('icici')) return 'icici';
+  if (normalizedName.includes('axis')) return 'axis';
+  if (normalizedName.includes('kotak')) return 'kotak';
+  if (normalizedName.includes('union')) return 'union';
+  if (normalizedName.includes('amex') || normalizedName.includes('american express')) return 'amex';
+  if (normalizedName.includes('yes')) return 'yes';
+  if (normalizedName.includes('indusind')) return 'indusind';
+  if (normalizedName.includes('pnb') || normalizedName.includes('punjab')) return 'pnb';
+  if (normalizedName.includes('rbl')) return 'rbl';
+  if (normalizedName.includes('canara')) return 'canara';
+  if (normalizedName.includes('federal')) return 'federal';
+  if (normalizedName.includes('idfc')) return 'idfc';
 
   return null;
+}
+
+// Resolves the official logo URL for a bank given its ID or Name.
+function getOfficialLogoUrl(bankId, bankName) {
+  const id = resolveBankId(bankId, bankName);
+  return id ? OFFICIAL_BANK_LOGOS[id] : null;
+}
+
+/**
+ * Card colours taken from each bank's own logo in public/banks/: the logo's
+ * main colour fading to a deeper shade of it, and the logo's second colour as
+ * the accent glow - so an HDFC card reads navy-and-red and an SBI Card light
+ * blue, the way the physical cards and logos do.
+ */
+const BANK_CARD_THEMES = {
+  hdfc: { from: '#0060B0', to: '#00305C', accent: '#ED232A' },
+  sbi: { from: '#00A5DF', to: '#22409A', accent: '#7FDBFF' },
+  icici: { from: '#C2402A', to: '#7A1A20', accent: '#F06321' },
+  axis: { from: '#AE285D', to: '#5E1233', accent: '#F06C9B' },
+  kotak: { from: '#0A4A8F', to: '#002650', accent: '#ED1C24' },
+  union: { from: '#0068B5', to: '#003A6B', accent: '#DA251C' },
+  amex: { from: '#1A86E0', to: '#014A8C', accent: '#9AD0FF' },
+  yes: { from: '#0062AE', to: '#00345E', accent: '#C4261B' },
+  indusind: { from: '#A8302F', to: '#5A1618', accent: '#E8746F' },
+  pnb: { from: '#B3163F', to: '#5F0820', accent: '#FBBC09' },
+  rbl: { from: '#2B3E96', to: '#141E4E', accent: '#ED1C24' },
+  canara: { from: '#0AA7F0', to: '#0167A0', accent: '#FFB600' },
+  federal: { from: '#0A5AD0', to: '#00307A', accent: '#FF9C00' },
+  idfc: { from: '#A8232D', to: '#5C1117', accent: '#F2A33A' },
+};
+
+/** The card theme for a bank, or null for one with no listed logo. */
+export function bankCardTheme(bankId, bankName) {
+  const id = resolveBankId(bankId, bankName);
+  return id ? BANK_CARD_THEMES[id] : null;
 }
 
 /**

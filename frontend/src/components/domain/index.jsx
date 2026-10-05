@@ -1,4 +1,5 @@
 import { Badge, Meter, cx } from '../ui';
+import { bankCardTheme } from './BankLogo';
 import { IconAlert, IconBank, IconCheck, IconChevron, IconClock } from '../layout/AppShell';
 import {
   date as fmtDate,
@@ -19,6 +20,9 @@ import {
  * pick the right one when four are on screen.
  */
 export function CardTile({ card, onClick, compact = false }) {
+  // The issuer's logo colours when the bank is one we have a logo for; the
+  // stored brand colour otherwise.
+  const theme = bankCardTheme(null, card.issuer_bank);
   const colour = card.brand_color || '#0A0F0D';
   const utilization = card.utilization_percentage;
 
@@ -35,13 +39,20 @@ export function CardTile({ card, onClick, compact = false }) {
         'hover:-translate-y-0.5 hover:shadow-lift active:translate-y-0 active:scale-[0.985]',
         compact ? 'min-h-[124px]' : 'min-h-[156px]',
       )}
-      style={{ backgroundColor: colour }}
+      style={theme
+        ? { backgroundColor: theme.to, backgroundImage: `linear-gradient(135deg, ${theme.from} 0%, ${theme.to} 100%)` }
+        : { backgroundColor: colour }}
     >
       {/* A soft highlight keeps a flat brand colour from reading as a plain
-          rectangle, without tipping into skeuomorphism. */}
+          rectangle, without tipping into skeuomorphism. With a logo theme it
+          glows in the logo's second colour. */}
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute -right-8 -top-12 h-40 w-40 rounded-full bg-white/10 blur-2xl"
+        className={cx(
+          'pointer-events-none absolute -right-8 -top-12 h-40 w-40 rounded-full blur-2xl',
+          theme ? 'opacity-35' : 'bg-white/10',
+        )}
+        style={theme ? { backgroundColor: theme.accent } : undefined}
       />
       <span
         aria-hidden="true"
