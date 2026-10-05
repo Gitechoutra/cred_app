@@ -1,14 +1,14 @@
 import { useNavigate } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
-import { Skeleton, cx } from '../../components/ui';
+import { Button, EmptyState, Skeleton, cx } from '../../components/ui';
 import { useFetch } from '../../hooks/useProfile';
 import { money, moneyCompact } from '../../utils/format';
 import { AdminHeader, StatCard } from './AdminLayout';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
-  const { data, loading } = useFetch(() => endpoints.admin.dashboard(), []);
+  const { data, error, loading, refetch } = useFetch(() => endpoints.admin.dashboard(), []);
 
   if (loading) {
     return (
@@ -19,6 +19,22 @@ export default function AdminDashboard() {
             <Skeleton key={i} className="h-24 rounded-2xl" />
           ))}
         </div>
+      </div>
+    );
+  }
+
+  // A failed fetch leaves `data` null. Rendering on regardless threw on
+  // `data.payments` and, with no boundary above, blanked the whole console.
+  if (error || !data) {
+    return (
+      <div>
+        <AdminHeader title="Operations overview" />
+        <EmptyState
+          title="Couldn't load the overview"
+          description={error?.message || 'The server did not respond. Check that the backend is running.'}
+          action={<Button onClick={refetch}>Try again</Button>}
+          className="rounded-2xl border border-line bg-canvas"
+        />
       </div>
     );
   }
