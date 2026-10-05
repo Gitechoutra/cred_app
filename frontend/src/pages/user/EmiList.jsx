@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
 import { EmiRow } from '../../components/domain';
-import { IconEmi, IconPlus } from '../../components/layout/AppShell';
+import { IconEmi, IconPlus, PageHeader } from '../../components/layout/AppShell';
 import { Button, EmptyState, Section, Skeleton } from '../../components/ui';
 import { useFetch } from '../../hooks/useProfile';
 import { money } from '../../utils/format';
@@ -14,7 +14,7 @@ export default function EmiList() {
   if (loading) {
     return (
       <div className="space-y-3 px-4 pt-5">
-        <Skeleton className="h-6 w-32" />
+        <PageHeader title="Your EMIs" back="/home" />
         <Skeleton className="h-24 w-full rounded-2xl" />
         <Skeleton className="h-20 w-full rounded-2xl" />
         <Skeleton className="h-20 w-full rounded-2xl" />
@@ -28,19 +28,19 @@ export default function EmiList() {
 
   return (
     <div className="animate-fade-up pb-6">
-      <header className="flex items-center justify-between px-4 pt-5 pb-3">
-        <div>
-          <h1 className="text-xl font-bold text-ink">Your EMIs</h1>
-          <p className="text-xs text-slate">
-            {active.length} active {active.length === 1 ? 'loan' : 'loans'}
-          </p>
-        </div>
-
-        <Button variant="outline" size="sm" onClick={() => navigate('/emi/add')}>
-          <IconPlus className="h-4 w-4" />
-          Add
-        </Button>
-      </header>
+      <div className="px-4 pt-5">
+        <PageHeader
+          title="Your EMIs"
+          subtitle={`${active.length} active ${active.length === 1 ? 'loan' : 'loans'}`}
+          back="/home"
+          action={
+            <Button variant="outline" size="sm" onClick={() => navigate('/emi/add')}>
+              <IconPlus className="h-4 w-4" />
+              Add
+            </Button>
+          }
+        />
+      </div>
 
       {obligations.length === 0 ? (
         <div className="px-4 pt-10">
