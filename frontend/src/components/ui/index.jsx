@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Loader3D } from './Loader3D';
 export { Loader3D };
 
@@ -275,7 +276,7 @@ export function Sheet({ open, onClose, title, children, footer }) {
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
       <div
         className="absolute inset-0 bg-ink/40 backdrop-blur-[2px]"
@@ -288,7 +289,7 @@ export function Sheet({ open, onClose, title, children, footer }) {
         aria-modal="true"
         aria-label={title}
         className={cx(
-          'relative w-full max-w-md animate-sheet-up bg-canvas shadow-sheet',
+          'relative w-full max-w-md animate-sheet-up bg-canvas shadow-sheet overflow-hidden',
           'rounded-t-3xl sm:rounded-3xl sm:animate-scale-in',
           'max-h-[92vh] flex flex-col',
         )}
@@ -312,11 +313,12 @@ export function Sheet({ open, onClose, title, children, footer }) {
           )}
         </div>
 
-        <div className="sheet-scroll flex-1 overflow-y-auto px-5 py-3">{children}</div>
+        <div className="sheet-scroll flex-1 min-h-0 overflow-y-auto px-5 py-3">{children}</div>
 
         {footer && <div className="shrink-0 border-t border-line px-5 py-4">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

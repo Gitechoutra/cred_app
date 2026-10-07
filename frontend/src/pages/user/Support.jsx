@@ -138,34 +138,37 @@ export default function Support() {
       </div>
 
       {/* ── New ticket ──────────────────────────────────────────────── */}
+      {/* ── New ticket ──────────────────────────────────────────────── */}
       <Sheet
         open={composing}
         onClose={() => setComposing(false)}
         title="Raise a ticket"
         footer={
-          <Button
-            variant="mint"
-            size="lg"
-            full
-            loading={busy}
-            disabled={!form.subject.trim() || !form.message.trim()}
-            onClick={create}
-          >
-            Submit
-          </Button>
+          <div className="w-full">
+            <Button
+              variant="mint"
+              size="lg"
+              full
+              loading={busy}
+              disabled={!form.subject.trim() || !form.message.trim()}
+              onClick={create}
+            >
+              Submit
+            </Button>
+          </div>
         }
       >
-        <div className="space-y-4 pb-2">
-          <div>
-            <span className="mb-2 block text-sm font-medium text-ink">What is this about?</span>
-            <div className="grid grid-cols-2 gap-2">
+        <div className="flex w-full flex-col gap-4 pb-2">
+          <div className="w-full">
+            <span className="mb-1.5 block text-sm font-medium text-ink">What is this about?</span>
+            <div className="grid w-full grid-cols-2 gap-2">
               {CATEGORIES.map((category) => (
                 <button
                   key={category.value}
                   type="button"
                   onClick={() => setForm({ ...form, category: category.value })}
                   className={cx(
-                    'rounded-xl border px-3 py-2.5 text-xs font-medium transition',
+                    'rounded-xl border px-3 py-2.5 text-[15px] font-medium transition',
                     form.category === category.value
                       ? 'border-mint bg-mint-50 text-ink'
                       : 'border-line text-slate hover:border-ink/20',
@@ -177,22 +180,26 @@ export default function Support() {
             </div>
           </div>
 
-          <Input
-            label="Subject"
-            placeholder="Payment stuck since yesterday"
-            value={form.subject}
-            onChange={(event) => setForm({ ...form, subject: event.target.value })}
-          />
-
-          <div>
-            <span className="mb-1.5 block text-sm font-medium text-ink">Describe the issue</span>
-            <textarea
-              rows={5}
-              placeholder="Tell us what happened, and include the UTR if you have one."
-              value={form.message}
-              onChange={(event) => setForm({ ...form, message: event.target.value })}
-              className="w-full rounded-xl border border-line bg-canvas p-3.5 text-[15px] text-ink outline-none transition focus:border-ink/40 placeholder:text-slate-light"
+          <div className="w-full">
+            <Input
+              label="Subject"
+              placeholder="Payment stuck since yesterday"
+              value={form.subject}
+              onChange={(event) => setForm({ ...form, subject: event.target.value })}
             />
+          </div>
+
+          <div className="w-full">
+            <span className="mb-1.5 block text-sm font-medium text-ink">Describe the issue</span>
+            <div className="w-full">
+              <textarea
+                rows={5}
+                placeholder="Tell us what happened, and include the UTR if you have one."
+                value={form.message}
+                onChange={(event) => setForm({ ...form, message: event.target.value })}
+                className="w-full m-0 block rounded-xl border border-line bg-canvas p-3.5 text-[15px] text-ink outline-none transition focus:border-ink/40 placeholder:text-slate-light"
+              />
+            </div>
           </div>
         </div>
       </Sheet>
@@ -204,14 +211,16 @@ export default function Support() {
         title={open?.subject}
         footer={
           open && open.status !== 'CLOSED' ? (
-            <div className="flex gap-2">
-              <input
-                value={reply}
-                onChange={(event) => setReply(event.target.value)}
-                placeholder="Write a reply…"
-                className="h-12 flex-1 rounded-xl border border-line bg-canvas px-3.5 text-[15px] outline-none focus:border-ink/40"
-              />
-              <Button variant="mint" size="lg" loading={busy} onClick={sendReply}>
+            <div className="flex w-full items-center gap-2">
+              <div className="flex-1">
+                <input
+                  value={reply}
+                  onChange={(event) => setReply(event.target.value)}
+                  placeholder="Write a reply…"
+                  className="h-12 w-full m-0 block rounded-xl border border-line bg-canvas px-3.5 text-[15px] text-ink outline-none transition focus:border-ink/40 placeholder:text-slate-light"
+                />
+              </div>
+              <Button variant="mint" size="lg" className="shrink-0" loading={busy} onClick={sendReply}>
                 Send
               </Button>
             </div>
@@ -219,7 +228,7 @@ export default function Support() {
         }
       >
         {open && (
-          <div className="space-y-3 pb-2">
+          <div className="flex w-full flex-col gap-3 pb-2">
             <p className="money text-2xs text-slate">
               {open.ticket_number} · {statusLabel(open.status)}
             </p>
@@ -234,7 +243,7 @@ export default function Support() {
                     : 'bg-mist text-ink',
                 )}
               >
-                <p className="text-sm leading-relaxed">{message.body}</p>
+                <p className="text-[15px] leading-relaxed">{message.body}</p>
                 <p
                   className={cx(
                     'mt-1 text-2xs',
