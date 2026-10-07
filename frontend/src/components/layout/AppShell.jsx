@@ -49,7 +49,7 @@ export default function AppShell({ children }) {
       <footer className="border-t border-line bg-canvas px-4 py-4 sm:px-6 lg:px-8">
         <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-2">
           <p className="text-2xs text-slate">
-            CashU v1.0 — your cards and EMIs, under one glass pane.
+            CashU — your cards and EMIs, under one glass pane.
           </p>
           <p className="text-2xs text-slate-light">
             Cards are tokenised under RBI Card-on-File rules. We never store

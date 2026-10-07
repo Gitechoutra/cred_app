@@ -179,7 +179,7 @@ export default function Profile() {
         </Button>
 
         <p className="pb-2 text-center text-2xs text-slate-light">
-          CashU v1.0 · Your cards and EMIs, under one glass pane.
+          CashU · Your cards and EMIs, under one glass pane.
         </p>
       </div>
     </div>
