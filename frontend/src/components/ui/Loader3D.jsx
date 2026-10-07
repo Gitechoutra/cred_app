@@ -18,7 +18,15 @@ export function Loader3D({ fullScreen = false, size = 'medium', className = '' }
     <div className="loader-coin-wrapper" style={cssVars}>
       <div className="loader-orbit" />
       <div className="loader-coin">
-        <span className="loader-u">U</span>
+        {Array.from({ length: 15 }).map((_, i) => (
+          <div key={i} className="loader-coin-layer" style={{ transform: `translateZ(calc(var(--loader-size, 80px) * -${i * 0.015}))` }} />
+        ))}
+        <div className="loader-coin-front">
+          <span className="loader-u">U</span>
+        </div>
+        <div className="loader-coin-back">
+          <span className="loader-u">U</span>
+        </div>
       </div>
     </div>
   );
