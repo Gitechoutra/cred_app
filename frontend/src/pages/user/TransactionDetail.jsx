@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
@@ -10,6 +11,11 @@ import {
 
 export default function TransactionDetail() {
   const { transactionId } = useParams();
+  
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
+
   const { data: transaction, loading } = useFetch(
     () => endpoints.transactions.get(transactionId),
     [transactionId],
