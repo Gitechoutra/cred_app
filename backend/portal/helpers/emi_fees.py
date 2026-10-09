@@ -14,6 +14,11 @@ from portal.helpers import settings
 from portal.helpers.settings import Key
 
 
+def _q(value) -> Decimal:
+    """Round to paise the way the Numeric(12,2) columns store it."""
+    return Decimal(str(value)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
 def mandate_cap(emi_amount) -> Decimal:
     """
     Minimum permissible auto-pay mandate ceiling (PRD 12.3).

@@ -139,12 +139,3 @@ def mask_pan(last4: str) -> str:
     """Render a card as the PRD 8.2 permitted display form."""
     return f"**** **** **** {last4}" if last4 else "**** **** **** ****"
 
-
-def mask_account(last4: str) -> str:
-    return f"**** {last4}" if last4 else "****"
-
-
-def mask_phone(phone: str) -> str:
-    if not phone or len(phone) < 4:
-        return "******"
-    return f"{'*' * (len(phone) - 4)}{phone[-4:]}"

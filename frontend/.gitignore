@@ -6,3 +6,6 @@ dist/
 *.local
 npm-debug.log*
 .eslintcache
+
+# Generated audit reports
+ui-audit-results.json

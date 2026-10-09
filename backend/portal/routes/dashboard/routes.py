@@ -11,7 +11,6 @@ from datetime import timedelta
 from flask_jwt_extended import jwt_required
 from flask_restx import Resource
 
-from portal import db
 from portal.helpers import bill_pay_engine
 from portal.helpers.helpers import iso, success, to_float
 from portal.helpers.jwt import active_user_required, current_user

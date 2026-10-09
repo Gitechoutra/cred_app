@@ -21,7 +21,7 @@ from portal.helpers.validators import (
 from portal.models.base import utcnow
 from portal.models.login_history import LoginHistory
 
-from . import logger, ns
+from . import ns
 
 profile_parser = reqparse.RequestParser()
 profile_parser.add_argument('full_name', type=str, required=False, location='json')

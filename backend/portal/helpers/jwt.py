@@ -124,10 +124,6 @@ def issue_tokens(user, session_id: str = None, device_uuid: str = None):
     )
 
 
-def current_user_id() -> str:
-    return get_jwt_identity()
-
-
 def current_claims() -> dict:
     return get_jwt()
 

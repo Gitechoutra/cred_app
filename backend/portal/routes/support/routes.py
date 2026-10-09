@@ -18,7 +18,7 @@ from portal.helpers.helpers import (
 )
 from portal.helpers.jwt import active_user_required, current_user
 from portal.helpers.validators import (
-    sanitize_text, validate_choice, validate_pagination,
+    sanitize_text, validate_pagination,
 )
 from portal.models.base import utcnow
 from portal.models.support_messages import (

@@ -7,10 +7,8 @@ Every route answers in the same shape so the React client has exactly one
 parsing path for success and one for failure.
 """
 
-import json
 import uuid
-from datetime import date, datetime
-from decimal import Decimal
+from datetime import datetime
 
 from flask import request
 
@@ -58,19 +56,6 @@ class ErrorCode:
     # Server
     INTERNAL_ERROR = "INTERNAL_ERROR"
     PROVIDER_ERROR = "PROVIDER_ERROR"
-
-
-class JSONEncoderMixin(json.JSONEncoder):
-    """Decimal and datetime handling for payloads assembled by hand."""
-
-    def default(self, o):
-        if isinstance(o, Decimal):
-            return float(o)
-        if isinstance(o, (datetime, date)):
-            return o.isoformat()
-        if isinstance(o, uuid.UUID):
-            return str(o)
-        return super().default(o)
 
 
 def success(data=None, message: str = "Success", status: int = 200, **extra):

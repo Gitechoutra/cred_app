@@ -13,7 +13,6 @@ removed, and its replacement is the credit-line purchase flow.
 Run with the server already up:  python tests/smoke_flow.py
 """
 
-import json
 import os
 import random
 import sys

@@ -69,7 +69,7 @@
     "section": 18,
     "check": "success envelope has success+data",
     "passed": true,
-    "detail": "{'success': True, 'message': 'Success', 'data': {'user_id': '5d4bf783-8e89-4d55-9ae1-b8c9da99e631', 'phone': '9584035936"
+    "detail": "{'success': True, 'message': 'Success', 'data': {'user_id': 'd3fe5e0c-b0f7-48f5-a484-d0245a48f4df', 'phone': '9915732813"
   },
   {
     "section": 18,
@@ -104,8 +104,8 @@
   {
     "section": 7,
     "check": "mismatched confirm account number rejected",
-    "passed": true,
-    "detail": "got 400"
+    "passed": false,
+    "detail": "got 201"
   },
   {
     "section": 7,
@@ -122,20 +122,8 @@
   {
     "section": 7,
     "check": "valid bank account accepted",
-    "passed": true,
-    "detail": "{\n    \"success\": true,\n    \"message\": \"Bank account verified successfully.\",\n    \"data\": {\n        \"bank_account_id\": \"0592a3e9-f2ab-4b19-9719-a32f7dfafe1f\",\n        \"masked_account\": \"**** 8980\",\n   "
-  },
-  {
-    "section": 7,
-    "check": "duplicate bank account rejected",
-    "passed": true,
-    "detail": "got 409"
-  },
-  {
-    "section": 7,
-    "check": "full account number never returned in a listing",
-    "passed": true,
-    "detail": "raw account number present"
+    "passed": false,
+    "detail": "{\n    \"success\": false,\n    \"error\": {\n        \"code\": \"CONFLICT\",\n        \"message\": \"This bank account is already linked.\"\n    }\n}\n"
   },
   {
     "section": 6,
@@ -158,104 +146,104 @@
   {
     "section": 9,
     "check": "administrator login available for the KYC gate",
-    "passed": true,
+    "passed": false,
     "detail": ""
   },
   {
     "section": 9,
     "check": "audit user reaches a verified KYC tier",
-    "passed": true,
+    "passed": false,
     "detail": ""
   },
   {
     "section": 9,
     "check": "payment rejects empty amount",
-    "passed": true,
-    "detail": "got 400 for ''"
+    "passed": false,
+    "detail": "got 403 for ''"
   },
   {
     "section": 9,
     "check": "payment rejects dot amount",
-    "passed": true,
-    "detail": "got 400 for '.'"
+    "passed": false,
+    "detail": "got 403 for '.'"
   },
   {
     "section": 9,
     "check": "payment rejects double dot amount",
-    "passed": true,
-    "detail": "got 400 for '..'"
+    "passed": false,
+    "detail": "got 403 for '..'"
   },
   {
     "section": 9,
     "check": "payment rejects alphabetic amount",
-    "passed": true,
-    "detail": "got 400 for 'abc'"
+    "passed": false,
+    "detail": "got 403 for 'abc'"
   },
   {
     "section": 9,
     "check": "payment rejects special chars amount",
-    "passed": true,
-    "detail": "got 400 for '@@@'"
+    "passed": false,
+    "detail": "got 403 for '@@@'"
   },
   {
     "section": 9,
     "check": "payment rejects negative amount",
-    "passed": true,
-    "detail": "got 400 for -100"
+    "passed": false,
+    "detail": "got 403 for -100"
   },
   {
     "section": 9,
     "check": "payment rejects zero amount",
-    "passed": true,
-    "detail": "got 400 for 0"
+    "passed": false,
+    "detail": "got 403 for 0"
   },
   {
     "section": 9,
     "check": "payment rejects multiple decimals amount",
-    "passed": true,
-    "detail": "got 400 for '10.5.5'"
+    "passed": false,
+    "detail": "got 403 for '10.5.5'"
   },
   {
     "section": 9,
     "check": "payment rejects scientific amount",
-    "passed": true,
-    "detail": "got 400 for '1e9'"
+    "passed": false,
+    "detail": "got 403 for '1e9'"
   },
   {
     "section": 9,
     "check": "payment rejects three decimals amount",
-    "passed": true,
-    "detail": "got 400 for 10.555"
+    "passed": false,
+    "detail": "got 403 for 10.555"
   },
   {
     "section": 9,
     "check": "payment rejects huge amount",
-    "passed": true,
-    "detail": "got 400 for 1000000000000"
+    "passed": false,
+    "detail": "got 403 for 1000000000000"
   },
   {
     "section": 9,
     "check": "payment rejects null amount",
-    "passed": true,
-    "detail": "got 400 for None"
+    "passed": false,
+    "detail": "got 403 for None"
   },
   {
     "section": 9,
     "check": "payment accepts a valid amount",
-    "passed": true,
-    "detail": "{\n    \"success\": true,\n    \"message\": \"Complete the payment in your UPI app.\",\n    \"data\": {\n        \"qr_payment_id\": \"6c2ce79d-5d3f-4a48-b118-19cca2336974\",\n  "
+    "passed": false,
+    "detail": "{\n    \"success\": false,\n    \"error\": {\n        \"code\": \"KYC_REQUIRED\",\n        \"message\": \"Complete your KYC verification to use this feature.\",\n        \"detail"
   },
   {
     "section": 9,
     "check": "payment accepts the minimum of Rs. 1",
-    "passed": true,
-    "detail": "{\n    \"success\": true,\n    \"message\": \"Complete the payment in your UPI app.\",\n    \"data\": {\n        \"qr_payment_id\": \"34f43e72-d4dd-48b2-b3be-f806a3356667\",\n        \"transaction_id\": null,\n        \"p"
+    "passed": false,
+    "detail": "{\n    \"success\": false,\n    \"error\": {\n        \"code\": \"KYC_REQUIRED\",\n        \"message\": \"Complete your KYC verification to use this feature.\",\n        \"details\": {\n            \"current_tier\": \"NONE\""
   },
   {
     "section": 9,
     "check": "payment rejects just below the minimum",
-    "passed": true,
-    "detail": "got 400"
+    "passed": false,
+    "detail": "got 403"
   },
   {
     "section": 9,
@@ -289,21 +277,9 @@
   },
   {
     "section": 17,
-    "check": "user B cannot read user A's bank account",
-    "passed": true,
-    "detail": "got 404"
-  },
-  {
-    "section": 17,
-    "check": "user B cannot delete user A's bank account",
-    "passed": true,
-    "detail": "got 404"
-  },
-  {
-    "section": 17,
-    "check": "unknown payment id is a 404, not a leak",
-    "passed": true,
-    "detail": "got 404"
+    "check": "ownership checks ran",
+    "passed": false,
+    "detail": "second user unavailable"
   },
   {
     "section": 20,
@@ -369,7 +345,7 @@
     "section": 14,
     "check": "transaction list responds",
     "passed": true,
-    "detail": "{\n    \"success\": true,\n    \"data\": [\n        {\n            \"transaction_id\": \"b36932fa-803b-454c-b770-f01b8b3deb24\",\n            \"type\": \"QR_UPI_PAYMENT\",\n     "
+    "detail": "{\n    \"success\": true,\n    \"data\": [],\n    \"pagination\": {\n        \"page\": 1,\n        \"per_page\": 20,\n        \"total\": 0,\n        \"pages\": 0,\n        \"has_next\""
   },
   {
     "section": 14,
@@ -410,14 +386,14 @@
   {
     "section": 28,
     "check": "idempotency key accepted on a payment",
-    "passed": true,
-    "detail": "got 201"
+    "passed": false,
+    "detail": "got 403"
   },
   {
     "section": 28,
     "check": "a replayed idempotency key returns the original payment",
-    "passed": true,
-    "detail": "8467bf23-2918-4b0c-873c-d81bfd87637a vs 8467bf23-2918-4b0c-873c-d81bfd87637a"
+    "passed": false,
+    "detail": "None vs None"
   },
   {
     "section": 28,
@@ -452,13 +428,13 @@
   {
     "section": 27,
     "check": "malformed JSON is a 400, not a 500",
-    "passed": true,
-    "detail": "got 400"
+    "passed": false,
+    "detail": "got 403"
   },
   {
     "section": 27,
     "check": "no stack traces in error bodies",
     "passed": true,
-    "detail": "{\n    \"errors\": {\n        \"payload\": \"Missing required parameter in the JSON body\"\n    },\n    \"message\": \"Input payload "
+    "detail": "{\n    \"success\": false,\n    \"error\": {\n        \"code\": \"KYC_REQUIRED\",\n        \"message\": \"Complete your KYC verificatio"
   }
 ]

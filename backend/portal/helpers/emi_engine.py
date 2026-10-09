@@ -31,7 +31,7 @@ from portal.helpers.helpers import ErrorCode
 from portal.helpers.ledger_engine import DuplicateTransaction
 from portal.models.base import utcnow
 from portal.models.emi_obligations import (
-    AutoPayStatus, EMIObligations, EMIPaymentStatus,
+    EMIObligations, EMIPaymentStatus,
 )
 from portal.models.emi_payments import EMIPaymentState, EMIPayments, PaymentMode
 from portal.models.master_transactions import (

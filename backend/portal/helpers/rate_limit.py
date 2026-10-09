@@ -132,13 +132,6 @@ def ip_scope(action: str, ip: str) -> str:
     return f'{action}:ip:{ip}'
 
 
-def user_scope(action: str, user_id: str) -> str:
-    return f'{action}:user:{user_id}'
-
-
 def phone_scope(action: str, phone: str) -> str:
     return f'{action}:phone:{phone}'
 
-
-def device_scope(action: str, device_uuid: str) -> str:
-    return f'{action}:device:{device_uuid}'

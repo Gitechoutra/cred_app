@@ -350,57 +350,6 @@ export function BankRow({ account, onClick, selected = false, selectable = false
   );
 }
 
-/* ── Fee breakdown ──────────────────────────────────────────────────────── */
-
-/**
- * Fee disclosure.
- *
- * PRD 9.2 makes this a non-skippable disclosure before the 3DS challenge: the
- * user must see exactly what is charged, and what of it is fee, before they
- * authorise anything. The two emphasised rows are the two numbers that
- * actually matter.
- */
-export function FeeBreakdown({ quote, className }) {
-  if (!quote?.breakdown) return null;
-
-  return (
-    <div className={cx('rounded-2xl border border-line bg-mist/60 p-4', className)}>
-      {quote.breakdown.map((row, index) => {
-        const isTotal = row.emphasis;
-        const isLast = index === quote.breakdown.length - 1;
-
-        return (
-          <div
-            key={row.label}
-            className={cx(
-              'flex items-baseline justify-between gap-4 py-1.5',
-              isTotal && index > 0 && !isLast && 'mt-1.5 border-t border-line pt-3',
-            )}
-          >
-            <span className={cx('text-sm', isTotal ? 'font-medium text-ink' : 'text-slate')}>
-              {row.label}
-            </span>
-            <span
-              className={cx(
-                'money text-right',
-                isTotal ? 'text-base font-bold text-ink' : 'text-sm text-ink',
-                isLast && 'text-mint-700',
-              )}
-            >
-              {money(row.amount)}
-            </span>
-          </div>
-        );
-      })}
-
-      <p className="mt-3 border-t border-line pt-3 text-2xs leading-relaxed text-slate">
-        GST is charged on fees only, never on the amount you pay. Fees are
-        disclosed before you authorise the payment.
-      </p>
-    </div>
-  );
-}
-
 /* ── Timeline ───────────────────────────────────────────────────────────── */
 
 /**

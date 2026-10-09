@@ -166,41 +166,6 @@ def get_int(key: str, default=None) -> int:
         return int(_DEFAULTS.get(key, 0))
 
 
-def get_list_int(key: str) -> list:
-    """Parse a comma-separated setting such as the retry backoff ladder."""
-    raw = get(key) or ''
-    out = []
-    for part in str(raw).split(','):
-        part = part.strip()
-        if part:
-            try:
-                out.append(int(part))
-            except ValueError:
-                continue
-    return out or [int(p) for p in str(_DEFAULTS.get(key, '')).split(',') if p.strip()]
-
-
-def get_bool(key: str, default: bool = False) -> bool:
-    raw = get(key)
-    if raw is None:
-        return default
-    return str(raw).strip().lower() in ('true', '1', 'yes', 'on')
-
-
-def set_value(key: str, value, updated_by: str = None):
-    from portal import db
-
-    row = AdminSettings.query.filter_by(setting_key=key).first()
-    if not row:
-        row = AdminSettings(setting_key=key, default_value=str(value))
-        db.session.add(row)
-
-    row.setting_value = str(value)
-    row.updated_by = updated_by
-    db.session.commit()
-    return row
-
-
 # ── Feature flags ──────────────────────────────────────────────────────────
 
 def flag_enabled(flag_key: str, user_id: str = None) -> bool:

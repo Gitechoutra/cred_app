@@ -11,3 +11,6 @@ flask_session/
 portal/uploads/*
 !portal/uploads/.gitkeep
 .pytest_cache/
+
+# Generated audit report
+tests/validation_audit_results.json

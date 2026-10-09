@@ -27,7 +27,7 @@ from portal.models.kyc_verifications import KYCStatus, KYCVerifications
 from portal.models.user_profiles import UserProfiles
 from portal.models.users import KYCTier
 
-from . import logger, ns
+from . import ns
 
 submit_parser = reqparse.RequestParser()
 submit_parser.add_argument('pan_number', type=str, required=True, location='form')

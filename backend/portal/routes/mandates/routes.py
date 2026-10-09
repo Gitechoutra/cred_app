@@ -26,7 +26,7 @@ from portal.models.bank_accounts import BankAccounts
 from portal.models.emi_obligations import EMIObligations
 from portal.models.mandate_debit_attempts import MandateDebitAttempts
 
-from . import logger, ns
+from . import ns
 
 create_parser = reqparse.RequestParser()
 create_parser.add_argument('emi_id', type=str, required=True, location='json')

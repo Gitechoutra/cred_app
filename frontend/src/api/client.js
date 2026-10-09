@@ -359,10 +359,7 @@ export const endpoints = {
     resendOtp: (id) => api.post(`/bill-payments/${id}/otp`),
     // Background: the flow shows its own Processing Payment screen, not the global loader.
     confirm: (id, data) => api.post(`/bill-payments/${id}/confirm`, data, { background: true }),
-    cancel: (id) => api.post(`/bill-payments/${id}/cancel`),
     get: (id, opts = {}) => api.get(`/bill-payments/${id}`, opts),
-    byTransaction: (transactionId) => api.get(`/bill-payments/by-transaction/${transactionId}`),
-    list: (page = 1) => api.get(`/bill-payments?page=${page}`),
   },
   qrPayments: {
     // The scanned string is validated server-side; the client never parses it.

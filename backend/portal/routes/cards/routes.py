@@ -8,12 +8,11 @@ this module that introduces a PAN or CVV field breaks PCI DSS SAQ-A eligibility
 and RBI CoFT compliance at the same time.
 """
 
-from flask import request
 from flask_jwt_extended import jwt_required
 from flask_restx import Resource, reqparse
 
 from portal import db
-from portal.helpers import adapters, audit, card_limit, settings, test_cards
+from portal.helpers import adapters, audit, card_limit, test_cards
 from portal.helpers.encryption import encrypt, mask_pan
 from portal.helpers.helpers import ErrorCode, failure, iso, success, to_float
 from portal.helpers.jwt import active_user_required, current_user

@@ -260,17 +260,6 @@ export function PageHeader({ title, subtitle, back, action, eyebrow }) {
   );
 }
 
-/**
- * Centred column for focused flows.
- *
- * Forms and single-purpose flows read badly at full width - a 1400px-wide OTP
- * field is absurd - so these stay in a measured column while dashboards and
- * tables use the whole content area.
- */
-export function NarrowPage({ children, className }) {
-  return <div className={cx('mx-auto w-full max-w-2xl', className)}>{children}</div>;
-}
-
 /** Full-bleed page card used to frame standalone flows on the mist background. */
 export function Panel({ children, className }) {
   return (

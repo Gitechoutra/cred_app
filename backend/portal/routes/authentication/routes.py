@@ -8,8 +8,8 @@ unlocks the app afterwards. Access tokens live 15 minutes; refresh tokens live
 
 from datetime import timedelta
 
-from flask import current_app, request
-from flask_jwt_extended import get_jwt, jwt_required, verify_jwt_in_request
+from flask import current_app
+from flask_jwt_extended import get_jwt, jwt_required
 from flask_restx import Resource, reqparse
 
 from portal import db

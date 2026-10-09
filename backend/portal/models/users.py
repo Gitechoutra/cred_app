@@ -1,6 +1,6 @@
 from portal import db
 from portal.models.base import (
-    TimestampMixin, CRUDMixin, uuid_pk, UUIDColumn,
+    TimestampMixin, CRUDMixin, uuid_pk,
 )
 
 

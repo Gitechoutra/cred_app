@@ -173,11 +173,6 @@ def find(bin_prefix: str, last4: str) -> dict:
     return None
 
 
-def is_test_pan(bin_prefix: str, last4: str) -> bool:
-    """True when this BIN/last-four pair belongs to the catalogue."""
-    return find(bin_prefix, last4) is not None
-
-
 def catalogue() -> list:
     """
     The catalogue as the client needs it - full numbers included.

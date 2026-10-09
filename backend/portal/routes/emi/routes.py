@@ -17,7 +17,7 @@ from werkzeug.utils import secure_filename
 
 from portal import db
 from portal.helpers import audit, emi_provider_adapter
-from portal.helpers.encryption import blind_index, encrypt
+from portal.helpers.encryption import encrypt
 from portal.helpers.helpers import ErrorCode, failure, iso, success, to_float
 from portal.helpers.jwt import active_user_required, current_user
 from portal.helpers.validators import (
@@ -30,7 +30,7 @@ from portal.models.emi_obligations import (
 )
 from portal.models.emi_providers import EMIProviders
 
-from . import logger, ns
+from . import ns
 
 lookup_parser = reqparse.RequestParser()
 lookup_parser.add_argument('provider_id', type=int, required=True, location='json')
@@ -263,7 +263,6 @@ class EMIList(Resource):
                 ErrorCode.VALIDATION_ERROR, 'Enter your loan account number.', 400
             )
 
-        fingerprint = blind_index(lan)
         duplicate = EMIObligations.query.filter_by(
             user_id=user.user_id, provider_id=provider.provider_id, is_active=True
         ).all()

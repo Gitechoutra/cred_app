@@ -44,10 +44,6 @@ _BASE_URL = 'https://api.razorpay.com/v1'
 MIN_PAISE = 100
 
 
-class RazorpayError(Exception):
-    """Raised only for configuration faults, never for a declined payment."""
-
-
 def _config() -> dict:
     cfg = current_app.config
     return {
@@ -73,10 +69,6 @@ def public_key() -> str:
     return _config()['key_id']
 
 
-def is_test_mode() -> bool:
-    return public_key().startswith('rzp_test_')
-
-
 def to_paise(amount) -> int:
     """
     Rupees to integer paise, half-up, without ever touching a float.
@@ -86,10 +78,6 @@ def to_paise(amount) -> int:
     """
     rupees = Decimal(str(amount)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
     return int(rupees * 100)
-
-
-def to_rupees(paise) -> Decimal:
-    return (Decimal(int(paise)) / Decimal(100)).quantize(Decimal('0.01'))
 
 
 def _request(method: str, path: str, payload: dict = None, params: dict = None) -> dict:
@@ -289,26 +277,6 @@ def create_order(
         'currency': data.get('currency'),
         'status': data.get('status'),
         'receipt': data.get('receipt'),
-    }
-
-
-def fetch_order(order_id: str) -> dict:
-    """Order status: created, attempted, or paid."""
-    result = _request('GET', f'/orders/{order_id}')
-    if not result['ok']:
-        return {
-            'ok': False, 'error': result['error'],
-            'timeout': result.get('timeout', False),
-        }
-
-    data = result['data']
-    return {
-        'ok': True,
-        'order_id': data.get('id'),
-        'status': (data.get('status') or '').lower(),
-        'amount_paid': data.get('amount_paid'),
-        'amount': data.get('amount'),
-        'raw': data,
     }
 
 

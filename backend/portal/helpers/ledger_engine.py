@@ -576,34 +576,7 @@ def entries_for_bill_pay_payout(bill_amount, bank_ref):
     ]
 
 
-def entries_for_penny_drop(amount, bank_ref):
-    """The 1 INR verification debit - a real payout, so it is a real posting."""
-    return [
-        {
-            'account': Account.GATEWAY_CHARGES,
-            'debit': amount,
-            'narration': f'Penny drop verification to {bank_ref}',
-        },
-        {
-            'account': Account.PAYOUT_CLEARING,
-            'credit': amount,
-            'narration': 'Penny drop in flight',
-        },
-    ]
-
-
 # ── Integrity ──────────────────────────────────────────────────────────────
-
-def verify_balanced(transaction_id: str) -> tuple:
-    """Check one transaction's entries sum to zero. Returns (ok, debit, credit)."""
-    row = db.session.query(
-        func.coalesce(func.sum(DoubleEntryLedger.debit_amount), 0),
-        func.coalesce(func.sum(DoubleEntryLedger.credit_amount), 0),
-    ).filter(DoubleEntryLedger.transaction_id == transaction_id).one()
-
-    debit, credit = money(row[0]), money(row[1])
-    return debit == credit, debit, credit
-
 
 def self_audit(limit: int = 5000) -> dict:
     """

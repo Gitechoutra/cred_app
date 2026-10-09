@@ -21,7 +21,6 @@ needs to change, the seam was drawn in the wrong place.
 
 import hashlib
 import random
-import time
 import uuid
 
 from flask import current_app
@@ -978,42 +977,4 @@ def verify_razorpay_signature(
 create_upi_order = create_razorpay_order
 get_upi_payment_status = get_razorpay_payment_status
 verify_upi_checkout_signature = verify_razorpay_signature
-
-
-def upi_needs_simulation() -> bool:
-    """
-    Whether a UPI payment has to be simulated rather than sent to the gateway.
-
-    True when the merchant account does not have UPI switched on. Offering UPI
-    and then handing the user to a checkout that cannot serve it is what
-    produced the "international cards are not supported" dead end: Checkout
-    falls back to a card, and the card fails.
-
-    Simulating instead keeps the whole journey exercisable today, and the day
-    UPI is enabled in the Razorpay dashboard this returns False and the same
-    flow starts going to the real rail with no code change.
-    """
-    if not razorpay.is_configured():
-        return True
-    return not razorpay.supports('upi')
-
-
-def test_upi_vpa() -> str:
-    """A VPA to prefill during testing, so nobody retypes it every attempt."""
-    return current_app.config.get('RAZORPAY_TEST_UPI_VPA', '') or ''
-
-
-def razorpay_available() -> bool:
-    """
-    Whether the Razorpay rail is usable at all.
-
-    Deliberately about configuration, not about UPI. This used to be defined as
-    `upi_provider() == 'RAZORPAY'`, which quietly coupled the card rail to a
-    UPI account setting: switching UPI off would have moved every card transfer
-    away from Razorpay as well, even though the account serves cards perfectly
-    well. Per-method support is `supports()`.
-    """
-    if not current_app.config.get('RAZORPAY_UPI_ENABLED', True):
-        return False
-    return razorpay.is_configured()
 

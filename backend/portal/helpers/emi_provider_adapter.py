@@ -16,22 +16,11 @@ returns realistic loan data and can be told to fail - ERR-010 (biller offline)
 is otherwise untestable.
 """
 
-import hashlib
 import random
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 
-from flask import current_app
-
 from portal.helpers.adapters import Simulate, _simulating, _ref, _use_sandbox
-
-
-class EMIProviderError(Exception):
-    def __init__(self, message: str, code: str = 'PROVIDER_ERROR', retryable: bool = False):
-        super().__init__(message)
-        self.message = message
-        self.code = code
-        self.retryable = retryable
 
 
 PREDEFINED_TEST_LOANS = {
@@ -263,20 +252,6 @@ def submit_payment(
         'code': 'PROVIDER_NOT_CONFIGURED',
         'error': 'No BBPS operating unit is configured for this provider.',
     }
-
-
-def poll_payment(*, provider, reference: str) -> dict:
-    """
-    Ask the biller whether a submitted payment cleared.
-
-    Drives the PRD FR-008 polling worker: a bank debit can succeed while the
-    biller acknowledgement lags, and the payment stays PENDING until this
-    resolves or 24 hours pass.
-    """
-    if _use_sandbox():
-        return {'ok': True, 'status': 'SUCCESS', 'bbps_rrn': reference}
-
-    return {'ok': False, 'error': 'Biller polling is not configured.'}
 
 
 def next_due_date(due_day: int, after: date = None) -> date:

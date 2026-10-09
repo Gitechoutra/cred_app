@@ -23,7 +23,6 @@ exact available credit, not just "it went up".
 
 import os
 import sys
-import time
 import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

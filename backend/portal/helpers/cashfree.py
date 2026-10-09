@@ -21,7 +21,6 @@ move the transfer into the right state rather than 500.
 
 import hashlib
 import hmac
-import json
 from base64 import b64encode
 
 import requests
@@ -33,10 +32,6 @@ _BASE_URLS = {
     'SANDBOX': 'https://sandbox.cashfree.com',
     'PRODUCTION': 'https://api.cashfree.com',
 }
-
-class CashfreeError(Exception):
-    """Raised only for configuration faults, never for a declined payment."""
-
 
 def _config():
     cfg = current_app.config
@@ -208,20 +203,6 @@ def get_order(order_id: str) -> dict:
         }
 
     return {'ok': False, 'error': result['error'], 'raw': result['data']}
-
-
-def get_order_payments(order_id: str) -> dict:
-    """Payment attempts for an order - used to read the decline reason."""
-    cfg = _config()
-    result = _request(
-        'GET', f"{cfg['base_url']}/pg/orders/{order_id}/payments", _headers(cfg)
-    )
-
-    if result['ok']:
-        payments = result['data'] if isinstance(result['data'], list) else []
-        return {'ok': True, 'payments': payments}
-
-    return {'ok': False, 'error': result['error'], 'payments': []}
 
 
 def refund_payment(*, order_id: str, refund_id: str, amount, note: str = None) -> dict:
