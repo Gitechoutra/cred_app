@@ -10,8 +10,10 @@ from alembic import context
 config = context.config
 
 # Interpret the config file for Python logging.
-# This line sets up loggers basically.
-fileConfig(config.config_file_name)
+# This line sets up loggers basically. Existing loggers are kept: the app
+# runs migrations at boot (portal/schema.py), and the default would silence
+# the app's own logger for the rest of the server's life.
+fileConfig(config.config_file_name, disable_existing_loggers=False)
 logger = logging.getLogger('alembic.env')
 
 

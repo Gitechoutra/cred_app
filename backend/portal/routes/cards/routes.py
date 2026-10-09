@@ -184,7 +184,10 @@ class CardList(Resource):
                 args['expiry_month'], args['expiry_year']
             )
         except ValidationError as exc:
-            return failure(ErrorCode.ERR_009_TOKEN_EXPIRED, exc.message, 400)
+            # ERR-009 is an expired card; a malformed date is a typing mistake.
+            code = (ErrorCode.ERR_009_TOKEN_EXPIRED if exc.field == 'expiry'
+                    and 'expired' in exc.message else ErrorCode.VALIDATION_ERROR)
+            return failure(code, exc.message, 400, details={'field': exc.field})
 
         # Longest matching BIN wins, so a specific 8-digit rule beats the
         # 6-digit fallback for the same issuer.
@@ -243,11 +246,26 @@ class CardList(Resource):
                 400,
             )
 
+        # The same card twice - checked on what we hold, not only on the token,
+        # because cards linked before sandbox tokens were deterministic carry
+        # tokens that a new attempt cannot reproduce.
+        already = Cards.query.filter(
+            Cards.user_id == user.user_id,
+            Cards.last4 == last4,
+            Cards.expiry_month == expiry_month,
+            Cards.expiry_year == expiry_year,
+            Cards.card_issuer_bank == network_row.issuer_bank,
+            Cards.status != CardStatus.DELETED,
+        ).first()
+        if already:
+            return failure(ErrorCode.CONFLICT, 'This card is already linked.', 409,
+                           details={'card_id': already.card_id})
+
         token = adapters.tokenize_card(
             reference=(
-                f'{user.user_id}:{last4}:'
+                f'{user.user_id}:{bin_prefix[:6]}:{last4}:'
                 f'{test_cards.simulation_token(test_card["scenario"])}'
-                if test_card else f'{user.user_id}:{last4}'
+                if test_card else f'{user.user_id}:{bin_prefix[:6]}:{last4}'
             ),
             last4=last4,
             network=network_row.network,

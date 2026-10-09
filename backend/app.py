@@ -12,18 +12,17 @@ bootstrap explicitly in docker-entrypoint.sh before starting workers - that
 keeps schema creation to exactly one process instead of racing it across every
 worker that happens to import the app.
 
-Schema handling is deliberately split. `db.create_all()` only ever *adds*
-missing tables; it will not alter a column that already exists. Flask-Migrate is
-wired up in portal/models/__init__.py and remains the mechanism for changing an
-existing table:
+Schema: bootstrap() applies any pending migrations itself (portal/schema.py),
+then creates missing tables, then logs any model column the database still
+lacks. A schema change is still written as a migration:
 
     flask db migrate -m "describe the change"
-    flask db upgrade
+    flask db upgrade        # or just restart the server
 """
 
 import os
 
-from portal import InitApp, db
+from portal import InitApp
 
 app = InitApp().app()
 
@@ -39,7 +38,11 @@ def bootstrap():
     would have transfer_engine silently pricing a transfer against a default.
     """
     with app.app_context():
-        db.create_all()
+        # Migrations first, then create_all for anything they do not cover,
+        # then a column-by-column check. A database left behind by a pulled
+        # commit used to fail at query time with a bare HTTP 500.
+        from portal.schema import sync_schema
+        sync_schema()
         app.logger.info('Database tables verified.')
 
         from portal.seeders import run_all_seeders

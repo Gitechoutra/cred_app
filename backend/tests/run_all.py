@@ -31,6 +31,7 @@ BACKEND = os.path.dirname(HERE)
 SUITES = [
     'static_audit',
     'bureau_provider',
+    'schema_sync',
     'validation_audit',
     'credit_lifecycle',
     'credit_bureau_flow',
@@ -40,6 +41,7 @@ SUITES = [
     'upi_payment_flow',
     'upi_webhook',
     'smoke_flow',
+    'card_link_flow',
     #: Both currently end on one deliberate BLOCKED check: their money-movement
     #: leg was the removed transfer product, and they get retargeted onto the
     #: credit purchase flow. Listed last so the failure is the last thing read.

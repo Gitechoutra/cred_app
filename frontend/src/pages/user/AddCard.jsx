@@ -152,12 +152,18 @@ export default function AddCard() {
   }, [digits, selectedBank]);
 
   const [expMonth, expYear] = expiry.split('/');
+  const expiryError = expiryProblem(expMonth, expYear);
+  const dueDayError = dueDay && (Number(dueDay) < 1 || Number(dueDay) > 31)
+    ? 'Enter a day between 1 and 31.'
+    : '';
 
   const isCardSupported = issuer ? issuer.is_supported : Boolean(selectedBank);
   const valid =
     digits.length >= 15 &&
     expMonth?.length === 2 &&
     expYear?.length === 2 &&
+    !expiryError &&
+    !dueDayError &&
     isCardSupported &&
     !issuerError &&
     limitCheck?.eligible !== false;
@@ -561,6 +567,7 @@ export default function AddCard() {
               placeholder="MM/YY"
               value={expiry}
               maxLength={5}
+              error={expiryError}
               onChange={(event) => onExpiryChange(event.target.value)}
             />
             <Input
@@ -570,6 +577,7 @@ export default function AddCard() {
               placeholder="10"
               value={dueDay}
               maxLength={2}
+              error={dueDayError}
               onChange={(event) => setDueDay(event.target.value.replace(/\D/g, ''))}
             />
           </div>
@@ -606,4 +614,21 @@ export default function AddCard() {
       </div>
     </div>
   );
+}
+
+/**
+ * Why a complete MM/YY expiry cannot be right, or '' when it can. Only judged
+ * once both parts are typed, so the field does not complain mid-entry. The
+ * server checks the same rules; this just says so before a round trip.
+ */
+function expiryProblem(month, year) {
+  if (month?.length !== 2 || year?.length !== 2) return '';
+  const m = Number(month);
+  if (m < 1 || m > 12) return 'Enter a valid month, 01 to 12.';
+  const now = new Date();
+  const y = 2000 + Number(year);
+  if (y < now.getFullYear() || (y === now.getFullYear() && m < now.getMonth() + 1)) {
+    return 'This card has expired.';
+  }
+  return '';
 }

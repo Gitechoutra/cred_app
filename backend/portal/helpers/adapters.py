@@ -126,7 +126,12 @@ def tokenize_card(
                 'error': 'This card has expired. Please link your renewed card.',
             }
 
-        seed = f'{reference}{last4}{expiry_month}{expiry_year}{uuid.uuid4().hex}'
+        # Deterministic, like a real token requestor: the same card linked
+        # again by the same user gets the same token, which is what lets the
+        # caller's duplicate check answer "already linked". A random part here
+        # used to make every attempt a new token, so the same dummy card could
+        # be linked over and over.
+        seed = f'{reference}|{last4}|{expiry_month}|{expiry_year}|{network}|{issuer_bank}'
         token = hashlib.sha256(seed.encode()).hexdigest()[:32]
 
         return {
