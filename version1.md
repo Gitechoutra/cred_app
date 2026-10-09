@@ -493,6 +493,7 @@
   | Tier cap | `CREDIT_LIMIT_MAX_STANDARD_KYC` / `CREDIT_LIMIT_MAX_FULL_KYC` settings |
   | Minimum KYC | capped at the full-KYC threshold (`FULL_KYC_REQUIRED_ABOVE`). A regulatory ceiling only: no screen offers a higher limit for completing KYC, and no form step (PAN, bank, KYC, income proof) adds to a limit |
   | Sandbox bureau | outside production only. The test PAN's four digits pick the answer: `0300`–`0900` is the score, `0000` NH, `0001` NA, `0002` outage, `0003` unreadable; any other PAN has no file and gets no score. There is no default score |
+  | Bureau provider | `BUREAU_PROVIDER`: `SANDBOX` (above) or `DECENTRO` (real Experian / CRIF / Equifax pull, `portal/helpers/decentro.py`). Independent of `USE_SANDBOX_ADAPTERS`, with no fallback: `DECENTRO` without credentials, or `SANDBOX` in production, refuses (`BUREAU_NOT_CONFIGURED`) rather than simulating. Every score is stored with the bureau that produced it; sandbox and Decentro-staging answers are flagged as test data on every screen. A user's own checks are capped at `CREDIT_SCORE_CHECKS_PER_DAY` (3); bureau outages are not counted |
   | Floor | below ₹5,000 → `INCOME_BELOW_FLOOR` |
   | Rounding | down to the nearest ₹500 |
   | Admin decision | approve or reject only. No amount is typed: approval grants the eligible limit re-checked at that moment, and an ineligible application cannot be approved |
@@ -717,6 +718,7 @@
   | EMI biller | Bajaj Finance sandbox | BBPS BOU / Bajaj B2B — unsigned |
   | Mandate | Simulated UMN, scheduled debit, bounce injection | Razorpay AutoPay / Cashfree / NPCI — unsigned |
   | KYC | Manual admin review queue | Bureau.id, Karza, Signzy, IDfy — unsigned |
+  | Credit bureau | PAN-digit scenarios, labelled sandbox data | **Decentro** (Experian / CRIF / Equifax) — integrated, needs credentials. TransUnion CIBIL — needs a CIBIL member agreement or a CIBIL-reselling aggregator contract; not integrated |
   | Card issuance | Internal (BIN + last 4) | **Issuing partner — unsigned** |
   | SMS / Email | Console sink / Flask-Mail | Gupshup, Exotel, Karix |
   | Push | No-op (P1) | FCM, OneSignal |

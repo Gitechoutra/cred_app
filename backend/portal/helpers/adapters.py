@@ -25,7 +25,7 @@ import uuid
 
 from flask import current_app
 
-from portal.helpers import cashfree, razorpay
+from portal.helpers import cashfree, decentro, razorpay
 
 
 # ── Failure injection ──────────────────────────────────────────────────────
@@ -337,8 +337,9 @@ def interpret_bureau_score(raw) -> dict:
     return invalid
 
 
-def _bureau_answer(raw, *, provider: str, reference: str) -> dict:
-    """A raw bureau score field as fetch_credit_score's result."""
+def _bureau_answer(raw, *, provider: str, bureau: str, reference: str,
+                   is_demo: bool) -> dict:
+    """A raw bureau score field as fetch_credit_report's result."""
     reading = interpret_bureau_score(raw)
     if reading['outcome'] == 'INVALID':
         return {
@@ -352,17 +353,55 @@ def _bureau_answer(raw, *, provider: str, reference: str) -> dict:
         'no_history': reading['outcome'] == 'NO_HISTORY',
         'bureau_code': reading['code'],
         'provider': provider,
+        'bureau': bureau,
         'reference': reference,
+        'is_demo': is_demo,
     }
 
 
 def _sandbox_bureau_allowed() -> bool:
     """
-    The sandbox bureau answers outside production only. USE_SANDBOX_ADAPTERS
-    defaults on everywhere, and a sandbox score in production would be an
-    invented score deciding a real application.
+    The sandbox bureau answers outside production only. A sandbox score in
+    production would be an invented score deciding a real application.
     """
     return current_app.config.get('ENV_NAME', 'development') != 'production'
+
+
+def bureau_provider() -> str:
+    """
+    Who answers a credit score request: SANDBOX, DECENTRO, or NONE.
+
+    Chosen by BUREAU_PROVIDER, separately from USE_SANDBOX_ADAPTERS: switching
+    the payment rails live must not quietly switch the bureau, or the reverse.
+    There is no fallback between them. DECENTRO without credentials is NONE,
+    not the sandbox - a user expecting their real score must never be handed a
+    simulated one - and SANDBOX in production is NONE too.
+    """
+    requested = (current_app.config.get('BUREAU_PROVIDER') or 'SANDBOX').upper()
+    if requested == 'DECENTRO':
+        return 'DECENTRO' if decentro.is_configured() else 'NONE'
+    if requested == 'SANDBOX':
+        return 'SANDBOX' if _sandbox_bureau_allowed() else 'NONE'
+    return 'NONE'
+
+
+def bureau_info() -> dict:
+    """What the screens say about the bureau before anything is pulled."""
+    provider = bureau_provider()
+    if provider == 'DECENTRO':
+        return {'provider': provider, 'bureau': decentro.bureau_name(),
+                'available': True, 'is_test': decentro.is_test_environment()}
+    if provider == 'SANDBOX':
+        return {'provider': provider, 'bureau': 'SANDBOX',
+                'available': True, 'is_test': True}
+    return {'provider': 'NONE', 'bureau': None, 'available': False, 'is_test': False}
+
+
+_NOT_CONFIGURED = {
+    'ok': False,
+    'error_code': 'BUREAU_NOT_CONFIGURED',
+    'error': 'The credit bureau is not connected yet.',
+}
 
 
 #: Sandbox scenarios, chosen by the four digits of a test PAN (ABCDE0680F).
@@ -374,71 +413,78 @@ SANDBOX_DOWN_DIGITS = '0002'            # bureau unreachable
 SANDBOX_GARBLED_DIGITS = '0003'         # bureau answers something unreadable
 
 
-def fetch_credit_score(*, reference: str, pan: str, full_name: str = None,
-                       phone: str = None) -> dict:
+def _sandbox_pull(pan: str) -> dict:
     """
-    The applicant's credit score from the bureau, by PAN.
-
-    Only ever called with the applicant's recorded consent - pulling a credit
-    report without it is not permitted - and it is a soft enquiry, which does
-    not itself affect the score.
-
-    Returns {'ok', 'score', 'no_history', 'bureau_code', 'provider',
-    'reference'}, or {'ok': False, 'error_code', 'error'}. A score of None with
-    no_history=True means the bureau has no file on the person: new to credit,
-    which is not the same as a bad score, and is never given a number.
-
-    Sandbox (outside production only): the PAN's four digits pick the answer.
-    0300-0900 is returned as the score (ABCDE0680F scores 680); 0000 answers NH
-    and 0001 NA; 0002 is a bureau outage and 0003 an unreadable response. Any
-    other PAN has no sandbox file and gets no score.
-
-    Live: no bureau vendor is contracted yet (CIBIL, Experian, CRIF and Equifax
-    all need a membership agreement), so this reports the score as unavailable
-    rather than inventing one. A vendor client goes here, and must hand its raw
-    score field to _bureau_answer so NH/NA are read the same way.
+    The sandbox bureau. The PAN's four digits pick the answer: 0300-0900 is
+    returned as the score (ABCDE0680F scores 680); 0000 answers NH and 0001 NA;
+    0002 is a bureau outage and 0003 an unreadable response. Any other PAN has
+    no sandbox file and gets no score.
     """
-    if _use_sandbox():
-        if not _sandbox_bureau_allowed():
-            return {
-                'ok': False,
-                'error_code': 'BUREAU_NOT_CONFIGURED',
-                'error': 'The credit bureau is not connected yet.',
-            }
-        digits = (pan or '')[5:9]
-        sandbox_ref = _ref('bureau_sbx')
-        if digits == SANDBOX_DOWN_DIGITS:
-            return {'ok': False, 'error_code': 'BUREAU_UNAVAILABLE',
-                    'error': 'The credit bureau did not respond.'}
-        raw = {
-            SANDBOX_NO_HIT_DIGITS: 'NH',
-            SANDBOX_NA_DIGITS: 'NA',
-            SANDBOX_GARBLED_DIGITS: 'ERR#',
-        }.get(digits)
-        if raw is None and digits.isdigit() and \
-                BUREAU_SCORE_MIN <= int(digits) <= BUREAU_SCORE_MAX:
-            raw = str(int(digits))
-        if raw is None:
-            return {'ok': False, 'error_code': 'BUREAU_NO_SANDBOX_FILE',
-                    'error': 'The sandbox bureau has no test file for this PAN.'}
-        return _bureau_answer(raw, provider='SANDBOX', reference=sandbox_ref)
+    digits = (pan or '')[5:9]
+    if digits == SANDBOX_DOWN_DIGITS:
+        return {'ok': False, 'error_code': 'BUREAU_UNAVAILABLE',
+                'error': 'The credit bureau did not respond.'}
+    raw = {
+        SANDBOX_NO_HIT_DIGITS: 'NH',
+        SANDBOX_NA_DIGITS: 'NA',
+        SANDBOX_GARBLED_DIGITS: 'ERR#',
+    }.get(digits)
+    if raw is None and digits.isdigit() and \
+            BUREAU_SCORE_MIN <= int(digits) <= BUREAU_SCORE_MAX:
+        raw = str(int(digits))
+    if raw is None:
+        return {'ok': False, 'error_code': 'BUREAU_NO_SANDBOX_FILE',
+                'error': 'The sandbox bureau has no test file for this PAN.'}
+    scored = _bureau_answer(raw, provider='SANDBOX', bureau='SANDBOX',
+                            reference=_ref('bureau_sbx'), is_demo=True)
+    if scored.get('ok'):
+        scored['report'] = _demo_credit_report(scored.get('score'), pan)
+    return scored
 
-    return {
-        'ok': False,
-        'error_code': 'BUREAU_NOT_CONFIGURED',
-        'error': 'The credit bureau is not connected yet.',
-    }
+
+def _decentro_pull(*, reference: str, pan: str, full_name: str, phone: str,
+                   date_of_birth=None, pincode: str = None) -> dict:
+    result = decentro.fetch_report(
+        reference_id=reference, pan=pan, name=full_name, mobile=phone,
+        date_of_birth=date_of_birth.isoformat() if date_of_birth else None,
+        pincode=pincode,
+    )
+    if not result.get('ok'):
+        return result
+
+    is_test = decentro.is_test_environment()
+    bureau = decentro.bureau_name()
+    if result['no_hit']:
+        return {'ok': True, 'score': None, 'no_history': True, 'bureau_code': 'NH',
+                'provider': 'DECENTRO', 'bureau': bureau,
+                'reference': result.get('reference'), 'is_demo': is_test,
+                'report': None}
+
+    scored = _bureau_answer(result.get('raw_score'), provider='DECENTRO',
+                            bureau=bureau, reference=result.get('reference'),
+                            is_demo=is_test)
+    if scored.get('ok'):
+        scored['report'] = result.get('report')
+    return scored
 
 
 def fetch_credit_report(*, reference: str, pan: str, full_name: str = None,
-                        phone: str = None) -> dict:
+                        phone: str = None, date_of_birth=None,
+                        pincode: str = None) -> dict:
     """
-    The score plus the report behind it: accounts, utilisation, payment history
-    and recent enquiries. For the user's own Credit Score screen.
+    The person's credit score, and the report behind it, by PAN.
 
-    Returns fetch_credit_score's fields plus 'report' and 'is_demo'. The
-    report's shape is what a bureau integration should map its response onto,
-    so the screen does not change when a real one is connected:
+    Only ever called with the person's recorded consent - pulling a credit
+    report without it is not permitted - and it is a soft enquiry, which does
+    not itself affect the score.
+
+    Returns {'ok', 'score', 'no_history', 'bureau_code', 'provider', 'bureau',
+    'reference', 'is_demo', 'report'}, or {'ok': False, 'error_code', 'error'}.
+    A score of None with no_history=True means the bureau has no file on the
+    person: new to credit, which is not the same as a bad score, and is never
+    given a number. report is None for a no-hit.
+
+    `report` has the one shape every provider is mapped onto:
 
         {'accounts': [{'type', 'lender', 'status', 'opened_on', 'limit',
                        'balance'}],
@@ -447,28 +493,29 @@ def fetch_credit_report(*, reference: str, pan: str, full_name: str = None,
                              'late_payments'},
          'enquiries': [{'date', 'lender', 'purpose'}]}
 
-    Sandbox: the score comes from fetch_credit_score, and the report is DEMO
-    DATA - derived from the score so a better score reads as a healthier
-    report, and fixed per PAN so the screen is stable between checks. Nothing
-    in it came from a bureau, and is_demo says so.
+    is_demo is True for anything that is not a real person's real file: every
+    sandbox answer, and every answer from a provider's test environment.
 
-    Live: no bureau is contracted, so this refuses like fetch_credit_score.
+    Providers (see bureau_provider):
+        SANDBOX   simulated, outside production only; the report is demo data.
+        DECENTRO  Experian, CRIF or Equifax through Decentro (decentro.py).
+        NONE      refused - the score is unavailable, never invented.
     """
-    scored = fetch_credit_score(reference=reference, pan=pan,
-                                full_name=full_name, phone=phone)
-    if not scored.get('ok'):
-        return scored
+    provider = bureau_provider()
+    if provider == 'SANDBOX':
+        return _sandbox_pull(pan)
+    if provider == 'DECENTRO':
+        return _decentro_pull(reference=reference, pan=pan, full_name=full_name,
+                              phone=phone, date_of_birth=date_of_birth,
+                              pincode=pincode)
+    return dict(_NOT_CONFIGURED)
 
-    if not _use_sandbox():
-        # Where a real bureau's report would be fetched and mapped.
-        return {
-            'ok': False,
-            'error_code': 'BUREAU_NOT_CONFIGURED',
-            'error': 'The credit bureau is not connected yet.',
-        }
 
-    return {**scored, 'is_demo': True,
-            'report': _demo_credit_report(scored.get('score'), pan)}
+def fetch_credit_score(**kwargs) -> dict:
+    """fetch_credit_report without the report - for a credit application."""
+    result = fetch_credit_report(**kwargs)
+    result.pop('report', None)
+    return result
 
 
 def _demo_credit_report(score, pan: str) -> dict:

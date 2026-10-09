@@ -5,14 +5,18 @@ by the earlier EMI payment migration. These columns are required by the ORM and
 their absence breaks admin dashboard queries that count EMI payments.
 
 Revision ID: f7c8a9d2e341
-Revises: c6f2a8d4e1b7
+Revises: d8a1f3c5b724
 Create Date: 2026-09-30
+
+Originally revised c6f2a8d4e1b7, which d8a1f3c5b724 also revises - two heads,
+and `flask db upgrade` refuses to run with two. It only adds what is missing,
+so chaining it after d8a1f3c5b724 is safe on every database.
 """
 import sqlalchemy as sa
 from alembic import op
 
 revision = 'f7c8a9d2e341'
-down_revision = 'c6f2a8d4e1b7'
+down_revision = 'd8a1f3c5b724'
 branch_labels = None
 depends_on = None
 

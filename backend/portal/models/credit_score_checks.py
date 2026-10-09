@@ -18,8 +18,9 @@ class CreditScoreChecks(db.Model, TimestampMixin, CRUDMixin):
     Both need the user's consent, and each row records when it was given -
     a bureau enquiry without it is not permitted.
 
-    `is_demo` is true for every row the sandbox produced. The screen shows
-    those as demo data, so a simulated report is never mistaken for a real one.
+    `is_demo` is true for every row the sandbox produced, and for every row a
+    provider's test environment produced. The screen shows those as test data,
+    so a simulated report is never mistaken for a real one.
     """
 
     __tablename__ = 'credit_score_checks'
@@ -37,7 +38,10 @@ class CreditScoreChecks(db.Model, TimestampMixin, CRUDMixin):
     score = db.Column(db.Integer, nullable=True)
     no_history = db.Column(db.Boolean, default=False, nullable=False)
 
+    #: SANDBOX or the provider that pulled it (DECENTRO).
     provider = db.Column(db.String(20), nullable=True)
+    #: Which bureau answered: EXPERIAN, CRIF, EQUIFAX, or SANDBOX.
+    bureau = db.Column(db.String(20), nullable=True)
     bureau_reference = db.Column(db.String(64), nullable=True)
     is_demo = db.Column(db.Boolean, default=False, nullable=False)
 

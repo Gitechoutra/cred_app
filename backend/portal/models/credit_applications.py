@@ -155,9 +155,15 @@ class CreditApplications(db.Model, TimestampMixin, CRUDMixin):
     credit_no_history = db.Column(db.Boolean, default=False, nullable=False)
     credit_score_fetched_at = db.Column(db.DateTime, nullable=True)
     bureau_reference = db.Column(db.String(64), nullable=True)
-    #: Who answered: SANDBOX, or the contracted bureau. A sandbox answer is
-    #: test data and is labelled as such wherever it is shown.
+    #: Who answered: SANDBOX, or the provider (DECENTRO) that pulled it.
     bureau_provider = db.Column(db.String(20), nullable=True)
+    #: Which bureau the score is from: EXPERIAN, CRIF, EQUIFAX, or SANDBOX.
+    #: Scores from different bureaus are different numbers for the same person.
+    bureau_name = db.Column(db.String(20), nullable=True)
+    #: Not a real person's real file - the sandbox, or a provider's test
+    #: environment. Labelled as test data wherever it is shown.
+    bureau_is_test = db.Column(db.Boolean, default=False, nullable=False,
+                               server_default=db.false())
     #: The bureau's own no-history code (NH, NA), kept as returned.
     bureau_code = db.Column(db.String(20), nullable=True)
     #: Why the last enquiry produced nothing usable. Cleared by a good answer.

@@ -342,7 +342,9 @@ def bureau_result(application: CreditApplications) -> dict:
         'no_history': status == BureauStatus.NO_HISTORY,
         'bureau_code': application.bureau_code,
         'provider': application.bureau_provider,
-        'is_demo': application.bureau_provider == 'SANDBOX',
+        'bureau': application.bureau_name,
+        'is_demo': bool(application.bureau_is_test)
+        or application.bureau_provider == 'SANDBOX',
         'error': application.bureau_error if status == BureauStatus.UNAVAILABLE else None,
         'fetched_at': application.credit_score_fetched_at,
     }
@@ -565,6 +567,8 @@ def _fetch_credit_score(application: CreditApplications, user) -> bool:
         pan=pan,
         full_name=user.full_name,
         phone=user.phone,
+        date_of_birth=getattr(user, 'date_of_birth', None),
+        pincode=getattr(profile, 'pincode', None),
     )
     if not result.get('ok'):
         application.bureau_error = (result.get('error') or 'The credit bureau did not answer.')[:255]
@@ -578,6 +582,8 @@ def _fetch_credit_score(application: CreditApplications, user) -> bool:
     application.credit_no_history = bool(result.get('no_history'))
     application.bureau_code = result.get('bureau_code')
     application.bureau_provider = result.get('provider')
+    application.bureau_name = result.get('bureau')
+    application.bureau_is_test = bool(result.get('is_demo'))
     application.bureau_error = None
     application.credit_score_fetched_at = utcnow()
     application.bureau_reference = (result.get('reference') or '')[:64] or None

@@ -422,11 +422,16 @@ export function AdminCreditApplicationReview() {
                       : app.bureau?.status === 'UNAVAILABLE' ? `${app.bureau.status_label}: ${app.bureau.error}`
                         : (app.status === 'KYC_PENDING' ? 'Fetched once KYC is verified' : 'Not fetched')}
                 </p>
-                {app.bureau?.is_demo && <Badge tone="warn" className="mt-1">Sandbox bureau</Badge>}
+                {app.bureau?.is_demo && (
+                  <Badge tone="warn" className="mt-1">
+                    {app.bureau.provider === 'SANDBOX' ? 'Sandbox bureau' : 'Test environment'}
+                  </Badge>
+                )}
               </div>
               {app.bureau?.credit_score != null && <ScoreBar score={app.bureau.credit_score} />}
             </div>
             <div className="mt-3 border-t border-line pt-1">
+              {app.bureau?.bureau && <Row label="Bureau" value={app.bureau.bureau} />}
               <Row label="Consent given" value={dateTime(app.bureau?.consented_at) || '—'} />
               <Row label="Fetched" value={dateTime(app.bureau?.fetched_at) || '—'} />
               {app.bureau?.reference && <Row label="Reference" value={app.bureau.reference} mono />}

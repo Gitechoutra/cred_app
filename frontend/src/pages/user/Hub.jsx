@@ -35,7 +35,7 @@ import {
 import { useFetch, useProfile } from '../../hooks/useProfile';
 import { Reveal } from '../../hooks/useReveal';
 import { date, money, moneyCompact } from '../../utils/format';
-import ScoreMeter from '../../components/credit/ScoreMeter';
+import ScoreMeter, { bureauLabel } from '../../components/credit/ScoreMeter';
 
 /**
  * Premium CashU Logged-In User Home Experience.
@@ -248,7 +248,7 @@ export default function Hub() {
                 </div>
 
                 <div className="mt-2 flex items-center justify-between text-2xs text-white/40">
-                  <span>Target: Under 30% for optimal CIBIL score</span>
+                  <span>Target: under 30% for a healthy credit score</span>
                   <span>Max: 100%</span>
                 </div>
               </div>
@@ -633,17 +633,17 @@ function CreditScoreCard({ onOpen }) {
       <div className="flex-1 text-center sm:text-left">
         <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
           <h2 className="text-base font-bold tracking-tight text-ink">Your Credit Score</h2>
-          {score?.is_demo && <Badge tone="warn">Demo data</Badge>}
+          {score?.is_demo && <Badge tone="warn">Test data</Badge>}
         </div>
         <p className="mt-1 text-sm text-slate">
           {score
-            ? <>CIBIL Score: <span className="font-semibold text-ink">{score.no_history ? 'Not Available' : score.score}</span>
+            ? <>{score.bureau && score.bureau !== 'SANDBOX' ? bureauLabel(score.bureau) : 'Credit score'}: <span className="font-semibold text-ink">{score.no_history ? 'Not Available' : score.score}</span>
                 {score.no_history ? ` (${score.status_label})` : ''}
                 {score.band && !score.no_history ? ` (${score.band})` : ''} · updated {date(score.fetched_at)}</>
             : 'Not checked yet. See your score, accounts, utilisation and enquiries.'}
         </p>
         <Button variant="mint" size="sm" className="mt-3" onClick={onOpen}>
-          Check CIBIL Score
+          Check credit score
         </Button>
       </div>
     </section>

@@ -30,9 +30,11 @@ BACKEND = os.path.dirname(HERE)
 #: something does not even parse, so it goes first and saves a slow run.
 SUITES = [
     'static_audit',
+    'bureau_provider',
     'validation_audit',
     'credit_lifecycle',
     'credit_bureau_flow',
+    'credit_score_check_flow',
     'credit_concurrency',
     'credit_statement_cycles',
     'upi_payment_flow',

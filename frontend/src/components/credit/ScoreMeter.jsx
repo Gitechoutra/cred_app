@@ -27,6 +27,20 @@ const BAND_COLORS = {
   Excellent: '#009170',
 };
 
+// The backend's bureau codes, for display. A score is always shown with the
+// bureau that produced it: each bureau scores the same person differently.
+const BUREAU_LABELS = {
+  EXPERIAN: 'Experian',
+  CRIF: 'CRIF High Mark',
+  EQUIFAX: 'Equifax',
+  CIBIL: 'TransUnion CIBIL',
+  SANDBOX: 'CashU sandbox',
+};
+
+export function bureauLabel(bureau) {
+  return BUREAU_LABELS[bureau] || 'the credit bureau';
+}
+
 export function bandColor(band) {
   return BAND_COLORS[band] || '#94A3A0';
 }

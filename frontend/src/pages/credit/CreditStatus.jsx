@@ -281,11 +281,11 @@ export default function CreditStatus() {
               title="Under review"
               subtitle="Nothing more is needed from you. This page updates by itself when there is a decision."
             />
-            {/* The eligible limit, worked out from salary and CIBIL score.
+            {/* The eligible limit, worked out from salary and credit score.
                 Nothing here is chosen by the applicant. */}
             <div className="mt-5 grid grid-cols-2 gap-2 text-center">
               <div className="rounded-2xl border border-line bg-mist/40 p-3">
-                <p className="text-2xs uppercase tracking-wider text-slate">CIBIL score</p>
+                <p className="text-2xs uppercase tracking-wider text-slate">Credit score</p>
                 <p className="money mt-1 text-xl font-bold text-ink">
                   {application.credit_score
                     ?? (application.credit_status === 'PENDING' ? '—' : 'Not Available')}
@@ -295,7 +295,7 @@ export default function CreditStatus() {
                     ? application.credit_score_band
                     : application.credit_status === 'PENDING' ? 'Being fetched' : application.credit_status_label}
                 </p>
-                {application.bureau_is_demo && <p className="text-2xs text-amber-700">Sandbox bureau</p>}
+                {application.bureau_is_demo && <p className="text-2xs text-amber-700">Test data</p>}
               </div>
               <div className="rounded-2xl border border-mint-200 bg-mint-50/60 p-3">
                 <p className="text-2xs uppercase tracking-wider text-slate">Eligible limit</p>

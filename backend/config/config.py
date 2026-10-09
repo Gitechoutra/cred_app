@@ -89,6 +89,29 @@ class BaseConfig:
     # so sandbox mode is the default until real credentials are present.
     USE_SANDBOX_ADAPTERS = os.getenv('USE_SANDBOX_ADAPTERS', 'True') == 'True'
 
+    # -- Credit bureau (credit score) --------------------------------------
+    # Who answers a credit score request. Independent of USE_SANDBOX_ADAPTERS
+    # (see adapters.bureau_provider), and there is no fallback between them:
+    #   SANDBOX   simulated answers chosen by the test PAN, outside production
+    #             only, always labelled as demo data.
+    #   DECENTRO  a real pull - Experian, CRIF or Equifax - through Decentro.
+    #             Needs DECENTRO_CLIENT_ID and DECENTRO_CLIENT_SECRET; without
+    #             them the score is reported unavailable, never simulated.
+    BUREAU_PROVIDER = os.getenv('BUREAU_PROVIDER', 'SANDBOX').upper()
+    # STAGING returns Decentro's UAT test files, labelled as test data.
+    # PRODUCTION returns the person's real report.
+    DECENTRO_ENV = os.getenv('DECENTRO_ENV', 'STAGING').upper()
+    DECENTRO_CLIENT_ID = os.getenv('DECENTRO_CLIENT_ID', '')
+    DECENTRO_CLIENT_SECRET = os.getenv('DECENTRO_CLIENT_SECRET', '')
+    # EX Experian, CR CRIF High Mark, EQ Equifax - whichever Decentro has
+    # enabled on the account.
+    DECENTRO_BUREAU_CODE = os.getenv('DECENTRO_BUREAU_CODE', 'EX').upper()
+    # BL, CC, CL, HL, GL or PL. CC: CashU's product is a revolving credit line.
+    DECENTRO_INQUIRY_PURPOSE = os.getenv('DECENTRO_INQUIRY_PURPOSE', 'CC').upper()
+    # Each pull is a paid enquiry on the person's file, so a user's own checks
+    # from the Credit Score screen are capped per day.
+    CREDIT_SCORE_CHECKS_PER_DAY = int(os.getenv('CREDIT_SCORE_CHECKS_PER_DAY', '3'))
+
     # -- Test cards --------------------------------------------------------
     # Predefined dummy cards for exercising the credit-card flow without a real
     # card. Empty means "follow the environment": on in a debug build with the

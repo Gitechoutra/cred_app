@@ -21,7 +21,7 @@ than creating a second one.
 
 from decimal import Decimal
 
-from flask import request
+from flask import current_app, request
 from flask_jwt_extended import jwt_required
 from flask_restx import Resource, inputs, reqparse
 
@@ -1382,7 +1382,7 @@ score_check_parser.add_argument('consent', type=inputs.boolean, required=True,
 
 
 def _score_dict(*, score, no_history, fetched_at, source, is_demo,
-                provider=None, report=None) -> dict:
+                provider=None, bureau=None, report=None) -> dict:
     return {
         'score': score,
         'no_history': bool(no_history),
@@ -1398,6 +1398,9 @@ def _score_dict(*, score, no_history, fetched_at, source, is_demo,
         # application, which carries no report.
         'source': source,
         'provider': provider,
+        # EXPERIAN, CRIF, EQUIFAX or SANDBOX: the screen names the bureau, so a
+        # score is never presented as being from one it did not come from.
+        'bureau': bureau,
         'is_demo': bool(is_demo),
         'report': report,
     }
@@ -1421,7 +1424,7 @@ def _latest_score(user) -> dict | None:
         return _score_dict(
             score=check.score, no_history=check.no_history,
             fetched_at=check.fetched_at, source='CHECK', is_demo=check.is_demo,
-            provider=check.provider, report=check.report,
+            provider=check.provider, bureau=check.bureau, report=check.report,
         )
     if application:
         return _score_dict(
@@ -1429,10 +1432,54 @@ def _latest_score(user) -> dict | None:
             no_history=application.credit_no_history,
             fetched_at=application.credit_score_fetched_at,
             source='APPLICATION',
-            is_demo=application.bureau_provider == 'SANDBOX',
+            is_demo=bool(application.bureau_is_test)
+            or application.bureau_provider == 'SANDBOX',
             provider=application.bureau_provider,
+            bureau=application.bureau_name,
         )
     return None
+
+
+def _score_payload(user) -> dict:
+    profile = user.profile
+    bureau = adapters.bureau_info()
+    return {
+        'score': _latest_score(user),
+        # A check needs the PAN, which KYC collects.
+        'can_check': bool(profile and profile.pan_number_enc),
+        # Who would answer a check made now. available=False means checks are
+        # switched off - the screen says so instead of offering a button that
+        # can only fail.
+        'bureau': bureau,
+        'bureau_connected': bureau['provider'] == 'DECENTRO',
+    }
+
+
+#: What the user is told for each way a check can fail, and the HTTP status.
+#: The bureau's own wording goes to the log, not the screen.
+_SCORE_FAILURES = {
+    'BUREAU_NOT_CONFIGURED': (
+        503, 'Credit score checks are not available yet. Please check back later.'),
+    'BUREAU_AUTH_FAILED': (
+        503, 'Credit score checks are temporarily unavailable. Please try again later.'),
+    'BUREAU_UNAVAILABLE': (
+        503, 'The credit bureau is not responding right now. Please try again '
+             'in a few minutes.'),
+    'BUREAU_INVALID_RESPONSE': (
+        502, 'The credit bureau sent a response we could not read. Please try '
+             'again later.'),
+    'BUREAU_REJECTED': (
+        422, 'The credit bureau could not match your details. Check that your '
+             'name and PAN match your PAN card.'),
+    'BUREAU_NO_SANDBOX_FILE': (
+        422, 'Sandbox: this PAN has no test credit file. Test PANs score by '
+             'their four digits - ABCDE0750F scores 750.'),
+}
+
+#: Failures that are not the user's doing, so the attempt is not counted
+#: against their daily checks.
+_SCORE_REFUNDED = {'BUREAU_NOT_CONFIGURED', 'BUREAU_AUTH_FAILED',
+                   'BUREAU_UNAVAILABLE', 'BUREAU_INVALID_RESPONSE'}
 
 
 @ns.route('/score')
@@ -1442,14 +1489,7 @@ class CreditScore(Resource):
     @active_user_required
     def get(self):
         """The user's latest credit score, or null if none has been pulled."""
-        user = current_user()
-        profile = user.profile
-        return success({
-            'score': _latest_score(user),
-            # A check needs the PAN, which KYC collects.
-            'can_check': bool(profile and profile.pan_number_enc),
-            'bureau_connected': not adapters._use_sandbox(),
-        })
+        return success(_score_payload(current_user()))
 
 
 @ns.route('/score/check')
@@ -1462,8 +1502,10 @@ class CreditScoreCheck(Resource):
         Pull the user's score and report from the bureau, with their consent.
 
         A soft enquiry: it does not affect the score. Refused without explicit
-        consent, and without a PAN on file.
+        consent, without a PAN on file, when no bureau is connected, and past
+        the daily allowance of checks.
         """
+        from portal.helpers import rate_limit
         from portal.helpers.encryption import decrypt
         from portal.models.base import utcnow
         from portal.models.credit_score_checks import (
@@ -1481,6 +1523,10 @@ class CreditScoreCheck(Resource):
                 400, details={'field': 'consent'},
             )
 
+        if not adapters.bureau_info()['available']:
+            code = 'BUREAU_NOT_CONFIGURED'
+            return failure(code, _SCORE_FAILURES[code][1], _SCORE_FAILURES[code][0])
+
         profile = user.profile
         pan = None
         if profile is not None and profile.pan_number_enc:
@@ -1494,6 +1540,25 @@ class CreditScoreCheck(Resource):
                 'Complete KYC with your PAN to check your credit score.',
                 422,
             )
+        if not (user.full_name or '').strip():
+            return failure(
+                ErrorCode.VALIDATION_ERROR,
+                'Add your full name to your profile to check your credit score.',
+                422, details={'field': 'full_name'},
+            )
+
+        # Each pull is a paid enquiry on the user's credit file.
+        scope = f'credit_score_check:user:{user.user_id}'
+        limit = current_app.config.get('CREDIT_SCORE_CHECKS_PER_DAY', 3)
+        try:
+            rate_limit.hit(scope, limit, 86400)
+        except rate_limit.RateLimitExceeded as exc:
+            return failure(
+                ErrorCode.ERR_011_VELOCITY_ABUSE,
+                f'You can check your credit score {limit} times a day. Please '
+                'try again tomorrow.',
+                429, details={'retry_after_seconds': exc.retry_after_seconds},
+            )
 
         check = CreditScoreChecks(user_id=user.user_id, consent_at=utcnow(),
                                   status=ScoreCheckStatus.FAILED)
@@ -1503,32 +1568,36 @@ class CreditScoreCheck(Resource):
         result = adapters.fetch_credit_report(
             reference=f'CASHUCHK{check.check_id.replace("-", "")[:16]}',
             pan=pan, full_name=user.full_name, phone=user.phone,
+            date_of_birth=user.date_of_birth,
+            pincode=profile.pincode if profile is not None else None,
         )
 
         if not result.get('ok'):
-            check.error = (result.get('error') or 'Bureau unavailable')[:255]
+            code = result.get('error_code') or 'BUREAU_UNAVAILABLE'
+            check.error = (f'{code}: ' + (result.get('error') or ''))[:255]
+            check.provider = adapters.bureau_provider()
             db.session.commit()
-            logger.warning(f'[credit-score] check failed for {user.user_id}: '
-                           f'{check.error}')
-            return failure(
-                result.get('error_code', ErrorCode.PROVIDER_ERROR),
-                'We could not get your credit score right now. Please try '
-                'again later.',
-                503,
-            )
+            logger.warning(f'[credit-score] check {check.check_id} failed for '
+                           f'{user.user_id}: {check.error}')
+            if code in _SCORE_REFUNDED:
+                try:
+                    rate_limit.hit(scope, limit, 86400, increment=-1)
+                except rate_limit.RateLimitExceeded:
+                    pass
+            status, message = _SCORE_FAILURES.get(
+                code, (503, 'We could not get your credit score right now. '
+                            'Please try again later.'))
+            return failure(code, message, status)
 
         check.status = ScoreCheckStatus.SUCCESS
         check.score = result.get('score')
         check.no_history = bool(result.get('no_history'))
         check.provider = result.get('provider')
+        check.bureau = result.get('bureau')
         check.bureau_reference = (result.get('reference') or '')[:64] or None
         check.is_demo = bool(result.get('is_demo'))
         check.report = result.get('report')
         check.fetched_at = utcnow()
         db.session.commit()
 
-        return success({
-            'score': _latest_score(user),
-            'can_check': True,
-            'bureau_connected': not adapters._use_sandbox(),
-        }, 'Credit score updated.')
+        return success(_score_payload(user), 'Credit score updated.')
