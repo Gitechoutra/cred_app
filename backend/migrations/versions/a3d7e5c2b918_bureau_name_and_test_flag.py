@@ -39,8 +39,13 @@ def upgrade():
 
     op.execute("UPDATE credit_score_checks SET bureau = 'SANDBOX' "
                "WHERE provider = 'SANDBOX' AND bureau IS NULL")
-    op.execute("UPDATE credit_applications SET bureau_name = 'SANDBOX', "
-               "bureau_is_test = 1 WHERE bureau_provider = 'SANDBOX'")
+    if 'bureau_provider' in applications:
+        op.execute("UPDATE credit_applications SET bureau_name = 'SANDBOX', "
+                   "bureau_is_test = 1 WHERE bureau_provider = 'SANDBOX'")
+    else:
+        op.execute("UPDATE credit_applications SET bureau_name = 'SANDBOX', "
+                   "bureau_is_test = 1")
+
 
 
 def downgrade():
