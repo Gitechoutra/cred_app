@@ -30,6 +30,13 @@ from datetime import date
 
 import requests
 
+from dotenv import load_dotenv  # noqa: E402
+
+# The admin's phone and MPIN live in backend/.env (seeded from it on boot).
+# Without this the os.getenv() defaults below are used instead, and the
+# administrator sign-in fails with MPIN_INVALID.
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from throttle import throttled  # noqa: E402
 from credit_apply import apply_for_credit, link_bank  # noqa: E402

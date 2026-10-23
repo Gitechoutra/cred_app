@@ -20,6 +20,14 @@ import uuid
 
 import requests
 
+from dotenv import load_dotenv  # noqa: E402
+
+# The admin's phone and MPIN live in backend/.env (seeded from it on boot).
+# Without this the os.getenv() defaults below are used instead, and the
+# administrator sign-in fails with MPIN_INVALID.
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
+
+
 BASE = os.getenv('CASHU_API', 'http://127.0.0.1:5050/v1')
 TIMEOUT = 30
 
@@ -168,10 +176,16 @@ def main():
         queue_ok = check('KYC queue', response.status_code == 200, response.text[:200])
 
         if queue_ok:
-            pending = [
-                k for k in response.json()['data']
-                if k['masked_phone'] and k['masked_phone'].endswith(phone[-4:])
-            ]
+            # Oldest-first and paged: walk every page, and match on the
+            # user's id - the last four digits of a phone are not unique.
+            user_id = get('/users/me', token=token).json()['data']['user_id']
+            pending = []
+            for page in range(1, 60):
+                rows = get(f'/admin/kyc/queue?page={page}&per_page=100',
+                           token=admin_token).json()['data']
+                pending += [k for k in rows if k['user_id'] == user_id]
+                if pending or not rows:
+                    break
             check('Submission in queue', len(pending) == 1, str(len(pending)))
 
             if pending:
