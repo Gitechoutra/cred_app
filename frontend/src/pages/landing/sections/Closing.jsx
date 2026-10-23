@@ -1,8 +1,8 @@
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 import { Logo } from '../../../components/layout/AppShell';
-import { Button, cx } from '../../../components/ui';
-import { NAV_LINKS } from './Nav';
+import { Button } from '../../../components/ui';
+import { MOCK_CARDS } from './Hero';
 import { ArrowRight, Container, FadeIn } from './shared';
 
 export function FinalCta() {
@@ -12,20 +12,31 @@ export function FinalCta() {
     <section className="pb-16 lg:pb-24">
       <Container>
         <FadeIn>
-          <div className="mesh relative overflow-hidden rounded-3xl bg-[linear-gradient(120deg,#0A0F0D_0%,#14211D_38%,#00312a_62%,#0A0F0D_100%)] px-6 py-14 text-center sm:px-12 lg:py-20">
-            <span aria-hidden="true" className="orb animate-drift -left-20 -top-20 h-64 w-64 bg-mint/30" />
-            <span aria-hidden="true" className="orb animate-drift-slow -bottom-24 -right-16 h-64 w-64 bg-mint/25" />
+          <div className="relative overflow-hidden rounded-3xl bg-[linear-gradient(120deg,#0A0F0D_0%,#1B1F22_45%,#2A3036_70%,#0A0F0D_100%)] px-6 py-14 text-center sm:px-12 lg:py-20">
+            <span aria-hidden="true" className="orb animate-drift -left-20 -top-20 h-64 w-64 bg-[#9AA4AE]/25" />
+            <span aria-hidden="true" className="orb animate-drift-slow -bottom-24 -right-16 h-64 w-64 bg-[#C9D1DA]/20" />
+
+            {/* The four card colours, as a quiet signature. */}
+            <div aria-hidden="true" className="relative mx-auto mb-8 flex justify-center -space-x-6">
+              {MOCK_CARDS.map((card, index) => (
+                <span
+                  key={card.label}
+                  className="h-12 w-20 rounded-lg shadow-lift ring-1 ring-white/10"
+                  style={{ backgroundImage: card.gradient, transform: `rotate(${(index - 1.5) * 6}deg)` }}
+                />
+              ))}
+            </div>
 
             <div className="relative mx-auto max-w-2xl">
               <h2 className="text-3xl font-bold tracking-tight text-white sm:text-5xl">
-                Put every card and EMI in one place
+                Bring every card into one dashboard
               </h2>
               <p className="mt-4 text-base leading-relaxed text-white/60">
                 Takes about a minute. All you need is your mobile number.
               </p>
 
               <div className="mt-9 flex flex-wrap justify-center gap-3">
-                <Button variant="mint" size="lg" className="group" onClick={() => navigate('/signin')}>
+                <Button variant="light" size="lg" className="group" onClick={() => navigate('/signin')}>
                   Create your account
                   <span className="transition-transform duration-base ease-glide group-hover:translate-x-0.5">
                     <ArrowRight />
@@ -45,7 +56,7 @@ export function FinalCta() {
                   className="text-white/70 hover:bg-white/10 hover:text-white"
                   onClick={() => navigate('/support-desk/login')}
                 >
-                  Support login
+                  Customer Support login
                 </Button>
               </div>
             </div>
@@ -57,45 +68,20 @@ export function FinalCta() {
 }
 
 export function Footer() {
-  const navigate = useNavigate();
-
   return (
-    <footer className="border-t border-line bg-mist">
+    <footer className="border-t border-line bg-[linear-gradient(180deg,#F7F8FA_0%,#EEF1F4_100%)]">
       <Container className="py-12">
-        <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-5">
           <div className="max-w-xs">
             <div className="flex items-center gap-2.5">
               <Logo className="h-8 w-8" />
               <p className="text-base font-bold tracking-tight text-ink">CashU</p>
             </div>
             <p className="mt-3 text-xs leading-relaxed text-slate">
-              Your credit cards and EMIs, under one glass pane.
+              Your credit cards. One smart dashboard.
             </p>
-          </div>
-
-          <FooterColumn title="Sign in">
-            <FooterAction strong onClick={() => navigate('/signin')}>User login</FooterAction>
-            <FooterAction onClick={() => navigate('/admin/login')}>Admin login</FooterAction>
-            <FooterAction onClick={() => navigate('/support-desk/login')}>Support login</FooterAction>
-            <FooterAction onClick={() => navigate('/forgot-mpin')}>Forgot MPIN</FooterAction>
-          </FooterColumn>
-
-          <FooterColumn title="Product">
-            {NAV_LINKS.map((link) => (
-              <a key={link.id} href={`#${link.id}`} className={LINK}>{link.label}</a>
-            ))}
-          </FooterColumn>
-
-          <FooterColumn title="Contact">
-            {/* Support lives inside the member app, so this routes into it
-                rather than pointing at a page that does not exist. Email,
-                phone and social links come from configuration and render
-                only when set: no placeholder addresses, no dead links. */}
-            <FooterAction onClick={() => navigate('/signin')}>Help &amp; support</FooterAction>
-            {CONTACT.email && <a href={`mailto:${CONTACT.email}`} className={LINK}>{CONTACT.email}</a>}
-            {CONTACT.phone && <a href={`tel:${CONTACT.phone.replace(/\s/g, '')}`} className={LINK}>{CONTACT.phone}</a>}
             {SOCIALS.length > 0 && (
-              <div className="flex gap-2 pt-1">
+              <div className="mt-4 flex gap-2">
                 {SOCIALS.map((social) => (
                   <a
                     key={social.key}
@@ -103,23 +89,44 @@ export function Footer() {
                     target="_blank"
                     rel="noopener noreferrer"
                     aria-label={social.label}
-                    className="grid h-9 w-9 place-items-center rounded-xl border border-line bg-canvas text-slate transition-all duration-base ease-glide hover:-translate-y-px hover:text-ink"
+                    className="grid h-9 w-9 place-items-center rounded-xl border border-line bg-canvas text-slate transition-all duration-base ease-glide hover:-translate-y-px hover:text-ink hover:shadow-card"
                   >
                     <social.Icon />
                   </a>
                 ))}
               </div>
             )}
+          </div>
+
+          <FooterColumn title="Sign in">
+            <FooterLink to="/signin" strong>User Login</FooterLink>
+            <FooterLink to="/admin/login">Admin Login</FooterLink>
+            <FooterLink to="/support-desk/login">Customer Support Login</FooterLink>
+            <FooterLink to="/forgot-mpin">Forgot MPIN</FooterLink>
+          </FooterColumn>
+
+          <FooterColumn title="Company">
+            <FooterLink to="/about">About</FooterLink>
+            <FooterLink to="/contact">Contact</FooterLink>
+          </FooterColumn>
+
+          <FooterColumn title="Support">
+            <FooterLink to="/help">Help &amp; Support</FooterLink>
+            <a href="/#faq" className={LINK}>FAQ</a>
+          </FooterColumn>
+
+          <FooterColumn title="Legal">
+            <FooterLink to="/privacy">Privacy Policy</FooterLink>
+            <FooterLink to="/terms">Terms</FooterLink>
           </FooterColumn>
         </div>
 
         <div className="mt-10 flex flex-col gap-3 border-t border-line pt-6 sm:flex-row sm:items-start sm:justify-between">
           <p className="max-w-3xl text-2xs leading-relaxed text-slate">
             CashU is a technology platform operating with licensed payment
-            partners. It is not a bank, does not issue credit and does not hold
-            customer funds. Card tokenisation follows RBI
-            Card-on-File rules; personal data is handled under the DPDPA 2023. By
-            continuing you agree to our Terms of Service and Privacy Policy.
+            partners. It is not a bank, does not issue credit cards and does not
+            hold customer funds. Card tokenisation follows RBI Card-on-File rules;
+            personal data is handled under the DPDPA 2023.
           </p>
           <p className="shrink-0 text-2xs text-slate">© {new Date().getFullYear()} CashU</p>
         </div>
@@ -131,7 +138,9 @@ export function Footer() {
 /* ── Contact and social, from configuration ─────────────────────────── */
 
 const env = import.meta.env;
-const CONTACT = {
+
+/** Contact details, shown only when configured - never a placeholder. */
+export const CONTACT = {
   email: (env.VITE_SUPPORT_EMAIL || '').trim(),
   phone: (env.VITE_SUPPORT_PHONE || '').trim(),
 };
@@ -148,7 +157,8 @@ function Svg({ d }) {
   );
 }
 
-const SOCIALS = [
+/** Social profiles; an unset or non-URL entry is left out, so no dead links. */
+export const SOCIALS = [
   { key: 'x', label: 'CashU on X', url: safeUrl(env.VITE_SOCIAL_X),
     Icon: () => <Svg d="M17.8 3h3.1l-6.8 7.7 8 10.3h-6.3l-4.9-6.4L5.3 21H2.2l7.3-8.3L1.8 3h6.4l4.4 5.9L17.8 3zm-1.1 16.2h1.7L7.4 4.7H5.6l11.1 14.5z" /> },
   { key: 'linkedin', label: 'CashU on LinkedIn', url: safeUrl(env.VITE_SOCIAL_LINKEDIN),
@@ -171,14 +181,10 @@ function FooterColumn({ title, children }) {
   );
 }
 
-function FooterAction({ onClick, strong, children }) {
+function FooterLink({ to, strong, children }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cx(LINK_BASE, strong ? 'font-semibold text-ink' : 'font-medium text-slate')}
-    >
+    <Link to={to} className={strong ? `${LINK_BASE} font-semibold text-ink` : LINK}>
       {children}
-    </button>
+    </Link>
   );
 }

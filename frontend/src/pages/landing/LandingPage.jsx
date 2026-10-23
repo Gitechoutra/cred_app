@@ -1,10 +1,10 @@
 import { useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { MotionConfig } from 'motion/react';
 
 import { Nav } from './sections/Nav';
 import { Hero } from './sections/Hero';
 import { BankMarquee } from './sections/BankMarquee';
-import { Portals } from './sections/Portals';
 import { Features } from './sections/Features';
 import { HowItWorks } from './sections/HowItWorks';
 import { Security } from './sections/Security';
@@ -24,9 +24,19 @@ import './landing.css';
  * the CSS animations are covered by the global reduced-motion block.
  */
 export function LandingPage() {
+  const { hash } = useLocation();
+
+  // Arriving from another page at /#faq: the browser tried to scroll before
+  // React drew the section, so scroll once it exists.
+  useEffect(() => {
+    if (!hash) return undefined;
+    const timer = setTimeout(() => document.getElementById(hash.slice(1))?.scrollIntoView(), 60);
+    return () => clearTimeout(timer);
+  }, [hash]);
+
   useEffect(() => {
     const prev = document.title;
-    document.title = 'CashU — Every card. Every EMI. One view.';
+    document.title = 'CashU — Your credit cards. One smart dashboard.';
     // Smooth anchor scrolling is already global (styles/index.css).
     return () => { document.title = prev; };
   }, []);
@@ -44,7 +54,6 @@ export function LandingPage() {
         <main>
           <Hero />
           <BankMarquee />
-          <Portals />
           <Features />
           <HowItWorks />
           <Security />

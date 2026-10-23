@@ -45,8 +45,8 @@ export function Eyebrow({ icon: Icon, tone = 'mint', children }) {
       className={cx(
         'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-2xs font-bold uppercase tracking-[0.14em]',
         tone === 'mint'
-          ? 'border-mint-200 bg-mint-50/80 text-mint-800'
-          : 'border-white/15 bg-white/5 text-mint',
+          ? 'lp-silver-chip border-[#D5DBE1] text-ink'
+          : 'border-white/15 bg-white/5 text-[#C9D1DA]',
       )}
     >
       {Icon && <Icon className="h-3.5 w-3.5" />}

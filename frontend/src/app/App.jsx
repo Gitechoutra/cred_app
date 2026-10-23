@@ -9,6 +9,9 @@ import { Loader3D } from '../components/ui/Loader3D';
 
 /* Public */
 import LandingPage from '../pages/landing/LandingPage';
+import {
+  AboutPage, ContactPage, HelpPage, PrivacyPage, TermsPage,
+} from '../pages/landing/InfoPages';
 
 /* Auth */
 import PhoneEntry from '../pages/auth/PhoneEntry';
@@ -180,6 +183,12 @@ export default function App() {
       <Routes>
         {/* Public */}
         <Route path="/" element={<RedirectIfAuthed><LandingPage /></RedirectIfAuthed>} />
+        {/* Footer pages: public, and open to signed-in users too. */}
+        <Route path="/about" element={<AboutPage />} />
+        <Route path="/contact" element={<ContactPage />} />
+        <Route path="/help" element={<HelpPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/terms" element={<TermsPage />} />
       <Route path="/signin" element={<RedirectIfAuthed><PhoneEntry /></RedirectIfAuthed>} />
       <Route path="/signin/otp" element={<RedirectIfAuthed><OtpVerify /></RedirectIfAuthed>} />
       <Route path="/signin/mpin" element={<RedirectIfAuthed><MpinLogin /></RedirectIfAuthed>} />

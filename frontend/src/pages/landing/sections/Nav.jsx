@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   AnimatePresence, motion, useMotionValueEvent, useScroll, useSpring,
 } from 'motion/react';
@@ -26,6 +26,9 @@ export const NAV_LINKS = [
  */
 export function Nav() {
   const navigate = useNavigate();
+  // On the footer pages the section links lead back to the home page.
+  const onHome = useLocation().pathname === '/';
+  const anchor = (id) => (onHome ? `#${id}` : `/#${id}`);
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -62,7 +65,7 @@ export function Nav() {
       )}
     >
       <div className="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-3.5 sm:px-6 lg:px-8">
-        <a href="#top" className="flex flex-1 items-center gap-2.5" aria-label="CashU, back to top">
+        <a href={onHome ? '#top' : '/'} className="flex flex-1 items-center gap-2.5" aria-label="CashU home">
           <Logo className="h-9 w-9" />
           <span>
             <span className="block text-base font-bold leading-none tracking-tight text-ink">CashU</span>
@@ -74,13 +77,13 @@ export function Nav() {
           {NAV_LINKS.map((item) => (
             <a
               key={item.id}
-              href={`#${item.id}`}
+              href={anchor(item.id)}
               className="group relative rounded-lg px-3 py-2 text-xs font-medium text-slate transition-colors duration-base hover:text-ink"
             >
               {item.label}
               <span
                 aria-hidden="true"
-                className="absolute inset-x-3 bottom-1 h-px origin-center scale-x-0 bg-mint transition-transform duration-base ease-glide group-hover:scale-x-100"
+                className="absolute inset-x-3 bottom-1 h-px origin-center scale-x-0 bg-ink transition-transform duration-base ease-glide group-hover:scale-x-100"
               />
             </a>
           ))}
@@ -89,9 +92,9 @@ export function Nav() {
         <button
           type="button"
           onClick={() => go('/support-desk/login')}
-          className="hidden rounded-xl px-3 py-2 text-xs font-semibold text-sky-700 transition-all duration-base ease-glide hover:-translate-y-px hover:bg-sky-50 lg:block"
+          className="hidden rounded-xl px-3 py-2 text-xs font-semibold text-slate transition-all duration-base ease-glide hover:-translate-y-px hover:bg-mist hover:text-ink lg:block"
         >
-          Support login
+          Customer Support login
         </button>
 
         <button
@@ -103,7 +106,7 @@ export function Nav() {
         </button>
 
         <div className="hidden sm:block">
-          <Button variant="mint" size="sm" onClick={() => go('/signin')}>
+          <Button variant="dark" size="sm" onClick={() => go('/signin')}>
             User login
           </Button>
         </div>
@@ -142,7 +145,7 @@ export function Nav() {
       {/* Reading progress. Mint, one pixel, along the bar's bottom edge. */}
       <motion.span
         aria-hidden="true"
-        className="absolute inset-x-0 bottom-[-1px] h-px origin-left bg-mint"
+        className="absolute inset-x-0 bottom-[-1px] h-px origin-left bg-ink/70"
         style={{ scaleX: progress }}
       />
 
@@ -174,7 +177,7 @@ export function Nav() {
                 {NAV_LINKS.map((item, index) => (
                   <motion.a
                     key={item.id}
-                    href={`#${item.id}`}
+                    href={anchor(item.id)}
                     onClick={() => setMenuOpen(false)}
                     initial={{ opacity: 0, x: -8 }}
                     animate={{ opacity: 1, x: 0 }}
@@ -187,7 +190,7 @@ export function Nav() {
               </nav>
 
               <div className="mt-4 space-y-2 border-t border-line pt-4">
-                <Button variant="mint" size="lg" full onClick={() => go('/signin')}>
+                <Button variant="dark" size="lg" full onClick={() => go('/signin')}>
                   User login
                 </Button>
                 <Button variant="outline" size="lg" full onClick={() => go('/admin/login')}>
@@ -197,10 +200,10 @@ export function Nav() {
                   variant="ghost"
                   size="lg"
                   full
-                  className="text-sky-700 hover:bg-sky-50"
+                  className="text-slate hover:bg-mist hover:text-ink"
                   onClick={() => go('/support-desk/login')}
                 >
-                  Support login
+                  Customer Support login
                 </Button>
               </div>
             </motion.div>

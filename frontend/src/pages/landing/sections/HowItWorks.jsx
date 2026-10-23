@@ -9,7 +9,7 @@ import { Container, EASE, SectionHeading, VIEWPORT } from './shared';
 const STEPS = [
   {
     title: 'Sign in with your mobile',
-    body: 'An OTP to your number, then a 4-digit MPIN for every visit after. There is no password to forget or leak.',
+    body: 'An OTP to your number, then a 6-digit MPIN for every visit after. There is no password to forget or leak.',
     meta: 'About a minute',
   },
   {
@@ -49,7 +49,7 @@ export function HowItWorks() {
           <span aria-hidden="true" className="absolute bottom-6 left-[1.375rem] top-6 w-px bg-line" />
           <motion.span
             aria-hidden="true"
-            className="absolute bottom-6 left-[1.375rem] top-6 w-px origin-top bg-mint"
+            className="absolute bottom-6 left-[1.375rem] top-6 w-px origin-top bg-ink"
             style={{ scaleY: fill }}
           />
 
@@ -69,7 +69,7 @@ export function HowItWorks() {
               <div className="min-w-0 flex-1 rounded-2xl border border-line bg-canvas p-5 transition-all duration-base ease-glide hover:-translate-y-0.5 hover:shadow-card">
                 <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                   <h3 className="text-base font-bold text-ink">{step.title}</h3>
-                  <span className="text-2xs font-semibold uppercase tracking-[0.12em] text-mint-800">
+                  <span className="text-2xs font-semibold uppercase tracking-[0.12em] text-slate">
                     {step.meta}
                   </span>
                 </div>

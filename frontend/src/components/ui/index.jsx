@@ -35,6 +35,10 @@ const BUTTON_VARIANTS = {
   outline:
     'bg-canvas text-ink border border-line hover:border-ink/25 hover:bg-mist disabled:text-slate-light',
   danger: 'bg-alert text-white hover:brightness-95 disabled:bg-slate-light',
+  // Black and white fills for the marketing pages, where the brief is black
+  // and silver. The app itself keeps mint as its one primary.
+  dark: 'bg-ink text-white shadow-lift hover:bg-ink/90 disabled:bg-slate-light',
+  light: 'bg-white text-ink hover:bg-[#E9ECEF] disabled:text-slate-light',
 };
 
 /* Radius is deliberately constant across sizes - a 14px-tall pill next to a

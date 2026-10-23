@@ -29,8 +29,8 @@ export function Security() {
   return (
     <section id="security" className="relative isolate overflow-hidden bg-ink py-16 lg:py-24">
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
-        <span className="orb animate-drift -left-24 top-10 h-80 w-80 bg-mint/20" />
-        <span className="orb animate-drift-slow -bottom-24 right-0 h-72 w-72 bg-mint/10" />
+        <span className="orb animate-drift -left-24 top-10 h-80 w-80 bg-[#9AA4AE]/20" />
+        <span className="orb animate-drift-slow -bottom-24 right-0 h-72 w-72 bg-[#C9D1DA]/10" />
       </div>
 
       <Container className="grid gap-12 lg:grid-cols-2 lg:items-center">
@@ -51,7 +51,7 @@ export function Security() {
               network="visa"
               last4="4821"
               sheen
-              gradient="linear-gradient(135deg,#141A18 0%,#1F2725 45%,#00614B 100%)"
+              gradient="linear-gradient(135deg,#2B2F2E 0%,#121514 55%,#050606 100%)"
               className="animate-float"
             />
           </div>
@@ -60,9 +60,9 @@ export function Security() {
         <ul className="space-y-4">
           {GUARANTEES.map((item, index) => (
             <FadeIn as="li" key={item.title} delay={index * 70}>
-              <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] p-5 transition-all duration-base ease-glide hover:-translate-y-0.5 hover:border-mint/40 hover:bg-white/[0.07]">
+              <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] p-5 transition-all duration-base ease-glide hover:-translate-y-0.5 hover:border-white/30 hover:bg-white/[0.07]">
                 <div className="relative flex items-start gap-3.5">
-                  <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-mint text-ink transition-transform duration-base ease-glide group-hover:scale-110">
+                  <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-white text-ink transition-transform duration-base ease-glide group-hover:scale-110">
                     <CheckMark />
                   </span>
                   <div className="min-w-0">
