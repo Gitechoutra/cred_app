@@ -32,6 +32,7 @@ def run_all_seeders():
         6. emi_providers      lender registry
         7. notification_templates  copy for the PRD 14.1 matrix
         8. admin             the bootstrap administrator account
+        9. customer          the bootstrap customer support agent (optional)
     """
     logger.info('[Seeders] Starting database seeding...')
 
@@ -44,6 +45,7 @@ def run_all_seeders():
         ('seed_emi_providers', 'portal.seeders.seed_emi_providers'),
         ('seed_notification_templates', 'portal.seeders.seed_notification_templates'),
         ('seed_admin', 'portal.seeders.seed_admin'),
+        ('seed_customer', 'portal.seeders.seed_customer'),
     ]
 
     for function_name, module_path in steps:
