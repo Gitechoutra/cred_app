@@ -29,6 +29,7 @@ def init_app(app):
         # -- Cards ---------------------------------------------------------
         from .card_networks import CardNetworks, NetworkType
         from .cards import Cards, CardStatus
+        from .manual_cards import ManualCards, ManualCardStatus, CardTheme  # noqa: F401
 
         # -- Banking -------------------------------------------------------
         from .bank_accounts import BankAccounts, PennyDropStatus, AccountType

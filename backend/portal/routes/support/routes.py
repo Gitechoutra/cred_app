@@ -57,12 +57,15 @@ def ticket_dict(ticket: SupportTickets, with_messages: bool = False) -> dict:
         'subject': ticket.subject,
         'category': ticket.category,
         'status': ticket.status,
+        'status_label': TicketStatus.DISPLAY.get(ticket.status, ticket.status),
+        'resolution_notes': ticket.resolution_notes,
         'priority': ticket.priority,
         'related_entity_type': ticket.related_entity_type,
         'related_entity_id': ticket.related_entity_id,
         'created_on': iso(ticket.created_on),
         'resolved_at': iso(ticket.resolved_at),
-        'message_count': ticket.messages.count(),
+        'message_count': ticket.messages.filter(
+            SupportMessages.is_internal.is_(False)).count(),
     }
 
     if with_messages:
@@ -73,7 +76,8 @@ def ticket_dict(ticket: SupportTickets, with_messages: bool = False) -> dict:
             'body': m.body,
             'attachment_path': m.attachment_path,
             'created_on': iso(m.created_on),
-        } for m in ticket.messages.order_by(SupportMessages.created_on.asc()).all()]
+        } for m in ticket.messages.filter(SupportMessages.is_internal.is_(False))
+            .order_by(SupportMessages.created_on.asc()).all()]
 
     return data
 
@@ -90,8 +94,13 @@ class TicketList(Resource):
         page, per_page = validate_pagination(args['page'], args['per_page'])
 
         query = SupportTickets.query.filter_by(user_id=user.user_id)
-        if args.get('status'):
-            query = query.filter(SupportTickets.status == args['status'])
+        status = (args.get('status') or '').upper()
+        if status == TicketStatus.IN_PROGRESS:
+            query = query.filter(SupportTickets.status.in_([
+                TicketStatus.IN_PROGRESS, TicketStatus.AWAITING_USER,
+                TicketStatus.AWAITING_AGENT]))
+        elif status:
+            query = query.filter(SupportTickets.status == status)
 
         pagination = query.order_by(SupportTickets.created_on.desc()).paginate(
             page=page, per_page=per_page, error_out=False

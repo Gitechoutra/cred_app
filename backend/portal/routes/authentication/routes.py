@@ -45,6 +45,7 @@ verify_otp_parser.add_argument('purpose', type=str, required=False, location='js
                                default=OTPPurpose.LOGIN)
 verify_otp_parser.add_argument('device_name', type=str, required=False, location='json')
 verify_otp_parser.add_argument('platform', type=str, required=False, location='json')
+verify_otp_parser.add_argument('portal', type=str, required=False, location='json')
 
 register_parser = reqparse.RequestParser()
 register_parser.add_argument('full_name', type=str, required=True, location='json')
@@ -58,6 +59,56 @@ mpin_parser.add_argument('mpin', type=str, required=True, location='json')
 mpin_login_parser = reqparse.RequestParser()
 mpin_login_parser.add_argument('phone', type=str, required=True, location='json')
 mpin_login_parser.add_argument('mpin', type=str, required=True, location='json')
+mpin_login_parser.add_argument('portal', type=str, required=False, location='json')
+
+reset_request_parser = reqparse.RequestParser()
+reset_request_parser.add_argument('phone', type=str, required=True, location='json')
+
+reset_confirm_parser = reqparse.RequestParser()
+reset_confirm_parser.add_argument('phone', type=str, required=True, location='json')
+reset_confirm_parser.add_argument('otp', type=str, required=True, location='json')
+reset_confirm_parser.add_argument('mpin', type=str, required=True, location='json')
+
+email_token_parser = reqparse.RequestParser()
+email_token_parser.add_argument('token', type=str, required=True, location='json')
+
+#: Display names for the portals, used in "please use the X sign-in".
+_PORTAL_NAMES = {'USER': 'customer', 'ADMIN': 'admin', 'SUPPORT': 'customer support'}
+
+
+def _portal_for(role_name: str) -> str:
+    for portal, roles in RoleTypes.PORTALS.items():
+        if role_name in roles:
+            return portal
+    return 'USER'
+
+
+def _portal_refusal(user, portal):
+    """
+    Refuse a sign-in made through the wrong portal, or None to allow it.
+
+    Called only after the credentials are proven, so naming the right portal
+    tells nothing to someone guessing numbers. This is a convenience boundary;
+    the real one is the role check on every endpoint. A request that names no
+    portal (older clients, scripts) is not refused.
+    """
+    if not portal:
+        return None
+    portal = portal.upper()
+    if portal not in RoleTypes.PORTALS:
+        return failure(ErrorCode.VALIDATION_ERROR, 'Unknown sign-in portal.', 400)
+    role_name = user.role.role_name if user.role else RoleTypes.NORMAL_USER
+    if role_name in RoleTypes.PORTALS[portal]:
+        return None
+    _log_login(user.phone, LoginStatus.FAILED_MPIN, user.user_id,
+               f'Wrong portal: {role_name} via {portal}')
+    right = _portal_for(role_name)
+    return failure(
+        'WRONG_PORTAL',
+        'This account cannot sign in here. Please use the '
+        f'{_PORTAL_NAMES[right]} sign-in.',
+        403, details={'portal': right},
+    )
 
 
 def _log_login(phone, status, user_id=None, reason=None):
@@ -271,6 +322,7 @@ class VerifyOTP(Resource):
             return failure(ErrorCode.VALIDATION_ERROR, exc.message, 400)
 
         user = Users.query.filter_by(phone=phone).first()
+        portal = (args.get('portal') or '').upper() or None
 
         if user and _is_locked(user):
             return _locked_response(user)
@@ -287,6 +339,17 @@ class VerifyOTP(Resource):
             return failure(exc.code, exc.message, 400)
 
         is_new_user = user is None
+
+        # Staff accounts are created by an administrator, never by an OTP.
+        if is_new_user and portal in ('ADMIN', 'SUPPORT'):
+            return failure(
+                ErrorCode.UNAUTHORIZED,
+                'There is no staff account for this number.', 401,
+            )
+        if not is_new_user:
+            refusal = _portal_refusal(user, portal)
+            if refusal:
+                return refusal
 
         if is_new_user:
             role = Roles.query.filter_by(role_name=RoleTypes.NORMAL_USER).first()
@@ -498,6 +561,10 @@ class VerifyMPIN(Resource):
                 403,
             )
 
+        refusal = _portal_refusal(user, args.get('portal'))
+        if refusal:
+            return refusal
+
         user.failed_auth_attempts = 0
         user.locked_until = None
         user.last_login = utcnow()
@@ -628,3 +695,182 @@ class Sessions(Resource):
         )
 
         return success(None, 'All sessions have been signed out.')
+
+
+# -- Forgot MPIN -------------------------------------------------------------
+
+@ns.route('/mpin/reset/request')
+class MPINResetRequest(Resource):
+    @ns.doc('mpin_reset_request')
+    def post(self):
+        """
+        Send an MPIN-reset OTP to the registered mobile.
+
+        Answers the same whether or not the number has an account, so it
+        cannot be used to find out who is registered.
+        """
+        args = reset_request_parser.parse_args()
+        try:
+            phone = validate_mobile(args['phone'])
+        except ValidationError as exc:
+            return failure(ErrorCode.VALIDATION_ERROR, exc.message, 400)
+
+        try:
+            rate_limit.hit(rate_limit.ip_scope('auth', client_ip()), 5, 60)
+        except rate_limit.RateLimitExceeded as exc:
+            return failure(ErrorCode.ERR_011_VELOCITY_ABUSE, exc.message, 429,
+                           details={'retry_after_seconds': exc.retry_after_seconds})
+
+        data = {}
+        user = Users.query.filter_by(phone=phone).first()
+        if user and user.mpin_hash and user.status not in (
+                UserStatus.SUSPENDED, UserStatus.BANNED):
+            try:
+                result = otp_helper.issue(
+                    phone, purpose=OTPPurpose.MPIN_RESET, user_id=user.user_id,
+                    ip=client_ip(), device_uuid=device_uuid(),
+                )
+            except otp_helper.OTPError as exc:
+                return failure(exc.code, exc.message, 429,
+                               details={'retry_after_seconds': exc.retry_after})
+            data = {k: v for k, v in result.items()
+                    if k in ('expires_in_seconds', 'length', 'resends_remaining',
+                             'debug_otp')}
+
+        return success(data, 'If this number is registered, we have sent it an OTP.')
+
+
+@ns.route('/mpin/reset/confirm')
+class MPINResetConfirm(Resource):
+    @ns.doc('mpin_reset_confirm')
+    def post(self):
+        """
+        Set a new MPIN with the reset OTP.
+
+        Signs the account out everywhere: whoever could not get in may not be
+        the only person who knew the old MPIN.
+        """
+        args = reset_confirm_parser.parse_args()
+        try:
+            phone = validate_mobile(args['phone'])
+            code = validate_otp(args['otp'])
+            mpin = validate_mpin(args['mpin'])
+        except ValidationError as exc:
+            return failure(ErrorCode.VALIDATION_ERROR, exc.message, 400,
+                           details={'field': exc.field})
+
+        user = Users.query.filter_by(phone=phone).first()
+        try:
+            otp_helper.verify(phone, code, purpose=OTPPurpose.MPIN_RESET)
+        except otp_helper.OTPError as exc:
+            if user:
+                _register_failure(user, LoginStatus.FAILED_OTP)
+            return failure(exc.code, exc.message, 400)
+        if not user:
+            return failure(ErrorCode.OTP_INVALID, 'The OTP is incorrect.', 400)
+
+        user.mpin_hash = hash_secret(mpin)
+        user.failed_auth_attempts = 0
+        user.locked_until = None
+        if user.security_settings:
+            user.security_settings.mpin_set = True
+            user.security_settings.mpin_last_changed = utcnow()
+            user.security_settings.sessions_invalidated_at = utcnow()
+        UserSessions.query.filter_by(
+            user_id=user.user_id, status=SessionStatus.ACTIVE,
+        ).update({'status': SessionStatus.REVOKED, 'revoked_at': utcnow(),
+                  'revoked_reason': 'MPIN reset'})
+        db.session.commit()
+
+        audit.record(action='MPIN_RESET', entity_type='Users',
+                     entity_id=user.user_id, actor_user_id=str(user.user_id))
+
+        role_name = user.role.role_name if user.role else RoleTypes.NORMAL_USER
+        return success({'portal': _portal_for(role_name)},
+                       'Your MPIN has been reset. Please sign in with the new MPIN.')
+
+
+# -- Email verification ------------------------------------------------------
+
+_EMAIL_SALT = 'cashu-email-verify'
+_EMAIL_MAX_AGE = 24 * 3600
+
+
+def _email_serializer():
+    from itsdangerous import URLSafeTimedSerializer
+    return URLSafeTimedSerializer(current_app.config['SECRET_KEY'], salt=_EMAIL_SALT)
+
+
+@ns.route('/email/verify/request')
+class EmailVerifyRequest(Resource):
+    @ns.doc('email_verify_request', security='Bearer')
+    @jwt_required()
+    def post(self):
+        """Email a signed, 24-hour verification link to the address on file."""
+        from portal.helpers import email as email_helper
+
+        user = current_user()
+        if not user or not user.email:
+            return failure(ErrorCode.VALIDATION_ERROR,
+                           'Add an email address to your profile first.', 400)
+        if user.is_email_verified:
+            return failure(ErrorCode.CONFLICT, 'Your email is already verified.', 409)
+
+        try:
+            rate_limit.hit(f'email_verify:user:{user.user_id}', 3, 3600)
+        except rate_limit.RateLimitExceeded as exc:
+            return failure(ErrorCode.ERR_011_VELOCITY_ABUSE,
+                           'Too many verification emails. Please try again later.',
+                           429, details={'retry_after_seconds': exc.retry_after_seconds})
+
+        token = _email_serializer().dumps({'u': user.user_id, 'e': user.email})
+        base = (current_app.config.get('FRONTEND_BASE_URL') or '').rstrip('/')
+        link = f'{base}/verify-email?token={token}'
+        sent = email_helper.send(
+            user.email, 'Verify your email for CashU',
+            f'Hi {user.full_name or "there"},\n\nConfirm this is your email '
+            f'address:\n{link}\n\nThe link expires in 24 hours. If you did not '
+            'ask for this, ignore this email.',
+        )
+        if not sent.get('ok'):
+            return failure(ErrorCode.PROVIDER_ERROR,
+                           'We could not send the email right now. Please try again.',
+                           503)
+
+        data = {'sent_to': user.email, 'delivery': sent.get('provider')}
+        # Without SMTP the email is only logged. In a debug build the link is
+        # returned so the flow can be finished locally, like debug_otp.
+        if sent.get('provider') == 'LOG' and current_app.debug:
+            data['debug_link'] = link
+        return success(data, f'We sent a verification link to {user.email}.')
+
+
+@ns.route('/email/verify')
+class EmailVerify(Resource):
+    @ns.doc('email_verify')
+    def post(self):
+        """Confirm an email address from the link's token."""
+        from itsdangerous import BadSignature, SignatureExpired
+
+        args = email_token_parser.parse_args()
+        try:
+            payload = _email_serializer().loads(args['token'], max_age=_EMAIL_MAX_AGE)
+        except SignatureExpired:
+            return failure('TOKEN_EXPIRED', 'This link has expired. Request a new '
+                           'one from your profile.', 400)
+        except BadSignature:
+            return failure(ErrorCode.VALIDATION_ERROR, 'This link is not valid.', 400)
+
+        user = Users.query.filter_by(user_id=payload.get('u')).first()
+        if not user or (user.email or '').lower() != (payload.get('e') or '').lower():
+            return failure(ErrorCode.VALIDATION_ERROR,
+                           'This link is for an email address no longer on the '
+                           'account.', 400)
+
+        if not user.is_email_verified:
+            user.is_email_verified = True
+            db.session.commit()
+            audit.record(action='EMAIL_VERIFIED', entity_type='Users',
+                         entity_id=user.user_id, actor_user_id=str(user.user_id))
+
+        return success({'email': user.email, 'verified': True}, 'Email verified.')

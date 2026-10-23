@@ -10,3 +10,4 @@ ns = api.namespace(
 logger = logging.getLogger(__name__)
 
 from .routes import *  # noqa: E402,F401,F403
+from .operations import *  # noqa: E402,F401,F403

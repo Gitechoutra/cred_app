@@ -61,6 +61,8 @@ class Cards(db.Model, TimestampMixin, CRUDMixin):
     next_due_date = db.Column(db.Date, nullable=True, index=True)
 
     brand_color = db.Column(db.String(9), nullable=True)
+    #: A CardTheme (portal/models/manual_cards.py). Visual only.
+    card_theme = db.Column(db.String(20), nullable=True)
     nickname = db.Column(db.String(100), nullable=True)
 
     # Set only for a predefined test card, and only while test mode is on. It

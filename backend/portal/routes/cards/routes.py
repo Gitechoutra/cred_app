@@ -67,6 +67,15 @@ def card_dict(card: Cards, detailed: bool = False) -> dict:
         'test_scenario': card.test_scenario,
         'is_test_card': bool(card.test_scenario),
         'linked_at': iso(card.linked_at),
+        'kind': 'TOKENISED',
+        'theme': card.card_theme or 'AUTO',
+        # Not "bank verified": the limit is CashU's own, from the holder's
+        # credit score and salary, and the token is the sandbox's until a
+        # token requestor is contracted.
+        'data_source': 'CASHU',
+        'data_source_label': 'Tokenised - limit set by CashU',
+        'bank_verified': False,
+        'last_updated': iso(card.last_synced_at or card.updated_on or card.linked_at),
     }
 
     if detailed:
@@ -98,11 +107,27 @@ class CardList(Resource):
             Cards.status != CardStatus.DELETED,
         ).order_by(Cards.created_on.asc()).all()
 
+        from portal.models.manual_cards import ManualCards, ManualCardStatus
+        from .manual import manual_card_dict
+
+        manual = ManualCards.query.filter_by(
+            user_id=user.user_id, status=ManualCardStatus.ACTIVE,
+        ).order_by(ManualCards.created_on.asc()).all()
+
+        # Totals stay per source: a limit CashU set and a figure the holder
+        # typed are different kinds of number and are not added together.
         return success({
             'cards': [card_dict(c) for c in cards],
             'total_limit': sum(float(c.card_limit or 0) for c in cards),
             'total_outstanding': sum(float(c.outstanding_amount or 0) for c in cards),
             'count': len(cards),
+            'manual_cards': [manual_card_dict(m) for m in manual],
+            'manual_totals': {
+                'credit_limit': sum(float(m.credit_limit or 0) for m in manual),
+                'outstanding_balance': sum(float(m.outstanding_balance or 0) for m in manual),
+                'count': len(manual),
+                'data_source_label': 'User-entered - Not Bank Verified',
+            },
         })
 
     @ns.doc('link_card', security='Bearer')

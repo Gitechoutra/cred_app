@@ -62,7 +62,6 @@ from portal.routes.credit.routes import (
 
 from . import logger, ns
 
-L1 = RoleTypes.L1_SUPPORT
 L2 = RoleTypes.L2_RISK_RECON
 L3 = RoleTypes.L3_SUPER_ADMIN
 
@@ -764,7 +763,7 @@ class ReviewKYC(Resource):
 class AdminCreditApplicationQueue(Resource):
     @ns.doc('admin_credit_application_queue', security='Bearer')
     @jwt_required()
-    @roles_required(L1, L2, L3)
+    @roles_required(L2, L3)
     def get(self):
         """
         Credit applications awaiting a decision, oldest first.
@@ -876,7 +875,7 @@ def _application_or_404(application_id):
 class AdminCreditApplicationDetail(Resource):
     @ns.doc('admin_credit_application_detail', security='Bearer')
     @jwt_required()
-    @roles_required(L1, L2, L3)
+    @roles_required(L2, L3)
     def get(self, application_id):
         """
         One application, complete: the applicant, their KYC and its documents,
@@ -1115,7 +1114,7 @@ class AdminReviewCreditApplication(Resource):
 class AdminCreditAccount(Resource):
     @ns.doc('admin_credit_account', security='Bearer')
     @jwt_required()
-    @roles_required(L1, L2, L3)
+    @roles_required(L2, L3)
     def get(self, credit_account_id):
         """
         One credit line, as support sees it.
@@ -1702,8 +1701,7 @@ resolve_parser.add_argument('notes', type=str, required=True, location='json')
 class AdminTransactionErrors(Resource):
     @ns.doc('list_transaction_errors', security='Bearer')
     @jwt_required()
-    @roles_required(RoleTypes.L1_SUPPORT, RoleTypes.L2_RISK_RECON,
-                    RoleTypes.L3_SUPER_ADMIN)
+    @roles_required(RoleTypes.L2_RISK_RECON, RoleTypes.L3_SUPER_ADMIN)
     def get(self):
         """
         Failed payments, newest first.
@@ -1750,8 +1748,7 @@ class AdminTransactionErrors(Resource):
 class AdminErrorSummary(Resource):
     @ns.doc('transaction_error_summary', security='Bearer')
     @jwt_required()
-    @roles_required(RoleTypes.L1_SUPPORT, RoleTypes.L2_RISK_RECON,
-                    RoleTypes.L3_SUPER_ADMIN)
+    @roles_required(RoleTypes.L2_RISK_RECON, RoleTypes.L3_SUPER_ADMIN)
     def get(self):
         """
         Failures grouped by type, and the users hitting them repeatedly.
@@ -1804,8 +1801,7 @@ class AdminErrorSummary(Resource):
 class AdminResolveError(Resource):
     @ns.doc('resolve_transaction_error', security='Bearer')
     @jwt_required()
-    @roles_required(RoleTypes.L1_SUPPORT, RoleTypes.L2_RISK_RECON,
-                    RoleTypes.L3_SUPER_ADMIN)
+    @roles_required(RoleTypes.L2_RISK_RECON, RoleTypes.L3_SUPER_ADMIN)
     def post(self, error_id):
         """
         Mark a failure handled.

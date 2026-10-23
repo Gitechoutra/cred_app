@@ -46,6 +46,7 @@ def init_app(app):
     from portal.routes.webhooks import ns as webhooks_ns
     from portal.routes.admin import ns as admin_ns
     from portal.routes.support import ns as support_ns
+    from portal.routes.support_desk import ns as support_desk_ns
 
     # -- Register namespaces ----------------------------------------------
     api.add_namespace(authentication_ns, path='/authentication')
@@ -65,6 +66,7 @@ def init_app(app):
     api.add_namespace(webhooks_ns, path='/webhooks')
     api.add_namespace(admin_ns, path='/admin')
     api.add_namespace(support_ns, path='/support')
+    api.add_namespace(support_desk_ns, path='/support-desk')
 
     app.register_blueprint(v1)
 

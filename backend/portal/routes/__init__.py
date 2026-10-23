@@ -27,5 +27,6 @@ def init_app():
     from .webhooks import routes                # noqa: F401
     from .admin import routes                   # noqa: F401
     from .support import routes                 # noqa: F401
+    from .support_desk import routes            # noqa: F401
 
     logger.info('Initialized routes')

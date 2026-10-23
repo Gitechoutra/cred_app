@@ -12,12 +12,26 @@ class SupportSenderRole:
 
 class TicketStatus:
     OPEN = "OPEN"
+    #: An agent has picked it up and is working on it.
+    IN_PROGRESS = "IN_PROGRESS"
+    #: Both still "In progress" to the people involved; they say whose turn it is.
     AWAITING_USER = "AWAITING_USER"
     AWAITING_AGENT = "AWAITING_AGENT"
     RESOLVED = "RESOLVED"
     CLOSED = "CLOSED"
 
-    CHOICES = [OPEN, AWAITING_USER, AWAITING_AGENT, RESOLVED, CLOSED]
+    CHOICES = [OPEN, IN_PROGRESS, AWAITING_USER, AWAITING_AGENT, RESOLVED, CLOSED]
+    #: What an agent may set by hand. The AWAITING_* states follow replies.
+    AGENT_SETTABLE = [OPEN, IN_PROGRESS, RESOLVED, CLOSED]
+    #: The four states the screens show, and which stored states each covers.
+    DISPLAY = {
+        OPEN: 'Open',
+        IN_PROGRESS: 'In progress',
+        AWAITING_USER: 'In progress',
+        AWAITING_AGENT: 'In progress',
+        RESOLVED: 'Resolved',
+        CLOSED: 'Closed',
+    }
 
 
 class TicketCategory:
@@ -61,6 +75,13 @@ class SupportTickets(db.Model, TimestampMixin, CRUDMixin):
     related_entity_id = db.Column(db.String(36), nullable=True)
 
     assigned_agent_id = db.Column(db.String(36), nullable=True, index=True)
+
+    # Escalation to an administrator. An agent cannot decide on money, limits
+    # or KYC; escalating puts the ticket in the admin console's queue.
+    escalated = db.Column(db.Boolean, default=False, nullable=False, index=True)
+    escalated_at = db.Column(db.DateTime, nullable=True)
+    escalated_by = db.Column(db.String(36), nullable=True)
+    escalation_reason = db.Column(db.String(500), nullable=True)
     resolved_at = db.Column(db.DateTime, nullable=True)
     resolution_notes = db.Column(db.String(1000), nullable=True)
 
@@ -86,6 +107,8 @@ class SupportMessages(db.Model, TimestampMixin, CRUDMixin):
     attachment_path = db.Column(db.String(500), nullable=True)
 
     is_read = db.Column(db.Boolean, default=False)
+    #: A note between staff. Never returned to the customer.
+    is_internal = db.Column(db.Boolean, default=False, nullable=False)
 
     ticket = db.relationship('SupportTickets', back_populates='messages')
 
