@@ -7,8 +7,10 @@ import { useProfile } from '../hooks/useProfile';
 import { LoadingProvider, useGlobalLoading } from '../context/LoadingContext';
 import { Loader3D } from '../components/ui/Loader3D';
 
+/* Public */
+import LandingPage from '../pages/landing/LandingPage';
+
 /* Auth */
-import Splash from '../pages/auth/Splash';
 import PhoneEntry from '../pages/auth/PhoneEntry';
 import OtpVerify from '../pages/auth/OtpVerify';
 import ProfileSetup from '../pages/auth/ProfileSetup';
@@ -143,7 +145,7 @@ export default function App() {
     <LoadingProvider>
       <Routes>
         {/* Public */}
-        <Route path="/" element={<RedirectIfAuthed><Splash /></RedirectIfAuthed>} />
+        <Route path="/" element={<RedirectIfAuthed><LandingPage /></RedirectIfAuthed>} />
       <Route path="/signin" element={<RedirectIfAuthed><PhoneEntry /></RedirectIfAuthed>} />
       <Route path="/signin/otp" element={<RedirectIfAuthed><OtpVerify /></RedirectIfAuthed>} />
       <Route path="/signin/mpin" element={<RedirectIfAuthed><MpinLogin /></RedirectIfAuthed>} />

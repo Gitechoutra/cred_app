@@ -29,7 +29,10 @@ function CreditCard({
   return (
     <div
       className={cx(
-        'relative overflow-hidden rounded-2xl shadow-lift ring-1 ring-white/10',
+        'overflow-hidden rounded-2xl shadow-lift ring-1 ring-white/10',
+        // Tailwind emits `relative` after `absolute`, so a base `relative`
+        // would beat a caller's `absolute` and drop the card into the flow.
+        !/\babsolute\b/.test(className || '') && 'relative',
         compact ? 'aspect-[1.585/1] w-44' : 'aspect-[1.585/1] w-64',
         className,
       )}
@@ -314,7 +317,7 @@ export default function Showcase({ className }) {
           last4="1134"
           gradient="linear-gradient(135deg,#2C3E85 0%,#1B2A5E 55%,#141F46 100%)"
           className="absolute left-0 top-16 animate-float-slow"
-          style={{ transform: 'rotate(-14deg)', animationDelay: '1.2s' }}
+          style={{ rotate: '-14deg', animationDelay: '1.2s' }}
         />
 
         {/* Mid card — Mastercard */}
@@ -324,7 +327,7 @@ export default function Showcase({ className }) {
           last4="9102"
           gradient="linear-gradient(135deg,#B02C68 0%,#8A1F4C 55%,#5E1333 100%)"
           className="absolute left-6 top-44 animate-float"
-          style={{ transform: 'rotate(-6deg)', animationDelay: '0.4s' }}
+          style={{ rotate: '-6deg', animationDelay: '0.4s' }}
         />
 
         {/* Phone — the anchor */}
@@ -341,7 +344,9 @@ export default function Showcase({ className }) {
           sheen
           gradient="linear-gradient(135deg,#0A0F0D 0%,#14211D 45%,#00614B 100%)"
           className="absolute -right-2 bottom-14 z-30 animate-float"
-          style={{ transform: 'rotate(9deg)', animationDelay: '0.9s' }}
+          // `rotate`, not `transform`: the float animation owns `transform`
+          // and would otherwise wipe the tilt out.
+          style={{ rotate: '9deg', animationDelay: '0.9s' }}
         />
 
         {/* Floating success chip — the product's payoff, stated once. */}

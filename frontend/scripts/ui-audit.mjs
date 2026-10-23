@@ -199,7 +199,7 @@ for (const [file, body] of jsx) {
     const px = Number(m[2] || m[3]);
     if (px > 320) {
       const before = body.slice(Math.max(0, m.index - 220), m.index);
-      if (!/overflow-x-auto|overflow-auto|sheet-scroll/.test(before)) {
+      if (!/overflow-x-auto|overflow-auto|overflow-x-clip|sheet-scroll/.test(before)) {
         hazards.push(`${file}: ${m[1]}`);
       }
     }

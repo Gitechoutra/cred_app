@@ -21,6 +21,9 @@
 
   body {
     @apply bg-canvas text-ink font-sans antialiased;
+    /* Nothing should ever scroll sideways. Set on body, it propagates to the
+       viewport, so sticky headers keep working. */
+    overflow-x: hidden;
     /* The app is mobile-first; this stops iOS rubber-banding the whole page
        behind a fixed bottom nav. */
     overscroll-behavior-y: none;
@@ -250,8 +253,6 @@
   .line-clip > * {
     opacity: 1 !important;
   }
-  /* Parallax is applied as an inline transform, so it needs neutralising by
-     the hook rather than here - useParallax returns a zero offset instead. */
 }
 
 /* ── Credit line ─────────────────────────────────────────────────────────── */
