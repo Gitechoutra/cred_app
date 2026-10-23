@@ -43,14 +43,23 @@ console.log('\nCashU UI audit\n' + '='.repeat(66));
 console.log('\n[21] Navigation');
 
 const app = sources.get('src/app/App.jsx') || '';
-const declared = new Set(
-  [...app.matchAll(/path="([^"]+)"/g)].map((m) => m[1]),
-);
-
-// Nested admin children are declared relative to /admin.
+// Nested children are declared relative to their parent route (the admin
+// console and the support desk both nest), so the parent is tracked while
+// reading: an opening <Route path="/x" ...> that is not self-closing starts a
+// nest, and </Route> ends it.
 const routes = new Set();
-for (const route of declared) {
-  routes.add(route.startsWith('/') ? route : `/admin/${route}`);
+const parents = [];
+for (const line of app.split('\n')) {
+  const m = line.match(/<Route\s+path="([^"]+)"/);
+  if (m) {
+    const path = m[1];
+    const full = path.startsWith('/') || path === '*'
+      ? path
+      : `${parents[parents.length - 1] || ''}/${path}`;
+    routes.add(full);
+    if (!/\/>\s*$/.test(line) && />\s*$/.test(line)) parents.push(full);
+  }
+  if (/^\s*<\/Route>/.test(line)) parents.pop();
 }
 
 function matches(target) {
@@ -86,7 +95,9 @@ check(21, 'admin routes are wrapped in an admin guard',
 /* ── 22. UI consistency ───────────────────────────────────────────────── */
 console.log('\n[22] UI consistency');
 
-const shells = ['src/components/layout/AppShell.jsx', 'src/pages/admin/AdminLayout.jsx'];
+// The member shell, and the console shell both staff portals (admin console
+// and support desk) are built on.
+const shells = ['src/components/layout/AppShell.jsx', 'src/components/layout/ConsoleShell.jsx'];
 check(22, 'both app shells use the white canvas background',
   shells.every((f) => (sources.get(f) || '').includes('min-h-screen bg-canvas')),
   shells.filter((f) => !(sources.get(f) || '').includes('min-h-screen bg-canvas')).join(', '));

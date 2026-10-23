@@ -85,7 +85,7 @@ export default function OtpVerify() {
     setError('');
 
     try {
-      const response = await endpoints.auth.verifyOtp(phone, code, navigator.platform);
+      const response = await endpoints.auth.verifyOtp(phone, code, navigator.platform, 'USER');
       const data = response.data;
 
       signIn(data);

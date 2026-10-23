@@ -1,28 +1,61 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { endpoints, tokens } from '../../api/client';
+import { endpoints } from '../../api/client';
 import { Logo } from '../../components/layout/AppShell';
 import { Button, cx } from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
 import { useProfile } from '../../hooks/useProfile';
 import PinPad, { PinDots } from './PinPad';
 
-const ADMIN_ROLES = ['L1_SUPPORT', 'L2_RISK_RECON', 'L3_SUPER_ADMIN'];
+/**
+ * The two staff portals: what each is called, where it leads, and the accent
+ * that tells them apart. Same white canvas and layout as the member app; the
+ * badge colour, heading and label carry the difference.
+ */
+export const STAFF_PORTALS = {
+  ADMIN: {
+    badge: 'Admin access only',
+    badgeClass: 'border-ink/15 bg-ink text-white',
+    title: 'Operations console',
+    subtitle: 'Sign in with your CashU administrator account.',
+    label: 'Operations',
+    labelClass: 'text-ink',
+    home: '/admin',
+    login: '/admin/login',
+  },
+  SUPPORT: {
+    badge: 'Support agents only',
+    badgeClass: 'border-sky-200 bg-sky-50 text-sky-800',
+    title: 'Customer support desk',
+    subtitle: 'Sign in with your CashU support agent account.',
+    label: 'Support desk',
+    labelClass: 'text-sky-700',
+    home: '/support-desk',
+    login: '/support-desk/login',
+  },
+};
+
+/** Where each portal's sign-in lives, for "use the right door" links. */
+const PORTAL_LOGIN = {
+  USER: { path: '/signin/mpin', name: 'customer' },
+  ADMIN: { path: '/admin/login', name: 'admin' },
+  SUPPORT: { path: '/support-desk/login', name: 'support' },
+};
+
+export default function AdminLogin() {
+  return <StaffLogin portal="ADMIN" />;
+}
 
 /**
- * Staff entrance to the operations console.
+ * Staff entrance, for the admin console or the support desk.
  *
- * Shares the member app's white canvas, so the difference is carried by content
- * rather than by colour: the "staff access only" badge, the console heading, and
- * the standing notice that everything done here is logged against your account.
- *
- * A non-staff account that reaches here is signed straight back out and told
- * plainly which door it wants. Leaving a member half-authenticated on a screen
- * they cannot use is how people end up filing support tickets - and the
- * credentials are identical between doors, so this is an easy mistake to make.
+ * The server checks the portal: an account from a different portal is refused
+ * once its MPIN is proven, with no session opened, and told which door it
+ * wants. Nothing here decides access from the role on the client.
  */
-export default function AdminLogin() {
+export function StaffLogin({ portal }) {
+  const config = STAFF_PORTALS[portal];
   const navigate = useNavigate();
   const { signIn, signOut } = useAuth();
   const { refresh } = useProfile();
@@ -31,7 +64,8 @@ export default function AdminLogin() {
   const [pin, setPin] = useState('');
   const [stage, setStage] = useState('phone');
   const [error, setError] = useState('');
-  const [wrongDoor, setWrongDoor] = useState(false);
+  // The portal this account belongs to, after the server refuses this one.
+  const [wrongDoor, setWrongDoor] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const phoneValid = /^[6-9]\d{9}$/.test(phone);
@@ -42,7 +76,7 @@ export default function AdminLogin() {
     const next = pin + digit;
     setPin(next);
     setError('');
-    setWrongDoor(false);
+    setWrongDoor(null);
 
     if (next.length === 6) submit(next);
   }
@@ -51,24 +85,17 @@ export default function AdminLogin() {
     setLoading(true);
 
     try {
-      const response = await endpoints.auth.loginMpin(phone, finalPin);
-      const role = response.data?.user?.role;
-
-      // Authenticate first, then check the role - the API does not expose a
-      // "is this phone an admin" endpoint, and it should not: that would let
-      // anyone enumerate which numbers hold staff accounts.
-      if (!ADMIN_ROLES.includes(role)) {
-        tokens.clear();
-        setWrongDoor(true);
+      const response = await endpoints.auth.loginMpin(phone, finalPin, portal);
+      signIn(response.data);
+      await refresh();
+      navigate(config.home, { replace: true });
+    } catch (err) {
+      if (err.code === 'WRONG_PORTAL') {
+        setWrongDoor(err.details?.portal || 'USER');
         setPin('');
         setLoading(false);
         return;
       }
-
-      signIn(response.data);
-      await refresh();
-      navigate('/admin', { replace: true });
-    } catch (err) {
       setError(err.message);
       setPin('');
       setLoading(false);
@@ -77,8 +104,9 @@ export default function AdminLogin() {
 
   /* ── Wrong door ──────────────────────────────────────────────────── */
   if (wrongDoor) {
+    const right = PORTAL_LOGIN[wrongDoor] || PORTAL_LOGIN.USER;
     return (
-      <Frame>
+      <Frame config={config}>
         <div className="animate-rise-in rounded-2xl border border-line bg-canvas p-7 text-center shadow-card">
           <div className="mx-auto grid h-14 w-14 animate-scale-in place-items-center rounded-2xl bg-warn/15 text-warn">
             <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -88,23 +116,23 @@ export default function AdminLogin() {
           </div>
 
           <h1 className="mt-5 text-xl font-bold text-ink">
-            This is a member account
+            {wrongDoor === 'USER' ? 'This is a member account' : 'Wrong sign-in for this account'}
           </h1>
           <p className="mx-auto mt-2 max-w-xs text-sm leading-relaxed text-slate">
-            Your credentials are correct, but this account doesn&rsquo;t have
-            staff access. Members sign in through the main entrance.
+            Your MPIN is correct, but this account signs in through the{' '}
+            {right.name} login. Nothing was opened here.
           </p>
 
           <div className="mt-7 space-y-2.5">
-            <Button variant="mint" size="lg" full onClick={() => navigate('/signin/mpin')}>
-              Go to user login
+            <Button variant="mint" size="lg" full onClick={() => navigate(right.path)}>
+              Go to {right.name} login
             </Button>
             <Button
               variant="ghost"
               size="lg"
               full
               onClick={() => {
-                setWrongDoor(false);
+                setWrongDoor(null);
                 setStage('phone');
                 setPhone('');
               }}
@@ -125,7 +153,7 @@ export default function AdminLogin() {
   /* ── Phone ───────────────────────────────────────────────────────── */
   if (stage === 'phone') {
     return (
-      <Frame>
+      <Frame config={config}>
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -137,7 +165,10 @@ export default function AdminLogin() {
               sign-in. On white that edge is a hairline plus a soft shadow. */}
           <div className="animate-rise-in rounded-2xl border border-line bg-canvas p-7 shadow-card">
             <span
-              className="inline-flex animate-fade-up items-center gap-1.5 rounded-full border border-mint-200 bg-mint-50 px-2.5 py-1 text-2xs font-semibold text-mint-800"
+              className={cx(
+                'inline-flex animate-fade-up items-center gap-1.5 rounded-full border px-2.5 py-1 text-2xs font-semibold',
+                config.badgeClass,
+              )}
             >
               <svg
                 viewBox="0 0 24 24"
@@ -149,25 +180,25 @@ export default function AdminLogin() {
                 <rect x="4.5" y="10" width="15" height="10" rx="2.5" />
                 <path d="M8 10V7a4 4 0 0 1 8 0v3" />
               </svg>
-              Staff access only
+              {config.badge}
             </span>
 
             <h1
               className="mt-5 animate-fade-up text-[1.75rem] font-bold leading-tight tracking-tight text-ink"
               style={{ animationDelay: '60ms' }}
             >
-              Operations console
+              {config.title}
             </h1>
             <p
               className="mt-1.5 animate-fade-up text-sm leading-relaxed text-slate"
               style={{ animationDelay: '110ms' }}
             >
-              Sign in with your CashU staff account.
+              {config.subtitle}
             </p>
 
             <div className="mt-7 animate-fade-up" style={{ animationDelay: '160ms' }}>
               <label
-                htmlFor="admin-phone"
+                htmlFor="staff-phone"
                 className="mb-2 block text-2xs font-semibold uppercase tracking-[0.12em] text-slate"
               >
                 Registered mobile number
@@ -178,7 +209,7 @@ export default function AdminLogin() {
                   +91
                 </span>
                 <input
-                  id="admin-phone"
+                  id="staff-phone"
                   inputMode="numeric"
                   autoComplete="tel-national"
                   autoFocus
@@ -254,7 +285,7 @@ export default function AdminLogin() {
 
   /* ── MPIN ────────────────────────────────────────────────────────── */
   return (
-    <Frame wide>
+    <Frame wide config={config}>
       <div className="flex animate-fade-up flex-col items-center text-center">
         <h1 className="text-xl font-bold tracking-tight text-ink">
           Enter your MPIN
@@ -295,6 +326,13 @@ export default function AdminLogin() {
       >
         Use a different number
       </button>
+      <button
+        type="button"
+        onClick={() => navigate(`/forgot-mpin?portal=${portal}&phone=${phone}`)}
+        className="mt-1 w-full text-center text-sm font-semibold text-mint-700 transition-colors duration-base ease-glide hover:text-mint-800"
+      >
+        Forgot MPIN?
+      </button>
     </Frame>
   );
 }
@@ -308,7 +346,7 @@ export default function AdminLogin() {
  * "Operations" label under the mark and the logging notice at the foot, not a
  * different colour scheme.
  */
-function Frame({ children, wide = false }) {
+function Frame({ children, wide = false, config = STAFF_PORTALS.ADMIN }) {
   const navigate = useNavigate();
 
   return (
@@ -323,7 +361,7 @@ function Frame({ children, wide = false }) {
             <Logo className="h-8 w-8 transition-transform duration-base ease-glide group-hover:scale-105" />
             <div>
               <p className="text-base font-bold leading-none text-ink">CashU</p>
-              <p className="mt-0.5 text-2xs text-mint-700">Operations</p>
+              <p className={cx('mt-0.5 text-2xs font-semibold', config.labelClass)}>{config.label}</p>
             </div>
           </button>
 

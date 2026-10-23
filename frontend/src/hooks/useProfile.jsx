@@ -14,7 +14,18 @@ import { useAuth } from '../context/AuthContext';
 
 const ProfileContext = createContext(null);
 
-const ADMIN_ROLES = ['L1_SUPPORT', 'L2_RISK_RECON', 'L3_SUPER_ADMIN'];
+// Mirrors RoleTypes on the server. The server enforces every one of these;
+// the screens only use them to choose which console to show.
+export const ADMIN_ROLES = ['L2_RISK_RECON', 'L3_SUPER_ADMIN'];
+export const SUPPORT_ROLES = ['L1_SUPPORT'];
+export const STAFF_ROLES = [...SUPPORT_ROLES, ...ADMIN_ROLES];
+
+/** Where a signed-in account belongs. */
+export function homeFor(role) {
+  if (ADMIN_ROLES.includes(role)) return '/admin';
+  if (SUPPORT_ROLES.includes(role)) return '/support-desk';
+  return '/home';
+}
 
 export function ProfileProvider({ children }) {
   const { isAuthenticated } = useAuth();
@@ -52,6 +63,9 @@ export function ProfileProvider({ children }) {
       loading,
       refresh: load,
       isAdmin: Boolean(profile && ADMIN_ROLES.includes(profile.role)),
+      isSupport: Boolean(profile && SUPPORT_ROLES.includes(profile.role)),
+      isStaff: Boolean(profile && STAFF_ROLES.includes(profile.role)),
+      isSuperAdmin: profile?.role === 'L3_SUPER_ADMIN',
       role: profile?.role || null,
       kycTier: profile?.kyc_tier || 'NONE',
       kycStatus: profile?.kyc_status || 'NOT_STARTED',

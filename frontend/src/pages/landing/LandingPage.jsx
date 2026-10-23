@@ -4,6 +4,7 @@ import { MotionConfig } from 'motion/react';
 import { Nav } from './sections/Nav';
 import { Hero } from './sections/Hero';
 import { BankMarquee } from './sections/BankMarquee';
+import { Portals } from './sections/Portals';
 import { Features } from './sections/Features';
 import { HowItWorks } from './sections/HowItWorks';
 import { Security } from './sections/Security';
@@ -43,6 +44,7 @@ export function LandingPage() {
         <main>
           <Hero />
           <BankMarquee />
+          <Portals />
           <Features />
           <HowItWorks />
           <Security />

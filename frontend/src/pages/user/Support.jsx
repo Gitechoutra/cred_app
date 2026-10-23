@@ -122,7 +122,7 @@ export default function Support() {
                       {ticket.subject}
                     </p>
                     <Badge tone={statusTone(ticket.status)} className="shrink-0">
-                      {statusLabel(ticket.status)}
+                      {ticket.status_label || statusLabel(ticket.status)}
                     </Badge>
                   </div>
 
@@ -230,8 +230,15 @@ export default function Support() {
         {open && (
           <div className="flex w-full flex-col gap-3 pb-2">
             <p className="money text-2xs text-slate">
-              {open.ticket_number} · {statusLabel(open.status)}
+              {open.ticket_number} · {open.status_label || statusLabel(open.status)}
             </p>
+
+            {/* How support resolved it - written by the agent for the customer. */}
+            {open.resolution_notes && (
+              <div className="rounded-xl border border-mint-200 bg-mint-50 p-3 text-sm text-mint-900">
+                <span className="font-semibold">Resolution:</span> {open.resolution_notes}
+              </div>
+            )}
 
             {open.messages?.map((message) => (
               <div

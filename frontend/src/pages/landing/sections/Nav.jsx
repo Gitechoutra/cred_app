@@ -9,6 +9,7 @@ import { Button, cx } from '../../../components/ui';
 import { EASE } from './shared';
 
 export const NAV_LINKS = [
+  { label: 'Portals', id: 'portals' },
   { label: 'Features', id: 'features' },
   { label: 'How it works', id: 'how-it-works' },
   { label: 'Security', id: 'security' },
@@ -18,9 +19,10 @@ export const NAV_LINKS = [
 /**
  * Sticky top bar.
  *
- * Both doors stay in it at every width: customers and staff sign in through
- * different screens, and nobody should have to scroll to find theirs. Below
- * `sm` they move into the sheet so the bar keeps its shape at 320px.
+ * All three doors stay in it at every width: customers, administrators and
+ * support agents sign in through different screens, and nobody should have to
+ * scroll to find theirs. Below `sm` they move into the sheet so the bar keeps
+ * its shape at 320px.
  */
 export function Nav() {
   const navigate = useNavigate();
@@ -83,6 +85,14 @@ export function Nav() {
             </a>
           ))}
         </nav>
+
+        <button
+          type="button"
+          onClick={() => go('/support-desk/login')}
+          className="hidden rounded-xl px-3 py-2 text-xs font-semibold text-sky-700 transition-all duration-base ease-glide hover:-translate-y-px hover:bg-sky-50 lg:block"
+        >
+          Support login
+        </button>
 
         <button
           type="button"
@@ -182,6 +192,15 @@ export function Nav() {
                 </Button>
                 <Button variant="outline" size="lg" full onClick={() => go('/admin/login')}>
                   Admin login
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="lg"
+                  full
+                  className="text-sky-700 hover:bg-sky-50"
+                  onClick={() => go('/support-desk/login')}
+                >
+                  Support login
                 </Button>
               </div>
             </motion.div>

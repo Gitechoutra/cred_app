@@ -640,7 +640,9 @@
   |---|:--:|:--:|:--:|:--:|
   | Own dashboard, cards, EMIs, credit line | ✅ | ❌ | ❌ | ❌ |
   | Apply, spend, pay bill, block/unblock own card | ✅ | ❌ | ❌ | ❌ |
-  | View masked users, credit applications, credit accounts, transaction errors | ❌ | ✅ | ✅ | ✅ |
+  | Support desk: tickets, replies, internal notes, status, assign, escalate | ❌ | ✅ | ✅ | ✅ |
+  | Support desk: masked customer search + read-only profile | ❌ | ✅ | ✅ | ✅ |
+  | Admin console (users, credit applications, payments, error log, card records) | ❌ | ❌ | ✅ | ✅ |
   | View raw PII / KYC documents | ❌ | ❌ | ✅ *(audited)* | ✅ *(audited)* |
   | Review KYC, freeze/unfreeze users | ❌ | ❌ | ✅ | ✅ |
   | **Approve / reject credit applications** | ❌ | ❌ | ✅ | ✅ |
@@ -648,13 +650,39 @@
   | **Cut an out-of-cycle statement** | ❌ | ❌ | ❌ | ✅ |
   | Reconciliation, self-audit, audit logs | ❌ | ❌ | ✅ | ✅ |
   | Settings & feature flags | ❌ | ❌ | ❌ | ✅ |
+  | Manage staff (grant / remove L1 support and L2) | ❌ | ❌ | ❌ | ✅ |
   | Direct production DB access | ❌ | ❌ | ❌ | **❌ (zero-DB)** |
 
   An admin can approve a credit line but **cannot declare a purpose or activate on the
   applicant's behalf**. Maker-checker threshold remains ₹25,000.
 
-  Admin UI modules: dashboard · users · KYC queue + document viewer · reconciliation ·
-  settings. *(Credit application queue is API-only today.)*
+  **Three sign-in portals, one sign-in system.** Customer (`/signin`), Admin
+  (`/admin/login`, L2/L3) and Customer Support (`/support-desk/login`, L1) all use
+  mobile + MPIN (OTP to register and to reset). Each sign-in names its portal; once the
+  MPIN is proven the server refuses an account from another portal with
+  `403 WRONG_PORTAL` and opens no session. Every endpoint checks the role itself, so
+  typing another console's URL leads back to the account's own. Forgot MPIN resets by
+  OTP and signs the account out everywhere. Email is verified by a signed 24-hour link
+  (logged, and returned in debug builds, until SMTP is configured).
+
+  Staff accounts are registered CashU accounts given a role by an L3 (Admin → Staff);
+  a role change signs the account out. L3 itself is only granted by server config.
+
+  Admin UI modules: overview · users · KYC · credit · payments · error log · card
+  records · escalations · staff (L3) · reconciliation · settings (L3).
+  Support desk UI: overview · tickets (Open / In progress / Resolved / Closed) ·
+  ticket workspace (reply, internal note, status, assign, escalate, audit trail) ·
+  customers (exact-identifier search, masked profile). Agents have no endpoint that
+  changes money, limits, KYC or account status.
+
+  **Cards.** Three ways to add one: *tokenise* (CoFT flow, limit set by CashU from
+  score and salary); *manual* (`manual_cards` - bank + last four + the holder's own
+  figures, every figure labelled **User-entered - Not Bank Verified**, editable and
+  removable, card numbers/CVV/OTP refused by the API); *connect bank* (needs a
+  licensed provider - `CARD_LINK_PROVIDER` - and reports "not available" until one is
+  contracted; nothing is simulated). Card themes are visual only. Card bills: the
+  CashU credit line is payable (gateway-verified); bank card bills show what is due
+  and say payment is not available until `CARD_BILL_PAY_PROVIDER` is contracted.
 
   ---
 
@@ -808,6 +836,9 @@
   | `credit_statement_cycles` | Multi-cycle statements, refunds as credit, carry-forward |
   | `upi_payment_flow`, `upi_webhook` | Scan & Pay + Razorpay webhook (gateway-signature checks skipped while UPI is off) |
   | `smoke_flow`, `test_card_flow`, `error_support_flow` | ⚠ One known BLOCKED check each — their money leg was the transfer; to be retargeted onto credit purchases |
+  | `portals_flow` | Portal separation, RBAC on every console endpoint, Forgot MPIN, email verification, support desk, staff management (71) |
+  | `card_dashboard_flow` | Manual cards: validation, duplicates, ownership, themes, refresh, removal, linking status, bills (45) |
+  | `card_link_flow`, `schema_sync` | Tokenised Add Card end to end; stale databases heal at boot |
   | `frontend/scripts/ui-audit.mjs` | Route and navigation-target resolution |
   | Browser e2e | puppeteer-core + installed Chrome against Vite :3000, at 320 / 375 / 768 / 1280px — 71 checks, no horizontal scroll, no console errors |
 

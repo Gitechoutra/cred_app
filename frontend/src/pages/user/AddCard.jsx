@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
 import { BankLogo } from '../../components/domain';
 import { PageHeader, IconLock, IconChevron, IconPlus } from '../../components/layout/AppShell';
 import { Button, Input, cx } from '../../components/ui';
+import ManualCardForm from '../../components/cards/ManualCardForm';
 import { useToast } from '../../context/ToastContext';
+import { useFetch } from '../../hooks/useProfile';
 import { SUPPORTED_BANKS, searchBanks } from '../../data/supportedBanks';
 import { groupCardNumber, money } from '../../utils/format';
 
@@ -41,7 +43,180 @@ function IconClose(props) {
  *      and issuer brand colour.
  *    - Allows switching bank via "Change bank" without losing input.
  */
+/**
+ * Add a card: choose how, then the flow for that method.
+ *
+ *   tokenise  the existing flow - the card is tokenised and CashU sets its
+ *             limit from the holder's credit score and salary
+ *   manual    track a card by typing its figures (last four digits only),
+ *             labelled User-entered - Not Bank Verified
+ *   link      connect through a bank-data provider; reports honestly that
+ *             none is configured instead of simulating a bank sign-in
+ */
 export default function AddCard() {
+  const [params] = useSearchParams();
+  const method = params.get('method');
+  if (method === 'tokenise') return <TokeniseCard />;
+  if (method === 'manual') return <ManualAdd />;
+  if (method === 'link') return <BankLink />;
+  return <MethodChooser />;
+}
+
+function MethodChooser() {
+  const navigate = useNavigate();
+  const methods = [
+    {
+      key: 'tokenise',
+      title: 'Link and tokenise',
+      body: 'Enter your card number once. It is tokenised and CashU sets a limit from your credit score and salary.',
+      tag: 'Limit set by CashU',
+    },
+    {
+      key: 'manual',
+      title: 'Enter manually',
+      body: 'Track any card with just its bank and last four digits, plus the limit, balance and due date you know.',
+      tag: 'User-entered - Not Bank Verified',
+      warn: true,
+    },
+    {
+      key: 'link',
+      title: 'Connect your bank',
+      body: 'Securely fetch card data from your bank with your consent, through an authorised provider.',
+      tag: 'Provider-verified',
+    },
+  ];
+  return (
+    <div className="mx-auto w-full max-w-2xl">
+      <PageHeader title="Add a card" subtitle="Choose how to add it" back="/cards" />
+      <div className="space-y-3 px-4 pt-1">
+        {methods.map((m, index) => (
+          <button
+            key={m.key}
+            type="button"
+            onClick={() => navigate(`/cards/add?method=${m.key}`)}
+            className="group flex w-full animate-fade-up items-start gap-3 rounded-2xl border border-line bg-canvas p-4 text-left transition-all duration-base ease-glide hover:-translate-y-0.5 hover:border-ink/20 hover:shadow-lift"
+            style={{ animationDelay: `${index * 60}ms` }}
+          >
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-mist text-ink">
+              {m.key === 'link' ? <IconLock className="h-5 w-5" /> : <IconPlus className="h-5 w-5" />}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold text-ink">{m.title}</span>
+              <span className="mt-0.5 block text-xs leading-relaxed text-slate">{m.body}</span>
+              <span className={cx('mt-2 inline-block rounded-full px-2 py-0.5 text-2xs font-semibold',
+                m.warn ? 'bg-amber-100 text-amber-900' : 'bg-mist text-slate')}
+              >
+                {m.tag}
+              </span>
+            </span>
+            <IconChevron className="mt-2 h-4 w-4 shrink-0 text-slate transition-transform group-hover:translate-x-0.5" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ManualAdd() {
+  const navigate = useNavigate();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const [serverError, setServerError] = useState(null);
+
+  async function add(body) {
+    setBusy(true);
+    setServerError(null);
+    try {
+      const response = await endpoints.cards.manual.add(body);
+      toast.success(response.message);
+      navigate(`/cards/manual/${response.data.manual_card_id}`, { replace: true });
+    } catch (err) {
+      setServerError({ message: err.message, field: err.details?.field });
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mx-auto w-full max-w-2xl">
+      <PageHeader title="Enter a card manually" subtitle="Only the last four digits - never the full number" back="/cards/add" />
+      <div className="px-4 pt-1">
+        <ManualCardForm onSubmit={add} busy={busy} serverError={serverError} submitLabel="Add card" />
+      </div>
+    </div>
+  );
+}
+
+function BankLink() {
+  const { data, loading, error } = useFetch(() => endpoints.cards.linkProviders(), []);
+  const [consent, setConsent] = useState(false);
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const navigate = useNavigate();
+
+  async function start() {
+    setBusy(true);
+    try {
+      await endpoints.cards.startLink();
+    } catch (err) {
+      setResult(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mx-auto w-full max-w-2xl">
+      <PageHeader title="Connect your bank" subtitle="Secure, consent-based card linking" back="/cards/add" />
+      <div className="space-y-4 px-4 pt-1">
+        {loading && !data ? <div className="h-32 animate-pulse rounded-2xl bg-mist" /> : (
+          <div className="rounded-2xl border border-line bg-canvas p-5">
+            <div className="flex items-center gap-2">
+              <span className={cx('h-2 w-2 rounded-full', data?.available ? 'bg-mint-600' : 'bg-warn')} />
+              <p className="text-sm font-semibold text-ink">
+                {error ? 'Could not check the provider' : data?.available ? 'Provider connected' : 'Not available yet'}
+              </p>
+            </div>
+            <p className="mt-2 text-sm leading-relaxed text-slate">
+              {error ? error.message : data?.reason || 'Choose your bank to continue.'}
+            </p>
+            {data?.institutions?.length === 0 && (
+              <p className="mt-2 text-xs text-slate">
+                No institutions are listed: CashU shows only banks its provider actually supports.
+              </p>
+            )}
+          </div>
+        )}
+
+        <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-line p-4">
+          <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[#00F5B8]" checked={consent}
+            onChange={(e) => setConsent(e.target.checked)}
+          />
+          <span className="text-xs leading-relaxed text-slate">
+            <span className="block text-sm font-medium text-ink">I consent</span>
+            I authorise CashU to receive my card&apos;s limit, balance and due date from
+            my bank through an authorised provider. CashU never asks for my net banking
+            password, card PIN or OTP.
+          </span>
+        </label>
+
+        {result && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-sm text-amber-900" role="alert">
+            {result}
+          </div>
+        )}
+
+        <Button variant="mint" size="lg" full loading={busy} disabled={!consent} onClick={start}>
+          Continue to my bank
+        </Button>
+        <Button variant="outline" size="lg" full onClick={() => navigate('/cards/add?method=manual')}>
+          Enter the card manually instead
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function TokeniseCard() {
   const navigate = useNavigate();
   const toast = useToast();
 
@@ -216,7 +391,7 @@ export default function AddCard() {
           <PageHeader
             title="Select your bank"
             subtitle="Choose the bank that issued your credit card"
-            back="/cards"
+            back="/cards/add"
           />
 
           <div className="space-y-6 px-4 pt-1">

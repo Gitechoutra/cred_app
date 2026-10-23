@@ -1,5 +1,5 @@
 import { Badge, Meter, cx } from '../ui';
-import { bankCardTheme } from './BankLogo';
+import { normaliseCard, resolveTheme } from './cardThemes';
 import { IconAlert, IconBank, IconCheck, IconChevron, IconClock } from '../layout/AppShell';
 import {
   date as fmtDate,
@@ -19,11 +19,11 @@ import {
  * recognise the physical card in their wallet - the fastest possible way to
  * pick the right one when four are on screen.
  */
-export function CardTile({ card, onClick, compact = false }) {
-  // The issuer's logo colours when the bank is one we have a logo for; the
-  // stored brand colour otherwise.
-  const theme = bankCardTheme(null, card.issuer_bank);
-  const colour = card.brand_color || '#0A0F0D';
+export function CardTile({ card: raw, onClick, compact = false }) {
+  // The holder's chosen theme, else the issuer's logo colours, else matte
+  // black. Visual only - see cardThemes.js.
+  const card = normaliseCard(raw);
+  const theme = resolveTheme(raw);
   const utilization = card.utilization_percentage;
 
   return (
@@ -39,20 +39,15 @@ export function CardTile({ card, onClick, compact = false }) {
         'hover:-translate-y-0.5 hover:shadow-lift active:translate-y-0 active:scale-[0.985]',
         compact ? 'min-h-[124px]' : 'min-h-[156px]',
       )}
-      style={theme
-        ? { backgroundColor: theme.to, backgroundImage: `linear-gradient(135deg, ${theme.from} 0%, ${theme.to} 100%)` }
-        : { backgroundColor: colour }}
+      style={{ backgroundColor: theme.to, backgroundImage: `linear-gradient(135deg, ${theme.from} 0%, ${theme.to} 100%)` }}
     >
       {/* A soft highlight keeps a flat brand colour from reading as a plain
           rectangle, without tipping into skeuomorphism. With a logo theme it
           glows in the logo's second colour. */}
       <span
         aria-hidden="true"
-        className={cx(
-          'pointer-events-none absolute -right-8 -top-12 h-40 w-40 rounded-full blur-2xl',
-          theme ? 'opacity-35' : 'bg-white/10',
-        )}
-        style={theme ? { backgroundColor: theme.accent } : undefined}
+        className="pointer-events-none absolute -right-8 -top-12 h-40 w-40 rounded-full opacity-35 blur-2xl"
+        style={{ backgroundColor: theme.accent }}
       />
       <span
         aria-hidden="true"
@@ -74,6 +69,11 @@ export function CardTile({ card, onClick, compact = false }) {
             {/* Amber, on the card face itself. A simulated card should be
                 identifiable at a glance from anywhere it appears, not only on
                 the screen where it was added. */}
+            {card.manual && (
+              <span className="rounded-full bg-white/90 px-2 py-0.5 text-2xs font-bold text-ink">
+                User-entered
+              </span>
+            )}
             {card.is_test_card && (
               <span className="rounded-full bg-amber-400 px-2 py-0.5 text-2xs font-bold uppercase tracking-wide text-amber-950">
                 Test
@@ -93,12 +93,12 @@ export function CardTile({ card, onClick, compact = false }) {
             {card.masked_pan}
           </p>
 
-          {card.card_limit ? (
+          {card.limit ? (
             <div>
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-2xs text-white/60">Available</span>
                 <span className="money text-sm font-semibold text-white">
-                  {money(card.available_limit ?? card.card_limit)}
+                  {card.available != null ? money(card.available) : '—'}
                 </span>
               </div>
 
@@ -115,15 +115,17 @@ export function CardTile({ card, onClick, compact = false }) {
                     ? `${utilization}% used`
                     : 'Limit not tracked'}
                 </span>
-                {card.next_due_date && (
+                {card.dueDate && (
                   <span className="text-2xs text-white/50">
-                    Due {relativeDays(card.next_due_date)}
+                    Due {relativeDays(card.dueDate)}
                   </span>
                 )}
               </div>
             </div>
           ) : (
-            <p className="text-2xs text-white/50">Tap to add your credit limit</p>
+            <p className="text-2xs text-white/50">
+              {card.manual ? 'No limit entered - tap to add it' : 'No limit on record'}
+            </p>
           )}
         </div>
       </div>

@@ -1,108 +1,65 @@
-import { Outlet, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 
+import { endpoints } from '../../api/client';
+import ConsoleShell from '../../components/layout/ConsoleShell';
 import {
+  IconAlert,
   IconCard,
+  IconHelp,
   IconHome,
   IconLock,
-  IconHelp,
-  IconLogout,
+  IconPay,
   IconReceipt,
   IconShield,
   IconUser,
-  Logo,
 } from '../../components/layout/AppShell';
-import { BottomNav, ProfileMenu } from '../../components/layout/BottomNav';
 import { cx } from '../../components/ui';
-import { useAuth } from '../../context/AuthContext';
-import { useProfile } from '../../hooks/useProfile';
-import { initials } from '../../utils/format';
 
 /**
- * Operations console shell (PRD section 16).
+ * Admin console shell (PRD section 16): L2 risk & reconciliation and L3 super
+ * admins. Support agents have their own portal, the support desk.
  *
- * Shares the member app's bottom navigation so the product reads as one thing,
- * but keeps its own full-bleed content area: this is a desk tool, and the
- * transaction and audit tables want every pixel of width they can get.
- *
- * Nav items are filtered by RBAC tier, so an L1 agent never sees a door they
- * cannot open - which also keeps the bar short for the lower tiers.
+ * Tabs are filtered by role so nobody sees a door they cannot open; the
+ * server checks the role on every endpoint regardless.
  */
 
+const L2 = 'L2_RISK_RECON';
+const L3 = 'L3_SUPER_ADMIN';
+
 const NAV = [
-  { to: '/admin', end: true, label: 'Overview', icon: IconHome, roles: ['L1_SUPPORT', 'L2_RISK_RECON', 'L3_SUPER_ADMIN'] },
-  { to: '/admin/users', label: 'Users', icon: IconUser, roles: ['L1_SUPPORT', 'L2_RISK_RECON', 'L3_SUPER_ADMIN'] },
-  { to: '/admin/kyc', label: 'KYC', icon: IconShield, roles: ['L1_SUPPORT', 'L2_RISK_RECON', 'L3_SUPER_ADMIN'] },
-  // Credit applications from users. They had no screen at all, so nothing an
-  // applicant submitted could be seen or decided here.
-  { to: '/admin/credit', label: 'Credit', icon: IconCard, roles: ['L1_SUPPORT', 'L2_RISK_RECON', 'L3_SUPER_ADMIN'] },
-  { to: '/admin/reconciliation', label: 'Recon', icon: IconReceipt, roles: ['L2_RISK_RECON', 'L3_SUPER_ADMIN'] },
-  { to: '/admin/settings', label: 'Settings', icon: IconLock, roles: ['L3_SUPER_ADMIN'] },
+  { to: '/admin', end: true, label: 'Overview', icon: IconHome, roles: [L2, L3] },
+  { to: '/admin/users', label: 'Users', icon: IconUser, roles: [L2, L3] },
+  { to: '/admin/kyc', label: 'KYC', icon: IconShield, roles: [L2, L3] },
+  { to: '/admin/credit', label: 'Credit', icon: IconCard, roles: [L2, L3] },
+  { to: '/admin/payments', label: 'Payments', icon: IconPay, roles: [L2, L3] },
+  { to: '/admin/errors', label: 'Error log', icon: IconAlert, roles: [L2, L3] },
+  { to: '/admin/cards', label: 'Card records', icon: IconCard, roles: [L2, L3] },
+  { id: 'escalations', to: '/admin/escalations', label: 'Escalations', icon: IconHelp, roles: [L2, L3] },
+  { to: '/admin/staff', label: 'Staff', icon: IconUser, roles: [L3] },
+  { to: '/admin/reconciliation', label: 'Recon', icon: IconReceipt, roles: [L2, L3] },
+  { to: '/admin/settings', label: 'Settings', icon: IconLock, roles: [L3] },
 ];
 
 export default function AdminLayout() {
-  const navigate = useNavigate();
-  const { signOut } = useAuth();
-  const { profile, role } = useProfile();
+  const [openEscalations, setOpenEscalations] = useState(0);
 
-  const items = NAV.filter((item) => item.roles.includes(role));
-
-  // The same menu a member gets, in the same place. An operator is also a user
-  // of this product - they have a profile, an MPIN and devices - and the
-  // console offering a different shape was just an inconsistency.
-  const profileMenuItems = [
-    { label: 'Profile', icon: IconUser, to: '/profile' },
-    { label: 'Security', icon: IconLock, to: '/security' },
-    { label: 'Help & support', icon: IconHelp, to: '/support' },
-    { divider: true },
-    { label: 'Switch to member app', icon: IconHome, to: '/home' },
-    { divider: true },
-    {
-      label: 'Logout',
-      icon: IconLogout,
-      tone: 'danger',
-      onClick: async () => {
-        await signOut();
-        navigate('/', { replace: true });
-      },
-    },
-  ];
+  useEffect(() => {
+    let alive = true;
+    const load = () => endpoints.admin.escalationCount()
+      .then((r) => alive && setOpenEscalations(r.data?.open_escalations || 0))
+      .catch(() => {});
+    load();
+    const timer = setInterval(load, 60000);
+    return () => { alive = false; clearInterval(timer); };
+  }, []);
 
   return (
-    <div className="min-h-screen bg-canvas pb-24 sm:pb-28">
-      <header className="sticky top-0 z-40 border-b border-line bg-canvas/95 backdrop-blur">
-        <div className="flex items-center gap-2.5 px-4 py-3 sm:px-6 lg:px-8">
-          <Logo className="h-8 w-8 shrink-0" />
-          <div className="min-w-0">
-            <p className="truncate text-sm font-bold leading-none text-ink">CashU</p>
-            <p className="mt-1 text-2xs text-slate">Operations</p>
-          </div>
-
-          <span className="ml-auto hidden truncate rounded-full border border-line bg-canvas px-2.5 py-1 text-2xs font-semibold text-slate sm:inline-block">
-            {role?.replace(/_/g, ' ')}
-          </span>
-
-          {/* Top right, as on the member side. `placement="bottom"` because
-              this one hangs off a bar at the top of the page, not the bottom. */}
-          <div className="ml-auto flex items-center gap-2 sm:ml-3">
-            <ProfileMenu
-              name={profile?.full_name}
-              detail={role?.replace(/_/g, ' ')}
-              avatar={initials(profile?.full_name)}
-              items={profileMenuItems}
-              placement="bottom"
-            />
-          </div>
-        </div>
-      </header>
-
-      {/* Full bleed, deliberately. A capped, centred container leaves dead space
-          down both sides of a wide monitor. */}
-      <main className="min-w-0 p-4 sm:p-6 lg:px-8 lg:py-7">
-        <Outlet />
-      </main>
-
-      <BottomNav items={items} />
-    </div>
+    <ConsoleShell
+      nav={NAV}
+      label="Operations"
+      accentClass="text-ink"
+      badgeFor={(item) => (item.id === 'escalations' ? openEscalations : 0)}
+    />
   );
 }
 /* ── Shared admin pieces ────────────────────────────────────────────────── */

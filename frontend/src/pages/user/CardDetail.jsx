@@ -1,6 +1,8 @@
 import { Link, useParams } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
+import { CardActions, DataSourceBadge, LastUpdated } from '../../components/cards/CardActions';
+import ThemePicker from '../../components/cards/ThemePicker';
 import { CardTile } from '../../components/domain';
 import { PageHeader } from '../../components/layout/AppShell';
 import { Card, EmptyState, Row, Skeleton } from '../../components/ui';
@@ -10,12 +12,12 @@ import { date, money, statusLabel } from '../../utils/format';
 export default function CardDetail() {
   const { cardId } = useParams();
 
-  const { data: card, loading } = useFetch(
+  const { data: card, loading, setData } = useFetch(
     () => endpoints.cards.get(cardId),
     [cardId],
   );
 
-  if (loading) {
+  if (loading && !card) {
     return (
       <div className="">
         <PageHeader title="Card" back="/cards" />
@@ -47,6 +49,29 @@ export default function CardDetail() {
 
         <div className="space-y-4 px-4 pt-4">
           <CardTile card={card} />
+
+          <Card className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <DataSourceBadge card={{ ...card, kind: 'TOKENISED' }} />
+              <LastUpdated card={card} />
+            </div>
+            <p className="text-xs leading-relaxed text-slate">
+              This card is tokenised. Its limit was set by CashU from your credit
+              score and salary - it is not a figure read from your bank.
+            </p>
+            <CardActions
+              card={{ ...card, kind: 'TOKENISED' }}
+              showView={false}
+              onChanged={(next) => next && setData(next)}
+            />
+            <ThemePicker
+              card={card}
+              onSave={async (theme) => {
+                const response = await endpoints.cards.setTheme(card.card_id, theme);
+                setData(response.data);
+              }}
+            />
+          </Card>
 
           {card.current_due_amount > 0 && (
             <Card className="bg-canvas shadow-[0_4px_24px_rgba(0,0,0,0.06)] border-mint-200">

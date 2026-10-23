@@ -3,7 +3,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import AppShell from '../components/layout/AppShell';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { useAuth } from '../context/AuthContext';
-import { useProfile } from '../hooks/useProfile';
+import { homeFor, useProfile } from '../hooks/useProfile';
 import { LoadingProvider, useGlobalLoading } from '../context/LoadingContext';
 import { Loader3D } from '../components/ui/Loader3D';
 
@@ -17,6 +17,9 @@ import ProfileSetup from '../pages/auth/ProfileSetup';
 import MpinSetup from '../pages/auth/MpinSetup';
 import MpinLogin from '../pages/auth/MpinLogin';
 import AdminLogin from '../pages/auth/AdminLogin';
+import SupportLogin from '../pages/auth/SupportLogin';
+import ForgotMpin from '../pages/auth/ForgotMpin';
+import VerifyEmail from '../pages/auth/VerifyEmail';
 
 /* Member */
 import Home from '../pages/user/Home';
@@ -41,6 +44,7 @@ import {
   CreditStatementList, CreditStatementDetail,
 } from '../pages/credit/CreditStatements';
 import AddCard from '../pages/user/AddCard';
+import ManualCardDetail from '../pages/user/ManualCardDetail';
 import BankAccounts from '../pages/user/BankAccounts';
 import AddBankAccount from '../pages/user/AddBankAccount';
 import EmiList from '../pages/user/EmiList';
@@ -66,6 +70,17 @@ import AdminCreditApplications, {
 } from '../pages/admin/AdminCreditApplications';
 import AdminReconciliation from '../pages/admin/AdminReconciliation';
 import AdminSettings from '../pages/admin/AdminSettings';
+import {
+  AdminCardRecords, AdminErrors, AdminEscalation, AdminEscalations, AdminPayments, AdminStaff,
+} from '../pages/admin/AdminOperations';
+
+/* Support desk */
+import {
+  DeskCustomer, DeskCustomers, DeskOverview, DeskTicket, DeskTickets, SupportDeskLayout,
+} from '../pages/support-desk/SupportDesk';
+
+/** Member-app pages a staff account may still open: its own profile and MPIN. */
+const STAFF_ALLOWED = ['/profile', '/security', '/onboarding/profile', '/onboarding/mpin'];
 
 function FullPageLoader() {
   return <Loader3D fullScreen />;
@@ -81,7 +96,7 @@ function FullPageLoader() {
  */
 function RequireAuth({ children }) {
   const { isAuthenticated } = useAuth();
-  const { profile, loading, needsProfile, needsMpin } = useProfile();
+  const { profile, loading, needsProfile, needsMpin, isStaff, role } = useProfile();
   const location = useLocation();
 
   if (!isAuthenticated) {
@@ -98,16 +113,35 @@ function RequireAuth({ children }) {
     return <Navigate to="/onboarding/mpin" replace />;
   }
 
+  // A staff account typing a member URL is sent to its own console. The
+  // server would refuse nothing here - member endpoints are the account's
+  // own data - but the member app is not what staff accounts are for.
+  if (isStaff && !STAFF_ALLOWED.includes(location.pathname)) {
+    return <Navigate to={homeFor(role)} replace />;
+  }
+
   return children;
 }
 
 function RequireAdmin({ children }) {
   const { isAuthenticated } = useAuth();
-  const { profile, loading, isAdmin } = useProfile();
+  const { profile, loading, isAdmin, role } = useProfile();
 
-  if (!isAuthenticated) return <Navigate to="/" replace />;
+  if (!isAuthenticated) return <Navigate to="/admin/login" replace />;
   if (loading || !profile) return <FullPageLoader />;
-  if (!isAdmin) return <Navigate to="/home" replace />;
+  if (!isAdmin) return <Navigate to={homeFor(role)} replace />;
+
+  return children;
+}
+
+/** The support desk: support agents only. Admins work escalations in /admin. */
+function RequireSupport({ children }) {
+  const { isAuthenticated } = useAuth();
+  const { profile, loading, isSupport, role } = useProfile();
+
+  if (!isAuthenticated) return <Navigate to="/support-desk/login" replace />;
+  if (loading || !profile) return <FullPageLoader />;
+  if (!isSupport) return <Navigate to={homeFor(role)} replace />;
 
   return children;
 }
@@ -115,11 +149,11 @@ function RequireAdmin({ children }) {
 /** Signed-in users should not see the sign-in screens again. */
 function RedirectIfAuthed({ children }) {
   const { isAuthenticated } = useAuth();
-  const { profile, loading, isAdmin } = useProfile();
+  const { profile, loading } = useProfile();
 
   if (!isAuthenticated) return children;
   if (loading) return <FullPageLoader />;
-  if (profile) return <Navigate to={isAdmin ? '/admin' : '/home'} replace />;
+  if (profile) return <Navigate to={homeFor(profile.role)} replace />;
 
   return children;
 }
@@ -150,6 +184,10 @@ export default function App() {
       <Route path="/signin/otp" element={<RedirectIfAuthed><OtpVerify /></RedirectIfAuthed>} />
       <Route path="/signin/mpin" element={<RedirectIfAuthed><MpinLogin /></RedirectIfAuthed>} />
       <Route path="/admin/login" element={<RedirectIfAuthed><AdminLogin /></RedirectIfAuthed>} />
+      <Route path="/support-desk/login" element={<RedirectIfAuthed><SupportLogin /></RedirectIfAuthed>} />
+      <Route path="/forgot-mpin" element={<RedirectIfAuthed><ForgotMpin /></RedirectIfAuthed>} />
+      {/* Not behind RedirectIfAuthed: the link works signed in or out. */}
+      <Route path="/verify-email" element={<VerifyEmail />} />
 
       {/* Onboarding - authenticated but incomplete */}
       <Route
@@ -168,6 +206,7 @@ export default function App() {
       <Route path="/dashboard" element={<RequireAuth><Shell><Home /></Shell></RequireAuth>} />
       <Route path="/cards" element={<RequireAuth><Shell><Cards /></Shell></RequireAuth>} />
       <Route path="/cards/add" element={<RequireAuth><Shell><AddCard /></Shell></RequireAuth>} />
+      <Route path="/cards/manual/:manualCardId" element={<RequireAuth><Shell><ManualCardDetail /></Shell></RequireAuth>} />
       <Route path="/cards/:cardId" element={<RequireAuth><Shell><CardDetail /></Shell></RequireAuth>} />
 
       {/* The credit line, in journey order. Every one of these screens carries
@@ -219,6 +258,21 @@ export default function App() {
         <Route path="credit/:applicationId" element={<AdminCreditApplicationReview />} />
         <Route path="reconciliation" element={<AdminReconciliation />} />
         <Route path="settings" element={<AdminSettings />} />
+        <Route path="payments" element={<AdminPayments />} />
+        <Route path="errors" element={<AdminErrors />} />
+        <Route path="cards" element={<AdminCardRecords />} />
+        <Route path="escalations" element={<AdminEscalations />} />
+        <Route path="escalations/:ticketId" element={<AdminEscalation />} />
+        <Route path="staff" element={<AdminStaff />} />
+      </Route>
+
+      {/* Support desk console */}
+      <Route path="/support-desk" element={<RequireSupport><SupportDeskLayout /></RequireSupport>}>
+        <Route index element={<DeskOverview />} />
+        <Route path="tickets" element={<DeskTickets />} />
+        <Route path="tickets/:ticketId" element={<DeskTicket />} />
+        <Route path="customers" element={<DeskCustomers />} />
+        <Route path="customers/:userId" element={<DeskCustomer />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -17,6 +17,8 @@ export default function MpinLogin() {
   const [pin, setPin] = useState('');
   const [stage, setStage] = useState('phone');
   const [error, setError] = useState('');
+  // Set when the server says this is a staff account: where it signs in.
+  const [staffDoor, setStaffDoor] = useState('');
   const [loading, setLoading] = useState(false);
 
   const phoneValid = /^[6-9]\d{9}$/.test(phone);
@@ -35,15 +37,15 @@ export default function MpinLogin() {
     setLoading(true);
 
     try {
-      const response = await endpoints.auth.loginMpin(phone, finalPin);
+      const response = await endpoints.auth.loginMpin(phone, finalPin, 'USER');
       signIn(response.data);
       await refresh();
-
-      // Always the member app. Staff who want the console either came through
-      // /admin/login or can switch from the sidebar - honouring the door they
-      // actually chose is less surprising than redirecting them.
       navigate('/home', { replace: true });
     } catch (err) {
+      // A staff account is refused here by the server, with no session opened.
+      setStaffDoor(err.code === 'WRONG_PORTAL'
+        ? ({"ADMIN":"/admin/login","SUPPORT":"/support-desk/login"})[err.details?.portal] || ''
+        : '');
       setError(err.message);
       setPin('');
     } finally {
@@ -155,6 +157,11 @@ export default function MpinLogin() {
               {error}
             </p>
           )}
+          {staffDoor && (
+            <Button variant="outline" size="sm" className="mt-3" onClick={() => navigate(staffDoor)}>
+              Go to staff sign-in
+            </Button>
+          )}
         </div>
 
         <div className="animate-fade-up px-6" style={{ animationDelay: '80ms' }}>
@@ -167,13 +174,22 @@ export default function MpinLogin() {
             disabled={loading}
           />
 
-          <button
-            type="button"
-            onClick={() => navigate('/signin')}
-            className="mb-6 w-full text-center text-sm font-medium text-slate transition-colors duration-base ease-glide hover:text-ink"
-          >
-            Forgot MPIN? Sign in with OTP
-          </button>
+          <div className="mb-6 flex flex-col items-center gap-1">
+            <button
+              type="button"
+              onClick={() => navigate(`/forgot-mpin?portal=USER&phone=${phone}`)}
+              className="text-sm font-semibold text-mint-700 transition-colors duration-base ease-glide hover:text-mint-800"
+            >
+              Forgot MPIN?
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/signin')}
+              className="text-sm font-medium text-slate transition-colors duration-base ease-glide hover:text-ink"
+            >
+              Sign in with OTP instead
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -246,6 +246,7 @@ export const api = {
   get: (path, options = {}) => request(path, options),
   post: (path, body, options = {}) => request(path, { method: 'POST', body, ...options }),
   patch: (path, body) => request(path, { method: 'PATCH', body }),
+  put: (path, body) => request(path, { method: 'PUT', body }),
   del: (path) => request(path, { method: 'DELETE' }),
   upload: (path, form) => request(path, { method: 'POST', form }),
 
@@ -268,11 +269,19 @@ export const api = {
 export const endpoints = {
   auth: {
     sendOtp: (phone) => api.post('/authentication/otp/send', { phone }),
-    verifyOtp: (phone, otp, deviceName) =>
-      api.post('/authentication/otp/verify', { phone, otp, device_name: deviceName }),
+    // portal: USER | ADMIN | SUPPORT. The server refuses an account that
+    // belongs to a different portal once its credentials are proven.
+    verifyOtp: (phone, otp, deviceName, portal = 'USER') =>
+      api.post('/authentication/otp/verify', { phone, otp, device_name: deviceName, portal }),
     register: (data) => api.post('/authentication/register', data),
     setMpin: (mpin) => api.post('/authentication/mpin/set', { mpin }),
-    loginMpin: (phone, mpin) => api.post('/authentication/mpin/verify', { phone, mpin }),
+    loginMpin: (phone, mpin, portal = 'USER') =>
+      api.post('/authentication/mpin/verify', { phone, mpin, portal }),
+    resetMpinRequest: (phone) => api.post('/authentication/mpin/reset/request', { phone }),
+    resetMpinConfirm: (phone, otp, mpin) =>
+      api.post('/authentication/mpin/reset/confirm', { phone, otp, mpin }),
+    requestEmailVerification: () => api.post('/authentication/email/verify/request'),
+    verifyEmail: (token) => api.post('/authentication/email/verify', { token }),
     logout: () => api.post('/authentication/logout'),
     sessions: () => api.get('/authentication/sessions'),
     revokeAll: () => api.del('/authentication/sessions'),
@@ -297,6 +306,21 @@ export const endpoints = {
     // the holder's credit score and salary - or why it cannot be linked yet.
     limit: () => api.get('/cards/limit'),
     link: (data) => api.post('/cards', data),
+    setTheme: (id, theme) => api.put(`/cards/${id}/theme`, { theme }),
+    refresh: (id) => api.post(`/cards/${id}/refresh`),
+    bills: () => api.get('/cards/bills'),
+    linkProviders: () => api.get('/cards/link/providers'),
+    startLink: () => api.post('/cards/link/sessions', { consent: true }),
+    // Cards tracked by hand. Every figure is the holder's own, labelled
+    // User-entered - Not Bank Verified by the server.
+    manual: {
+      list: () => api.get('/cards/manual'),
+      get: (id) => api.get(`/cards/manual/${id}`),
+      add: (data) => api.post('/cards/manual', data),
+      update: (id, data) => api.patch(`/cards/manual/${id}`, data),
+      remove: (id) => api.del(`/cards/manual/${id}`),
+      refresh: (id) => api.post(`/cards/manual/${id}/refresh`),
+    },
   },
   creditScore: {
     // The latest score on file (null when none), and whether a check can run.
@@ -422,6 +446,21 @@ export const endpoints = {
     create: (data) => api.post('/support/tickets', data),
     reply: (id, message) => api.post(`/support/tickets/${id}/reply`, { message }),
   },
+  desk: {
+    overview: () => api.get('/support-desk/overview'),
+    tickets: (params = '') => api.get(`/support-desk/tickets${params}`),
+    ticket: (id) => api.get(`/support-desk/tickets/${id}`),
+    reply: (id, message) => api.post(`/support-desk/tickets/${id}/reply`, { message }),
+    note: (id, message) => api.post(`/support-desk/tickets/${id}/notes`, { message }),
+    setStatus: (id, status, resolutionNotes) => api.post(
+      `/support-desk/tickets/${id}/status`,
+      { status, resolution_notes: resolutionNotes || undefined },
+    ),
+    assign: (id, mine) => api.post(`/support-desk/tickets/${id}/assign`, { agent: mine ? 'me' : '' }),
+    escalate: (id, reason) => api.post(`/support-desk/tickets/${id}/escalate`, { reason }),
+    searchCustomers: (q) => api.get(`/support-desk/customers/search?q=${encodeURIComponent(q)}`),
+    customer: (id) => api.get(`/support-desk/customers/${id}`),
+  },
   admin: {
     dashboard: () => api.get('/admin/dashboard'),
     users: (params = '') => api.get(`/admin/users${params}`),
@@ -444,6 +483,17 @@ export const endpoints = {
     settings: () => api.get('/admin/settings'),
     updateSetting: (key, value) => api.patch(`/admin/settings/${key}`, { value }),
     flags: () => api.get('/admin/feature-flags'),
+    staff: () => api.get('/admin/staff'),
+    addStaff: (phone, role) => api.post('/admin/staff', { phone, role }),
+    setStaffRole: (id, role) => api.patch(`/admin/staff/${id}`, { role }),
+    payments: (params = '') => api.get(`/admin/payments${params}`),
+    cardRecords: (params = '') => api.get(`/admin/cards${params}`),
+    escalations: () => api.get('/admin/support/escalations'),
+    escalationCount: () => api.get('/admin/support/escalations/count', { background: true }),
+    transactionErrors: (params = '') => api.get(`/admin/transaction-errors${params}`),
+    transactionErrorSummary: () => api.get('/admin/transaction-errors/summary'),
+    resolveTransactionError: (id, note) =>
+      api.post(`/admin/transaction-errors/${id}/resolve`, { notes: note }),
     updateFlag: (key, data) => api.patch(`/admin/feature-flags/${key}`, data),
   },
 };

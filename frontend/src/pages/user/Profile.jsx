@@ -1,4 +1,7 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+
+import { endpoints } from '../../api/client';
 
 import { ListLink } from '../../components/domain';
 import {
@@ -6,6 +9,7 @@ import {
 } from '../../components/layout/AppShell';
 import { Badge, Button, Card, Section, Skeleton } from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 import { useProfile } from '../../hooks/useProfile';
 import { date, initials, statusLabel, statusTone } from '../../utils/format';
 
@@ -46,7 +50,12 @@ export default function Profile() {
             </p>
             <p className="money truncate text-xs text-slate">+91 {profile.phone}</p>
             {profile.email && (
-              <p className="truncate text-xs text-slate">{profile.email}</p>
+              <p className="flex items-center gap-1.5 truncate text-xs text-slate">
+                <span className="truncate">{profile.email}</span>
+                {profile.is_email_verified
+                  ? <Badge tone="good" className="shrink-0">Email verified</Badge>
+                  : <VerifyEmailButton />}
+              </p>
             )}
           </div>
 
@@ -183,5 +192,47 @@ export default function Profile() {
         </p>
       </div>
     </div>
+  );
+}
+
+/**
+ * Sends the verification link. Without SMTP configured the server only logs
+ * the email; in a development build it also returns the link, which is
+ * offered here so the flow can be finished locally.
+ */
+function VerifyEmailButton() {
+  const toast = useToast();
+  const [sending, setSending] = useState(false);
+  const [devLink, setDevLink] = useState('');
+
+  async function send() {
+    setSending(true);
+    try {
+      const response = await endpoints.auth.requestEmailVerification();
+      toast.success(response.message);
+      if (response.data?.debug_link) setDevLink(response.data.debug_link);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  if (devLink) {
+    return (
+      <a href={devLink} className="shrink-0 font-semibold text-mint-700 underline">
+        Open link (dev)
+      </a>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={send}
+      disabled={sending}
+      className="shrink-0 font-semibold text-mint-700 hover:text-mint-800 disabled:opacity-50"
+    >
+      {sending ? 'Sending…' : 'Verify email'}
+    </button>
   );
 }

@@ -112,6 +112,14 @@ class BaseConfig:
     # from the Credit Score screen are capped per day.
     CREDIT_SCORE_CHECKS_PER_DAY = int(os.getenv('CREDIT_SCORE_CHECKS_PER_DAY', '3'))
 
+    # -- Card linking and card bill payment -------------------------------
+    # Both need licensed partners CashU has not contracted: an Account
+    # Aggregator / card-data provider to link bank cards, and a BBPS biller
+    # operator (or issuer API) to pay bank card bills. Empty means "not
+    # available", and the API says so rather than simulating either.
+    CARD_LINK_PROVIDER = os.getenv('CARD_LINK_PROVIDER', '').upper()
+    CARD_BILL_PAY_PROVIDER = os.getenv('CARD_BILL_PAY_PROVIDER', '').upper()
+
     # -- Test cards --------------------------------------------------------
     # Predefined dummy cards for exercising the credit-card flow without a real
     # card. Empty means "follow the environment": on in a debug build with the
