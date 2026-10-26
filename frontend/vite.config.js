@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 3000,
+    port: 5173,
     strictPort: true,
     // Loopback only, so the dev server is not reachable from anything else on
     // the network and Vite prints just the Local URL.

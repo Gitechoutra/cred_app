@@ -14,3 +14,4 @@ portal/uploads/*
 
 # Generated audit report
 tests/validation_audit_results.json
+migrations/
