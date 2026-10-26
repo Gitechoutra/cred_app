@@ -19,7 +19,7 @@ import { cx } from '../../components/ui';
  * Admin console shell (PRD section 16): L2 risk & reconciliation and L3 super
  * admins. Support agents have their own portal, the support desk.
  *
- * Tabs are filtered by role so nobody sees a door they cannot open; the
+ * Sidebar links are filtered by role so nobody sees a door they cannot open; the
  * server checks the role on every endpoint regardless.
  */
 
