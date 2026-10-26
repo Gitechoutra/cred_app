@@ -72,9 +72,16 @@ export default function TicketWorkspace({ ticketId, backTo, customerPath, canEsc
   if (error || !ticket) {
     return (
       <Card className="text-center">
-        <p className="font-semibold text-ink">Could not load this ticket</p>
-        <p className="mt-1 text-sm text-slate">{error?.message}</p>
-        <Button variant="outline" size="sm" className="mt-4" onClick={refetch}>Try again</Button>
+        <p className="font-semibold text-ink">
+          {error?.status === 404 ? 'Ticket not found' : 'Could not load this ticket'}
+        </p>
+        <p className="mt-1 text-sm text-slate">
+          {error?.status === 404 ? 'It may have been removed, or the link is out of date.' : error?.message}
+        </p>
+        <div className="mt-4 flex justify-center gap-2">
+          {backTo && <Button variant="outline" size="sm" onClick={() => navigate(backTo)}>Back to the list</Button>}
+          {error?.status !== 404 && <Button variant="outline" size="sm" onClick={refetch}>Try again</Button>}
+        </div>
       </Card>
     );
   }

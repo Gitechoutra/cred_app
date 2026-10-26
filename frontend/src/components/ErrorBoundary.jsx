@@ -34,7 +34,9 @@ export default class ErrorBoundary extends Component {
 
     return (
       <div className="grid min-h-[60vh] place-items-center px-6 py-12">
-        <div className="w-full max-w-lg text-center">
+        {/* min-w-0: a grid child otherwise grows to its widest content, and a
+            long error message pushed the page past a phone screen. */}
+        <div className="w-full min-w-0 max-w-lg text-center">
           <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-red-50 text-alert">
             <svg
               viewBox="0 0 24 24"
@@ -57,7 +59,7 @@ export default class ErrorBoundary extends Component {
           {/* The actual error, in development only. In production this would
               leak internals to a user who cannot act on them. */}
           {isDev && (
-            <pre className="mt-5 overflow-x-auto rounded-xl bg-mist p-4 text-left text-2xs leading-relaxed text-alert">
+            <pre className="mt-5 overflow-x-auto whitespace-pre-wrap break-words rounded-xl bg-mist p-4 text-left text-2xs leading-relaxed text-alert">
               {error?.message || String(error)}
             </pre>
           )}

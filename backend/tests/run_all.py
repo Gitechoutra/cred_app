@@ -44,6 +44,8 @@ SUITES = [
     'card_link_flow',
     'card_dashboard_flow',
     'portals_flow',
+    'bill_pay_flow',
+    'security_probe',
     #: Both currently end on one deliberate BLOCKED check: their money-movement
     #: leg was the removed transfer product, and they get retargeted onto the
     #: credit purchase flow. Listed last so the failure is the last thing read.

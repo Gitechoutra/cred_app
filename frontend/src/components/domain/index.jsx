@@ -61,7 +61,7 @@ export function CardTile({ card: raw, onClick, compact = false }) {
               {card.nickname || card.issuer_bank}
             </p>
             <p className="mt-0.5 text-2xs uppercase tracking-wider text-white/60">
-              {card.network}
+              {card.network && card.network !== 'OTHER' ? card.network : ''}
             </p>
           </div>
 

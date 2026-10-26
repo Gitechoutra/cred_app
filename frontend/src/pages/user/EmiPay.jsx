@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import { endpoints } from '../../api/client';
 import { PageHeader } from '../../components/layout/AppShell';
-import { Button, Card, Input, Row, Skeleton, Loader3D, cx } from '../../components/ui';
+import { Button, Card, EmptyState, Input, Row, Skeleton, Loader3D, cx } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
 import { PaymentMethodPicker, PaymentProgress } from '../../components/payments/PaymentMethods';
 import { useFetch } from '../../hooks/useProfile';
@@ -284,6 +284,23 @@ export default function EmiPay() {
           <Skeleton className="h-28 w-full rounded-2xl" />
           <Skeleton className="h-56 w-full rounded-2xl" />
         </div>
+      </div>
+    );
+  }
+
+  /* ── Not found ───────────────────────────────────────────────────── */
+  // An EMI that was removed, a stale link, or an id that is not this
+  // account's: the server answers 404 and there is nothing to pay. Every
+  // later stage reads emi.*, so this has to come before them.
+  if (!emi) {
+    return (
+      <div>
+        <PageHeader title="Pay EMI" back="/emi" />
+        <EmptyState
+          title="EMI not found"
+          description="It may have been removed, or the link is out of date."
+          action={<Button variant="outline" onClick={() => navigate('/emi')}>Back to EMIs</Button>}
+        />
       </div>
     );
   }

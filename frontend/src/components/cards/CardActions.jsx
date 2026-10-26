@@ -103,9 +103,14 @@ export function CardActions({ card: raw, onChanged, showView = true }) {
         <Button size="sm" variant="outline" loading={busy === 'refresh'} onClick={refresh}>Refresh</Button>
         <Button size="sm" variant="outline" loading={busy === 'bill'} onClick={openBill}>Pay bill</Button>
         {card.manual && (
-          <Button size="sm" variant="ghost" loading={busy === 'remove'} onClick={remove} className="text-alert">
-            Remove
-          </Button>
+          <button
+            type="button"
+            onClick={remove}
+            disabled={busy === 'remove'}
+            className="h-9 rounded-xl px-4 text-sm font-semibold text-alert transition hover:bg-red-50 disabled:opacity-50"
+          >
+            {busy === 'remove' ? 'Removing…' : 'Remove'}
+          </button>
         )}
       </div>
 
