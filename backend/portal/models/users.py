@@ -40,6 +40,11 @@ class Users(db.Model, TimestampMixin, CRUDMixin):
     full_name = db.Column(db.String(200), nullable=True)
     date_of_birth = db.Column(db.Date, nullable=True)
 
+    # The `key` a staff seeder lists this account under (seeders/staff_sync).
+    # Stays fixed while its phone or email change, so the seeder can find it.
+    # NULL for every account a seeder does not manage.
+    seed_key = db.Column(db.String(64), unique=True, nullable=True, index=True)
+
     mpin_hash = db.Column(db.String(255), nullable=True)
     kyc_tier = db.Column(db.String(20), default=KYCTier.NONE, nullable=False)
 
